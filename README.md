@@ -11,7 +11,7 @@
 [![Clerk Auth](https://img.shields.io/badge/Auth-Clerk-6C47FF?style=for-the-badge&logo=clerk&logoColor=white)](https://clerk.dev/)
 [![Drizzle ORM](https://img.shields.io/badge/ORM-Drizzle-C5F74F?style=for-the-badge)](https://orm.drizzle.team/)
 [![Vitest](https://img.shields.io/badge/Tested_with-Vitest-6E9F18?style=for-the-badge&logo=vitest&logoColor=white)](https://vitest.dev/)
-[![CI](https://img.shields.io/badge/CI-GitHub_Actions-2088FF?style=for-the-badge&logo=github-actions&logoColor=white)](https://github.com/keshav-agrawal595/Migoo/actions)
+[![CI](https://img.shields.io/badge/CI-GitHub_Actions-2088FF?style=for-the-badge&logo=github-actions&logoColor=white)](https://github.com/parmeetsingh1313n/Migoo-Describe-It.-AI-Creates-It.-Ship-It/actions)
 [![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)](LICENSE)
 
 ---
@@ -149,8 +149,8 @@ Migoo implements **defense-in-depth** security across every layer:
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/keshav-agrawal595/Migoo.git
-cd Migoo
+git clone https://github.com/parmeetsingh1313n/Migoo-Describe-It.-AI-Creates-It.-Ship-It.git
+cd Migoo-Describe-It.-AI-Creates-It.-Ship-It
 
 # 2. Install dependencies
 npm install --legacy-peer-deps
@@ -406,22 +406,14 @@ npx drizzle-kit migrate
 
 ---
 
-## 👥 Team
+## 👥 Author
 
 <table>
 <tr>
-<td align="center"><b>Team T4</b></td>
-</tr>
-<tr>
-<td align="center">
-<b>Keshav Agrawal</b><br/>
-<a href="https://github.com/keshav-agrawal595">@keshav-agrawal595</a>
-</td>
-</tr>
-<tr>
 <td align="center">
 <b>Parmeet Singh</b><br/>
-Full-Stack Developer
+Full-Stack Developer<br/>
+<a href="https://github.com/parmeetsingh1313n">@parmeetsingh1313n</a>
 </td>
 </tr>
 </table>
@@ -442,7 +434,7 @@ This project is licensed under the MIT License. See [LICENSE](LICENSE) for detai
 
 <div align="center">
 
-**Built with ❤️ by Team T4**
+**Built with ❤️ by Parmeet Singh**
 
 *Describe It. AI Creates It. Ship It.*
 
@@ -450,6 +442,3 @@ This project is licensed under the MIT License. See [LICENSE](LICENSE) for detai
 
 </div>
 
-
---
-Last Updated: 2026-04-22 17:41:13
