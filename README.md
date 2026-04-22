@@ -182,8 +182,8 @@ Full creative control — you're the director, the platform is your crew.
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/parmeetsingh1313n/Migoo-Describe-It.-AI-Creates-It.-Ship-It.git
-cd Migoo-Describe-It.-AI-Creates-It.-Ship-It
+git clone https://github.com/parmeetsingh1313n/Migoo.AI-Describe.Creates.Ship.git
+cd Migoo.AI-Describe.Creates.Ship
 
 # 2. Install dependencies
 npm install --legacy-peer-deps

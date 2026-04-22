@@ -35,6 +35,14 @@ import { MUSIC_URLS } from '@/lib/music-urls'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
+interface MotionGraphicScene {
+    type: string
+    headline?: string
+    subtext?: string
+    imageUrl?: string
+    colors?: { bg?: string; text?: string; accent?: string }
+}
+
 interface Project {
     id: number
     projectId: string
@@ -43,6 +51,9 @@ interface Project {
     aspectRatio: string
     status: string
     thumbnailUrl: string | null
+    videoUrl: string | null
+    sceneData: MotionGraphicScene[] | null
+    theme: { palette?: string } | null
     createdAt: string
 }
 
@@ -496,15 +507,44 @@ export default function MotionGraphicsPage() {
                                         className="group relative rounded-2xl bg-white/80 backdrop-blur-md border border-white/40 hover:border-primary/20 overflow-hidden shadow-[0_2px_10px_-3px_rgba(0,0,0,0.05)] hover:shadow-[0_8px_30px_-4px_rgba(0,0,0,0.1)] hover:-translate-y-1 transition-all duration-300"
                                     >
                                         {/* Thumbnail */}
-                                        <div className="h-36 bg-muted/30 flex items-center justify-center relative">
-                                            {project.thumbnailUrl ? (
-                                                <img src={project.thumbnailUrl} alt="" className="w-full h-full object-cover" />
-                                            ) : (
-                                                <div className="text-center">
-                                                    <Wand2 className="w-8 h-8 text-muted-foreground/30 mx-auto mb-2" />
-                                                    <span className="text-[11px] text-muted-foreground/50">{project.aspectRatio} · {project.duration}s</span>
-                                                </div>
-                                            )}
+                                        <div className="h-36 bg-muted/30 flex items-center justify-center relative overflow-hidden">
+                                            {(() => {
+                                                // Priority 1: explicit thumbnailUrl
+                                                if (project.thumbnailUrl) {
+                                                    return <img src={project.thumbnailUrl} alt="" className="w-full h-full object-cover" />
+                                                }
+                                                // Priority 2: first scene with an imageUrl from sceneData
+                                                const firstImageScene = project.sceneData?.find(s => s.imageUrl)
+                                                if (firstImageScene?.imageUrl) {
+                                                    return <img src={firstImageScene.imageUrl} alt="" className="w-full h-full object-cover" />
+                                                }
+                                                // Priority 3: themed gradient with first scene headline
+                                                const palette = project.theme?.palette || 'midnight'
+                                                const paletteColors: Record<string, { bg: string; accent: string }> = {
+                                                    midnight: { bg: '#0a0a0f', accent: '#6366f1' },
+                                                    sunset:   { bg: '#1a0a0a', accent: '#f97316' },
+                                                    ocean:    { bg: '#0a1628', accent: '#06b6d4' },
+                                                    emerald:  { bg: '#0a1a0a', accent: '#10b981' },
+                                                    rose:     { bg: '#1a0a14', accent: '#f43f5e' },
+                                                    neon:     { bg: '#000000', accent: '#a855f7' },
+                                                }
+                                                const colors = paletteColors[palette] || paletteColors.midnight
+                                                const firstScene = project.sceneData?.[0]
+                                                const headline = firstScene?.headline || project.prompt.slice(0, 40)
+                                                return (
+                                                    <div
+                                                        className="w-full h-full flex flex-col items-center justify-center p-4 text-center"
+                                                        style={{ background: `linear-gradient(135deg, ${colors.bg} 0%, ${colors.accent}30 100%)` }}
+                                                    >
+                                                        <p className="text-white font-bold text-sm leading-snug line-clamp-2 drop-shadow-lg" style={{ textShadow: `0 0 20px ${colors.accent}80` }}>
+                                                            {headline}
+                                                        </p>
+                                                        <span className="text-white/50 text-[10px] mt-2 font-medium">
+                                                            {project.aspectRatio} · {project.duration}s
+                                                        </span>
+                                                    </div>
+                                                )
+                                            })()}
                                             <div className={`absolute top-2 right-2 px-2 py-0.5 rounded-full text-[10px] font-bold border ${badge.cls}`}>
                                                 {badge.text}
                                             </div>
