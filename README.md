@@ -4,14 +4,14 @@
 
 ### Describe It. AI Creates It. Ship It.
 
-> The AI video creation platform that turns your ideas into studio-quality courses, shorts, and motion graphics — powered by multi-provider AI orchestration.
+> A full-stack AI video creation platform with **4 production modules** — from educational courses and viral shorts to cinematic motion graphics and a full creative studio — powered by multi-provider AI orchestration.
 
 [![Next.js 16](https://img.shields.io/badge/Next.js-16.1-black?style=for-the-badge&logo=next.js)](https://nextjs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Clerk Auth](https://img.shields.io/badge/Auth-Clerk-6C47FF?style=for-the-badge&logo=clerk&logoColor=white)](https://clerk.dev/)
 [![Drizzle ORM](https://img.shields.io/badge/ORM-Drizzle-C5F74F?style=for-the-badge)](https://orm.drizzle.team/)
+[![Remotion](https://img.shields.io/badge/Video-Remotion-0B84F3?style=for-the-badge)](https://www.remotion.dev/)
 [![Vitest](https://img.shields.io/badge/Tested_with-Vitest-6E9F18?style=for-the-badge&logo=vitest&logoColor=white)](https://vitest.dev/)
-[![CI](https://img.shields.io/badge/CI-GitHub_Actions-2088FF?style=for-the-badge&logo=github-actions&logoColor=white)](https://github.com/parmeetsingh1313n/Migoo-Describe-It.-AI-Creates-It.-Ship-It/actions)
 [![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)](LICENSE)
 
 ---
@@ -24,27 +24,78 @@
 
 ## 🌟 What is Migoo?
 
-Migoo is a **full-stack AI platform** that automates the entire educational video course creation pipeline — from topic input to rendered video output. It combines multiple AI providers (Gemini, OpenRouter, Sarvam, Leonardo AI) with a modern Next.js frontend to deliver a seamless course generation experience.
+Migoo is a **full-stack AI platform** that automates the entire video creation pipeline — from a text prompt to a rendered, downloadable video. It combines multiple AI providers (Gemini, OpenRouter, Groq, Sarvam, Leonardo AI) with Remotion's programmatic video engine to deliver four distinct production workflows.
 
-### The Pipeline
+---
 
-```
-📝 Topic Input → 🧠 AI Course Layout → 📊 Slide Generation → 🎙️ TTS Narration
-                                                                      ↓
-                🎬 Video Render ← 🖼️ Image Generation ← 📝 Caption Sync
-```
+## 🎯 The Four Modules
 
-### Key Capabilities
+<table>
+<tr>
+<td width="50%">
 
-| Capability | Description |
-|:---|:---|
-| 🧠 **AI Course Structuring** | Auto-generates multi-chapter layouts with subtopics via LLM providers |
-| 📊 **Rich Slide Generation** | Creates HTML presentation slides with embedded visuals |
-| 🎙️ **Multi-Language TTS** | Natural narration via Sarvam AI with multiple voice options |
-| 📝 **Word-Level Captions** | Synchronized caption data for full accessibility |
-| 🖼️ **AI Image Generation** | Cinematic visuals via Leonardo AI with intelligent prompt enrichment |
-| 🎬 **Automated Video Rendering** | Compiles slides + audio + captions into final video via Remotion |
-| 📱 **Short Video Generator** | 7-step Inngest pipeline for viral short-form content creation |
+### 📚 Video Course Generator
+Generate complete multi-chapter educational video courses from a single topic.
+
+**Pipeline:** Topic → AI Layout → Slides → TTS Narration → Caption Sync → Image Generation → Video Render
+
+- Multi-chapter course structuring via LLM
+- Rich HTML presentation slides
+- Multi-language TTS via Sarvam AI
+- Word-level synchronized captions
+- AI-generated cinematic visuals (Leonardo AI)
+- Automated Remotion video compilation
+
+</td>
+<td width="50%">
+
+### ⚡ Short Video Generator
+Create viral short-form video series with a 1-click auto-pilot pipeline.
+
+**Pipeline:** Niche → Script → Voice → Captions → Images → Video → Publish
+
+- 7-step Inngest durable workflow
+- Niche-based recurring series
+- Multiple visual styles (Realistic, Cyberpunk, GTA, etc.)
+- Platform-optimized (TikTok, Reels, Shorts)
+- Automated asset sourcing & composition
+- Batch generation for content scheduling
+
+</td>
+</tr>
+<tr>
+<td width="50%">
+
+### ✨ Motion Graphics Generator
+AI chat-driven animated promo videos with 25+ professional scene types.
+
+**Pipeline:** Prompt → AI Chat → Scene Generation → Theme Selection → Asset Creation → Voiceover → Video Render
+
+- Conversational AI scene builder
+- 25+ animated scene types (title reveals, stat counters, comparisons, kinetic text, logo reveals, etc.)
+- 6 cinematic color palettes
+- Upload logos, product shots & screenshots
+- Optional AI voiceover narration
+- Background music selection
+- Multiple aspect ratios (16:9, 9:16, 1:1)
+
+</td>
+<td width="50%">
+
+### 🎬 Migoo Studio
+Full creative control — you're the director, the platform is your crew.
+
+**Features:**
+- **Document Source** — Upload PDFs, ZIPs, or images as source material
+- **Scene Asset Manager** — Inject your own photos & video clips
+- **Human Touch Score** — Gamified script editor for authenticity
+- **Voice & Captions** — Hormozi-style dynamic caption styling
+- **Music & SFX** — Smart sound design per scene
+- **Mixed Media** — Combine AI-generated content with your footage
+
+</td>
+</tr>
+</table>
 
 ---
 
@@ -54,37 +105,26 @@ Migoo is a **full-stack AI platform** that automates the entire educational vide
 ┌──────────────────────────────────────────────────────────────────────────┐
 │                        🖥️  Frontend (Next.js 16 App Router)             │
 │                                                                          │
-│   ┌───────────┐   ┌────────────────┐   ┌──────────────────────────┐     │
-│   │  Auth UI  │   │  Course Pages  │   │  Short Video Generator   │     │
-│   │  (Clerk)  │   │  Create / View │   │  Niche → Script → Video  │     │
-│   └───────────┘   └────────────────┘   └──────────────────────────┘     │
+│   ┌────────────┐  ┌─────────────┐  ┌───────────────┐  ┌────────────┐   │
+│   │  Video     │  │  Short      │  │  Motion       │  │  Migoo     │   │
+│   │  Courses   │  │  Generator  │  │  Graphics     │  │  Studio    │   │
+│   └────────────┘  └─────────────┘  └───────────────┘  └────────────┘   │
 ├──────────────────────────────────────────────────────────────────────────┤
 │                     🔒  Middleware Layer                                  │
-│   ┌──────────────────────────────────────────────────────────────────┐   │
-│   │  Clerk Auth Guard · Rate Limiting (60 req/min) · CSRF Protection │   │
-│   └──────────────────────────────────────────────────────────────────┘   │
+│   Clerk Auth Guard · Rate Limiting (60 req/min) · CSRF Protection        │
 ├──────────────────────────────────────────────────────────────────────────┤
-│                     🔌  API Layer (Route Handlers)                       │
-│                                                                          │
-│   ┌──────────────┐  ┌─────────────────────┐  ┌────────────────────┐     │
-│   │  /api/course │  │  /api/generate-*    │  │  /api/user         │     │
-│   │  CRUD + Auth │  │  AI Orchestration   │  │  Profile + Credits │     │
-│   └──────────────┘  └─────────────────────┘  └────────────────────┘     │
-│   ┌──────────────────────────────────────────────────────────────────┐   │
-│   │  Zod Validation · Typed Responses · Security Headers · CORS     │   │
-│   └──────────────────────────────────────────────────────────────────┘   │
+│                     🔌  API Layer (17 Route Handlers)                    │
+│   Course CRUD · AI Orchestration · Motion Graphics Chat · Studio         │
+│   Zod Validation · Typed Responses · Security Headers · CORS             │
 ├──────────────────────────────────────────────────────────────────────────┤
 │                     ⚡  Background Jobs (Inngest)                        │
-│   ┌──────────────────────────────────────────────────────────────────┐   │
-│   │  Short Video Pipeline:                                           │   │
-│   │  Script → Voice → Captions → Images → Video → Render → Publish  │   │
-│   └──────────────────────────────────────────────────────────────────┘   │
+│   Short Video Pipeline · Motion Graphic Render Pipeline                  │
 ├──────────────────────────────────────────────────────────────────────────┤
 │                     🗄️  Data & External Services                        │
 │                                                                          │
 │   ┌──────────┐  ┌───────────┐  ┌──────────┐  ┌─────────────────┐       │
-│   │ Neon DB  │  │  Vercel   │  │  Sarvam  │  │   OpenRouter /  │       │
-│   │ Postgres │  │  Blob     │  │  TTS/STT │  │   Gemini LLM    │       │
+│   │ Neon DB  │  │  Vercel   │  │  Sarvam  │  │   Gemini /      │       │
+│   │ Postgres │  │  Blob     │  │  TTS/STT │  │   OpenRouter    │       │
 │   └──────────┘  └───────────┘  └──────────┘  └─────────────────┘       │
 │   ┌──────────────┐  ┌────────────────────────────────────────────┐      │
 │   │  Leonardo AI │  │  Remotion (Server-Side Video Rendering)    │      │
@@ -96,19 +136,16 @@ Migoo is a **full-stack AI platform** that automates the entire educational vide
 
 ## 🛡️ Security
 
-Migoo implements **defense-in-depth** security across every layer:
-
 | Layer | Implementation | Details |
 |:------|:---------------|:--------|
 | **Authentication** | Clerk (delegated) | OAuth + email auth; no passwords stored in DB |
 | **Authorization** | Route-level guards | `clerkMiddleware` protects all non-public routes |
-| **Rate Limiting** | IP-based sliding window | 60 req/min per IP on all API routes (middleware + per-route) |
+| **Rate Limiting** | IP-based sliding window | 60 req/min per IP on all API routes |
 | **Input Validation** | Zod schemas | Every API endpoint validates request body/query params |
-| **CSRF Protection** | Origin header validation | Blocks cross-origin mutations (POST/PUT/PATCH/DELETE) |
-| **XSS Prevention** | HTML entity sanitization | `<script>` tag detection in all user inputs via Zod refinements |
-| **Security Headers** | Middleware-injected | `Strict-Transport-Security`, `X-Frame-Options`, `X-Content-Type-Options`, `X-XSS-Protection`, `Referrer-Policy`, `Permissions-Policy` |
-| **SQL Injection** | Drizzle ORM parameterized | All queries use Drizzle's type-safe query builder — no raw SQL |
-| **CORS** | Controlled access | `Access-Control-Allow-Methods/Headers` with configurable origins |
+| **CSRF Protection** | Origin header validation | Blocks cross-origin mutations |
+| **XSS Prevention** | HTML entity sanitization | `<script>` tag detection via Zod refinements |
+| **Security Headers** | Middleware-injected | HSTS, X-Frame-Options, X-Content-Type-Options, etc. |
+| **SQL Injection** | Drizzle ORM parameterized | All queries use type-safe query builder |
 
 ---
 
@@ -170,8 +207,6 @@ The app will be available at `http://localhost:3000`.
 
 ### Environment Variables
 
-Create a `.env` file in the project root with the following variables:
-
 | Variable | Required | Description |
 |:---------|:--------:|:------------|
 | `DATABASE_URL` | ✅ | Neon PostgreSQL connection string |
@@ -184,13 +219,9 @@ Create a `.env` file in the project root with the following variables:
 | `LEONARDO_API_KEY` | ✅ | Leonardo AI image generation |
 | `INNGEST_SIGNING_KEY` | ✅ | Inngest webhook signing key |
 
-> **Note**: Only `DATABASE_URL`, `CLERK_*` keys, and `GEMINI_API_KEY` are strictly required for the core course generation flow. Other keys enable additional features (TTS, image generation, short videos).
-
 ---
 
 ## 🗄️ Database Schema
-
-Migoo uses **6 tables** managed by Drizzle ORM with full referential integrity:
 
 ```
 ┌──────────────┐       ┌──────────────────┐       ┌──────────────────────┐
@@ -207,15 +238,6 @@ Migoo uses **6 tables** managed by Drizzle ORM with full referential integrity:
                    └──────────────────┘       └──────────────────┘
 ```
 
-| Table | Purpose | Key Fields |
-|:------|:--------|:-----------|
-| `users` | User profiles synced from Clerk | email, name, credits |
-| `courses` | Course metadata + AI-generated layouts | courseId, courseLayout (JSON), thumbnail |
-| `course_images` | Generated images for course slides | imageUrl, imagePrompt, dimensions |
-| `chapter_content_slides` | Slide content with audio & captions | html, audioUrl, captions (JSON), revealData |
-| `short_video_series` | Short video series configuration | niche, voice, style, platform, status |
-| `short_video_assets` | Generated video assets per series | scriptData, audioUrl, imageUrls, videoUrl |
-
 ### Database Commands
 
 ```bash
@@ -225,39 +247,25 @@ npx drizzle-kit migrate    # Apply pending migrations
 npx drizzle-kit studio     # Visual database browser
 ```
 
-> 💡 **Authentication Note**: Migoo delegates all authentication to [Clerk](https://clerk.dev). No passwords are stored in the database — Clerk handles password hashing, session management, and OAuth flows externally. The `users` table only stores profile data (name, email, credits) synced from Clerk.
-
 ---
 
 ## 🧪 Testing
 
-Migoo uses **Vitest** for fast, TypeScript-native unit and integration testing.
-
 ```bash
 npm test              # Run all tests
-npm run test:watch    # Watch mode (re-run on changes)
+npm run test:watch    # Watch mode
 npm run test:coverage # Generate coverage report
 ```
 
 ### Test Suites
 
-| Suite | File | Tests | Coverage Area |
-|:------|:-----|:-----:|:--------------|
-| **Validation Schemas** | `validations.test.ts` | 23 | Input validation for all API endpoints (XSS, types, bounds) |
-| **Rate Limiting** | `rate-limit.test.ts` | 7 | Sliding window enforcement, expiry, independent IP tracking |
-| **API Helpers** | `api-helpers.test.ts` | 5 | Response shapes, security headers, CORS, error formatting |
-| **Environment Config** | `env.test.ts` | 6 | Env variable schema validation (required/optional/defaults) |
-| | | **41** | **Total tests** |
-
-### CI/CD Pipeline
-
-Tests run automatically on every push via **GitHub Actions**:
-
-```yaml
-# .github/workflows/ci.yml
-Triggers: push to main/develop, PRs to main
-Steps:    Checkout → Node 20 → Install → TypeScript Check → Vitest → Coverage Upload
-```
+| Suite | Tests | Coverage Area |
+|:------|:-----:|:--------------|
+| **Validation Schemas** | 23 | Input validation for all API endpoints |
+| **Rate Limiting** | 7 | Sliding window enforcement, expiry |
+| **API Helpers** | 5 | Response shapes, security headers, CORS |
+| **Environment Config** | 6 | Env variable schema validation |
+| | **41** | **Total tests** |
 
 ---
 
@@ -269,30 +277,23 @@ See [docs/API.md](docs/API.md) for complete documentation.
 
 ### Quick Reference
 
-| Endpoint | Method | Description |
-|:---------|:------:|:------------|
-| `/api/user` | `POST` | Create or fetch user profile (Clerk-synced) |
-| `/api/course` | `GET` | List all courses or fetch specific course by ID |
-| `/api/generate-course-layout` | `POST` | Generate AI-powered course structure with chapters |
-| `/api/generate-video-content` | `POST` | Generate slides + TTS audio + captions for a chapter |
-| `/api/generate-images` | `POST` | Generate AI images for course slides |
-| `/api/generate-thumbnail` | `POST` | Generate course thumbnail image |
-| `/api/create-short-series` | `POST` | Create and configure a short video series |
-| `/api/short-series` | `GET` | List user's short video series |
-| `/api/video` | `GET` | Fetch generated video assets |
-| `/api/tts-preview` | `POST` | Preview text-to-speech output |
-
-### Response Format
-
-All API responses follow a consistent typed structure:
-
-```typescript
-// Success
-{ success: true, data: T, timestamp: string }
-
-// Error
-{ success: false, error: string, code: string, timestamp: string }
-```
+| Endpoint | Method | Module | Description |
+|:---------|:------:|:------:|:------------|
+| `/api/user` | `POST` | Core | Create or fetch user profile |
+| `/api/course` | `GET` | Courses | List/fetch courses |
+| `/api/generate-course-layout` | `POST` | Courses | AI course structure generation |
+| `/api/generate-video-content` | `POST` | Courses | Slides + TTS + captions |
+| `/api/generate-images` | `POST` | Courses | AI image generation |
+| `/api/generate-thumbnail` | `POST` | Courses | Course thumbnail |
+| `/api/create-short-series` | `POST` | Shorts | Create short video series |
+| `/api/short-series` | `GET` | Shorts | List short series |
+| `/api/video` | `GET` | Shorts | Fetch video assets |
+| `/api/motion-graphics` | `POST/GET` | Motion | Create/list motion graphic projects |
+| `/api/motion-graphics/[id]/chat` | `POST` | Motion | AI conversational scene builder |
+| `/api/motion-graphics/[id]/generate` | `POST` | Motion | Trigger render pipeline |
+| `/api/motion-graphics/[id]/upload` | `POST` | Motion | Upload reference assets |
+| `/api/studio` | `POST/GET` | Studio | Studio project management |
+| `/api/tts-preview` | `POST` | Core | Preview text-to-speech |
 
 ---
 
@@ -301,76 +302,54 @@ All API responses follow a consistent typed structure:
 ```
 migoo/
 ├── app/                            # Next.js App Router
-│   ├── api/                        # API Route Handlers
-│   │   ├── course/                 #   Course CRUD operations
-│   │   ├── generate-course-layout/ #   AI course structure generation
-│   │   ├── generate-video-content/ #   Slide + audio + caption generation
-│   │   ├── generate-images/        #   AI image generation
-│   │   ├── generate-thumbnail/     #   Course thumbnail generation
-│   │   ├── create-short-series/    #   Short video series creation
+│   ├── api/                        # 17 API Route Handlers
+│   │   ├── course/                 #   Course CRUD
+│   │   ├── generate-*/             #   AI generation endpoints
+│   │   ├── motion-graphics/        #   Motion graphic projects & chat
+│   │   ├── studio/                 #   Studio project management
+│   │   ├── create-short-series/    #   Short video creation
 │   │   ├── short-series/           #   Short series listing
-│   │   ├── video/                  #   Video asset retrieval
-│   │   ├── tts-preview/            #   TTS audio preview
-│   │   ├── user/                   #   User management
 │   │   └── inngest/                #   Inngest webhook endpoint
 │   ├── (auth)/                     # Auth pages (sign-in, sign-up)
-│   ├── (routes)/                   # Application pages
+│   ├── (routes)/                   # Course listing & detail pages
 │   ├── short-generator/            # Short video generator UI
+│   ├── motion-graphics/            # Motion graphics creator + project editor
+│   ├── studio/                     # Migoo Studio (director's chair)
 │   └── _components/                # Shared page components
 │
 ├── config/                         # Service Configuration
-│   ├── schema.tsx                  #   Drizzle database schema (6 tables)
+│   ├── schema.tsx                  #   Drizzle database schema
 │   ├── db.tsx                      #   Neon database connection
 │   ├── gemini.ts                   #   Google Gemini AI client
 │   ├── openrouter.ts               #   OpenRouter multi-model client
 │   ├── groq.ts                     #   Groq LLM client
-│   ├── cohere.ts                   #   Cohere AI client
-│   ├── sarvam.ts                   #   Sarvam TTS/STT client
+│   ├── ai-fallback.ts              #   Multi-provider fallback chain
 │   └── image-generator.ts          #   Image generation orchestrator
 │
 ├── lib/                            # Shared Utilities
 │   ├── api-helpers.ts              #   Typed API responses + security headers
-│   ├── validations.ts              #   Zod validation schemas (all endpoints)
+│   ├── validations.ts              #   Zod validation schemas
 │   ├── rate-limit.ts               #   Sliding window rate limiter
-│   ├── env.ts                      #   Environment variable validation
-│   ├── leonardo.ts                 #   Leonardo AI image integration
-│   ├── leonardo-video.ts           #   Leonardo AI video integration
-│   ├── enhanced-tts.ts             #   Enhanced text-to-speech pipeline
-│   ├── audio-utils.ts              #   Audio processing utilities
-│   ├── caption-styles.ts           #   Caption styling configurations
-│   ├── video-render.ts             #   Remotion video rendering
-│   ├── content-cache.ts            #   Content caching layer
-│   ├── blob.ts                     #   Vercel Blob storage utilities
-│   └── image-utils.ts              #   Image processing helpers
+│   ├── leonardo.ts                 #   Leonardo AI integration
+│   ├── enhanced-tts.ts             #   Enhanced TTS pipeline
+│   └── video-render.ts             #   Remotion video rendering
 │
 ├── inngest/                        # Background Job Definitions
-│   ├── client.ts                   #   Inngest client configuration
-│   └── functions.ts                #   Short video pipeline (7-step workflow)
+│   ├── client.ts                   #   Inngest client config
+│   └── functions.ts                #   Short video + motion graphic pipelines
 │
-├── components/                     # React UI Components (Radix + shadcn/ui)
-├── remotion/                       # Remotion Video Composition Config
+├── remotion/                       # Video Compositions
+│   ├── Composition.tsx             #   Course video composition
+│   ├── MotionGraphicComposition.tsx #   Motion graphic renderer (25+ scene types)
+│   └── Root.tsx                    #   Remotion entry point
+│
+├── components/                     # React UI Components
 ├── hooks/                          # Custom React Hooks
 ├── context/                        # React Context Providers
-├── data/                           # Static Data & Constants
-├── middleware.ts                   # Auth + Rate Limiting + CSRF Middleware
-│
-├── __tests__/                      # Test Suites
-│   └── lib/                        #   Unit tests for lib/ modules
-│       ├── api-helpers.test.ts     #     API response patterns (5 tests)
-│       ├── env.test.ts             #     Env validation schemas (6 tests)
-│       ├── rate-limit.test.ts      #     Rate limiter logic (7 tests)
-│       └── validations.test.ts     #     Input validation (23 tests)
-│
-├── .github/workflows/              # CI/CD
-│   ├── ci.yml                      #   TypeScript check + Vitest on push/PR
-│   └── render-video.yml            #   Video rendering workflow
-│
-├── docs/                           # Documentation
-│   └── API.md                      #   Complete API reference
-├── CONTRIBUTING.md                 # Contribution guidelines
-├── vitest.config.ts                # Vitest test configuration
-├── drizzle.config.ts               # Drizzle ORM configuration
-└── next.config.ts                  # Next.js configuration
+├── __tests__/                      # Vitest Test Suites (41 tests)
+├── .github/workflows/              # CI/CD (GitHub Actions)
+├── docs/                           # API documentation
+└── middleware.ts                   # Auth + Rate Limiting + CSRF
 ```
 
 ---
@@ -381,27 +360,14 @@ migoo/
 
 1. Push to GitHub
 2. Import project in [Vercel Dashboard](https://vercel.com/new)
-3. Add all environment variables from the table above
-4. Deploy — Vercel auto-detects Next.js and configures optimally
+3. Add all environment variables
+4. Deploy — Vercel auto-detects Next.js
 
-### Manual Deployment
-
-```bash
-# Build for production
-npm run build
-
-# Start production server
-npm start
-```
-
-### Database Migrations (Production)
+### Manual
 
 ```bash
-# Generate migration files
-npx drizzle-kit generate
-
-# Apply migrations to production database
-npx drizzle-kit migrate
+npm run build    # Build for production
+npm start        # Start production server
 ```
 
 ---
@@ -420,11 +386,7 @@ Full-Stack Developer<br/>
 
 ## 🤝 Contributing
 
-We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on:
-- Setting up the development environment
-- Code style and conventions
-- Submitting pull requests
-- Reporting issues
+We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ## 📄 License
 
@@ -441,4 +403,3 @@ This project is licensed under the MIT License. See [LICENSE](LICENSE) for detai
 [⬆ Back to Top](#-migoo)
 
 </div>
-
