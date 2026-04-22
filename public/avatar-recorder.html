@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Avatar Recorder</title>
+  <style>
+    body { margin: 0; background: #000; overflow: hidden; }
+    video { width: 720px; height: 1280px; object-fit: cover; }
+    #status { color: #0f0; font-family: monospace; position: fixed; top: 8px; left: 8px; z-index: 100; }
+  </style>
+</head>
+<body>
+  <div id="status">Waiting for session...</div>
+  <video id="avatar-video" autoplay playsinline muted></video>
+
+  <script>
+    /**
+     * Minimal avatar WebRTC recorder.
+     * Puppeteer injects session credentials, this page connects via LiveKit,
+     * captures the avatar video track, records it, and exposes the blob.
+     */
+
+    // Globals set by Puppeteer
+    window.__AVATAR_BLOB = null;
+    window.__AVATAR_READY = false;
+    window.__AVATAR_ERROR = null;
+    window.__AVATAR_DONE = false;
+
+    const statusEl = document.getElementById('status');
+    const videoEl = document.getElementById('avatar-video');
+
+    function log(msg) {
+      console.log('[AvatarRecorder]', msg);
+      statusEl.textContent = msg;
+    }
+
+    /**
+     * Called by Puppeteer with session credentials from Runway API.
+     * Connects via LiveKit WebRTC, records the avatar video, and stores the blob.
+     */
+    window.startRecording = async function(credentials, durationMs) {
+      try {
+        log('Loading LiveKit SDK...');
+
+        // Dynamically load LiveKit client SDK
+        await loadScript('https://unpkg.com/livekit-client@2.9.1/dist/livekit-client.umd.js');
+
+        const { Room, RoomEvent, Track } = window.LivekitClient;
+
+        log('Connecting to room...');
+
+        const room = new Room({
+          adaptiveStream: false, // Force highest quality immediately
+          dynacast: false,
+        });
+
+        // Track when we get the avatar's video
+        let mediaRecorder = null;
+        const chunks = [];
+        
+        // Audio analysis state
+        let audioContext = null;
+        let analyser = null;
+        let pcmData = null;
+        let isSpeaking = false;
+        let speechStartTime = 0;
+        let lastSpeechTime = 0;
+        window.__AVATAR_MOTION_DURATION = null;
+        
+        let videoReady = false;
+        let audioReady = false;
+
+        room.on(RoomEvent.TrackSubscribed, (track, publication, participant) => {
+          log(`Track subscribed: ${track.kind} from ${participant.identity}`);
+
+          if (track.kind === Track.Kind.Audio) {
+            log('Audio track received. Creating analyzer...');
+            audioReady = true;
+            const audioStream = new MediaStream([track.mediaStreamTrack]);
+            
+            // Set up Web Audio API to analyze volume
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            const source = audioContext.createMediaStreamSource(audioStream);
+            analyser = audioContext.createAnalyser();
+            analyser.fftSize = 256;
+            source.connect(analyser);
+            pcmData = new Uint8Array(analyser.frequencyBinCount);
+            
+            const checkAudioLoop = () => {
+                if (window.__AVATAR_DONE) return;
+                
+                analyser.getByteTimeDomainData(pcmData);
+                // Calculate RMS audio level
+                let sum = 0;
+                for (let i = 0; i < pcmData.length; i++) {
+                    const val = (pcmData[i] - 128) / 128; // Normalize to -1..1
+                    sum += val * val;
+                }
+                const rms = Math.sqrt(sum / pcmData.length);
+                
+                const threshold = 0.01; // Silence threshold
+                const now = Date.now();
+                
+                if (rms > threshold) {
+                    if (!isSpeaking) {
+                        isSpeaking = true;
+                        if (speechStartTime === 0) {
+                            speechStartTime = now;
+                            log('Avatar started speaking!');
+                        }
+                    }
+                    lastSpeechTime = now;
+                } else if (isSpeaking && (now - lastSpeechTime > 1500)) {
+                    // 1.5 seconds of silence means they finished their sentence
+                    isSpeaking = false;
+                    const durationSec = (lastSpeechTime - speechStartTime) / 1000;
+                    window.__AVATAR_MOTION_DURATION = durationSec;
+                    log(`Avatar finished speaking. Lip sync duration: ${durationSec.toFixed(2)}s. Stopping recording early.`);
+                    
+                    // Stop recording strictly when speaking ends so the output clip only contains motion
+                    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                        mediaRecorder.stop();
+                    }
+                    room.disconnect();
+                }
+                
+                requestAnimationFrame(checkAudioLoop);
+            };
+            
+            checkAudioLoop();
+          }
+
+          if (track.kind === Track.Kind.Video) {
+            // Attach raw video to a hidden element
+            const mediaStream = new MediaStream([track.mediaStreamTrack]);
+            videoEl.srcObject = mediaStream;
+
+            // Wait for video to be ready before starting canvas paint loop
+            videoEl.onloadedmetadata = () => {
+              videoEl.play();
+              window.__AVATAR_READY = true;
+              videoReady = true;
+              log('Avatar video received. Creating portrait canvas...');
+
+              // Create a 720x1280 canvas for the MediaRecorder
+              const canvas = document.createElement('canvas');
+              const ctx = canvas.getContext('2d');
+              canvas.width = 720;
+              canvas.height = 1280;
+              
+              const CANVAS_W = 720;
+              const CANVAS_H = 1280;
+
+              // Paint loop: draw the source video onto the portrait canvas with balanced framing
+              let rafId;
+              const paintToCanvas = () => {
+                const videoW = videoEl.videoWidth;
+                const videoH = videoEl.videoHeight;
+                
+                if (videoW && videoH) {
+                  // Use contain mode with 1.4x zoom for a balanced "presenter" look
+                  // This avoids the extreme face zoom of cover mode while still filling the frame nicely
+                  const baseScale = Math.min(CANVAS_W / videoW, CANVAS_H / videoH);
+                  const scale = baseScale * 1.15; // 15% gentle zoom for natural presenter framing
+                  const drawW = videoW * scale;
+                  const drawH = videoH * scale;
+                  const drawX = (CANVAS_W - drawW) / 2;
+                  // Position face in upper portion of frame (natural presenter position)
+                  const drawY = (CANVAS_H - drawH) * 0.25;
+                  
+                  ctx.fillStyle = 'black';
+                  ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+                  
+                  // Use high-quality image smoothing
+                  ctx.imageSmoothingEnabled = true;
+                  ctx.imageSmoothingQuality = 'high';
+                  
+                  ctx.drawImage(videoEl, drawX, drawY, drawW, drawH);
+                }
+                
+                rafId = requestAnimationFrame(paintToCanvas);
+              };
+              
+              paintToCanvas();
+
+              // Capture stream from canvas at 30 fps instead of native track
+              const canvasStream = canvas.captureStream(30);
+
+              // Start recording the canvas video (no audio)
+              mediaRecorder = new MediaRecorder(canvasStream, {
+                mimeType: 'video/webm;codecs=vp8',
+                videoBitsPerSecond: 8000000, // 8 Mbps for pristine quality
+              });
+
+              mediaRecorder.ondataavailable = (e) => {
+                if (e.data.size > 0) chunks.push(e.data);
+              };
+
+              mediaRecorder.onstop = () => {
+                cancelAnimationFrame(rafId);
+                log('Recording stopped. Creating blob...');
+                const blob = new Blob(chunks, { type: 'video/webm' });
+                window.__AVATAR_BLOB = blob;
+                
+                // Fallback duration if audio track never went silent (e.g. background noise)
+                if (!window.__AVATAR_MOTION_DURATION && speechStartTime > 0) {
+                     window.__AVATAR_MOTION_DURATION = (Date.now() - speechStartTime) / 1000;
+                }
+                // Fallback if audio track never sent anything
+                if (!window.__AVATAR_MOTION_DURATION) {
+                     window.__AVATAR_MOTION_DURATION = durationMs / 1000; 
+                }
+                
+                window.__AVATAR_DONE = true;
+                log(`Done! Blob size: ${(blob.size / 1024).toFixed(1)} KB`);
+              };
+
+              mediaRecorder.start(1000); // Collect data every 1s
+
+              // Stop recording after duration
+              setTimeout(() => {
+                log('Duration reached. Stopping recording...');
+                if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                  mediaRecorder.stop();
+                }
+                room.disconnect();
+              }, durationMs);
+            };
+          }
+        });
+
+        room.on(RoomEvent.Disconnected, () => {
+          log('Room disconnected.');
+          if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+            mediaRecorder.stop();
+          }
+        });
+
+        room.on(RoomEvent.TrackSubscriptionFailed, (trackSid, participant, reason) => {
+          log(`Track subscription failed: ${reason}`);
+        });
+
+        // Connect to the LiveKit room
+        await room.connect(credentials.serverUrl, credentials.token, {
+          autoSubscribe: true,
+        });
+
+        log('Connected to room. Waiting for avatar video track...');
+
+        // Safety timeout: if no video track after 30s, fail
+        setTimeout(() => {
+          if (!window.__AVATAR_READY) {
+            window.__AVATAR_ERROR = 'Timeout waiting for avatar video track';
+            window.__AVATAR_DONE = true;
+            room.disconnect();
+          }
+        }, 30000);
+
+      } catch (err) {
+        log('Error: ' + err.message);
+        window.__AVATAR_ERROR = err.message;
+        window.__AVATAR_DONE = true;
+      }
+    };
+
+    function loadScript(src) {
+      return new Promise((resolve, reject) => {
+        const script = document.createElement('script');
+        script.src = src;
+        script.onload = resolve;
+        script.onerror = () => reject(new Error('Failed to load: ' + src));
+        document.head.appendChild(script);
+      });
+    }
+  </script>
+</body>
+</html>

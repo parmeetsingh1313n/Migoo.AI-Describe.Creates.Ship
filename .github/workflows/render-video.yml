@@ -1,0 +1,56 @@
+name: Render Video
+on:
+  repository_dispatch:
+    types: [render-video]
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: Write props to file
+        run: |
+          mkdir -p tmp
+          echo '${{ toJson(github.event.client_payload.props) }}' > tmp/props.json
+
+      - name: Download Avatar Assets
+        run: node scripts/download-assets.js
+
+      - name: Render Video
+        run: |
+          npx remotion render MainVideo out/video.mp4 \
+            --props="./tmp/props.json" \
+            --timeout=120000 \
+            --disable-web-security \
+            --concurrency=4 \
+            --offthread-video-cache-size-in-bytes=3221225472 \
+            --jpeg-quality=75
+
+      - name: Upload to Appwrite Storage & Notify Webhook
+        env:
+          APPWRITE_ENDPOINT: ${{ secrets.APPWRITE_ENDPOINT }}
+          APPWRITE_PROJECT_ID: ${{ secrets.APPWRITE_PROJECT_ID }}
+          APPWRITE_API_KEY: ${{ secrets.APPWRITE_API_KEY }}
+          APPWRITE_BUCKET_ID: ${{ secrets.APPWRITE_BUCKET_ID }}
+          VIDEO_ID: ${{ github.event.client_payload.videoId }}
+          WEBHOOK_URL: ${{ github.event.client_payload.webhookUrl }}
+        run: node scripts/upload-render.js
+
+      - name: Notify Failure
+        if: failure()
+        run: |
+          curl -s -X PATCH "${{ github.event.client_payload.webhookUrl }}" \
+            -H "Content-Type: application/json" \
+            -d '{"videoId": "${{ github.event.client_payload.videoId }}", "status": "failed"}'

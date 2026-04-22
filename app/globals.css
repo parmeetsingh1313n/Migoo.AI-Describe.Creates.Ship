@@ -1,0 +1,761 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-3xl: calc(var(--radius) + 12px);
+  --radius-4xl: calc(var(--radius) + 16px);
+}
+
+:root {
+  --radius: 0.625rem;
+  --background: oklch(0.99 0 0);
+  --foreground: oklch(0.18 0.02 260);
+  --card: oklch(0.975 0 0);
+  --card-foreground: oklch(0.18 0.02 260);
+  --popover: oklch(0.975 0 0);
+  --popover-foreground: oklch(0.18 0.02 260);
+  --primary: oklch(0.62 0.23 260);
+  --primary-foreground: oklch(0.98 0 0);
+  --secondary: oklch(0.74 0.18 300);
+  --secondary-foreground: oklch(0.18 0.02 260);
+  --accent: oklch(0.78 0.21 210);
+  --accent-foreground: oklch(0.18 0.02 260);
+  --muted: oklch(0.94 0.01 260);
+  --muted-foreground: oklch(0.45 0.02 260);
+  --destructive: oklch(0.62 0.23 25);
+  --border: oklch(0.90 0.01 260);
+  --input: oklch(0.92 0.01 260);
+  --ring: oklch(0.62 0.23 260);
+  --chart-1: oklch(0.62 0.23 260);
+  --chart-2: oklch(0.78 0.21 210);
+  --chart-3: oklch(0.74 0.18 300);
+  --chart-4: oklch(0.70 0.20 180);
+  --chart-5: oklch(0.65 0.22 30);
+  --sidebar: oklch(0.975 0 0);
+  --sidebar-foreground: oklch(0.18 0.02 260);
+  --sidebar-primary: oklch(0.62 0.23 260);
+  --sidebar-primary-foreground: oklch(0.98 0 0);
+  --sidebar-accent: oklch(0.94 0.01 260);
+  --sidebar-accent-foreground: oklch(0.18 0.02 260);
+  --sidebar-border: oklch(0.90 0.01 260);
+  --sidebar-ring: oklch(0.62 0.23 260);
+}
+
+.dark {
+  --background: oklch(0.14 0.02 260);
+  --foreground: oklch(0.97 0 0);
+
+  --card: oklch(0.18 0.03 260);
+  --card-foreground: oklch(0.97 0 0);
+
+  --popover: oklch(0.18 0.03 260);
+  --popover-foreground: oklch(0.97 0 0);
+
+  --primary: oklch(0.72 0.22 260);
+  --primary-foreground: oklch(0.14 0.02 260);
+
+  --secondary: oklch(0.62 0.19 300);
+  --secondary-foreground: oklch(0.97 0 0);
+
+  --accent: oklch(0.75 0.21 210);
+  --accent-foreground: oklch(0.14 0.02 260);
+
+  --muted: oklch(0.28 0.03 260);
+  --muted-foreground: oklch(0.72 0.02 260);
+
+  --destructive: oklch(0.68 0.22 25);
+
+  --border: oklch(1 0 0 / 12%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.72 0.22 260);
+
+  --chart-1: oklch(0.72 0.22 260);
+  --chart-2: oklch(0.75 0.21 210);
+  --chart-3: oklch(0.62 0.19 300);
+  --chart-4: oklch(0.70 0.20 180);
+  --chart-5: oklch(0.65 0.22 30);
+
+  --sidebar: oklch(0.18 0.03 260);
+  --sidebar-foreground: oklch(0.97 0 0);
+  --sidebar-primary: oklch(0.72 0.22 260);
+  --sidebar-primary-foreground: oklch(0.14 0.02 260);
+  --sidebar-accent: oklch(0.28 0.03 260);
+  --sidebar-accent-foreground: oklch(0.97 0 0);
+  --sidebar-border: oklch(1 0 0 / 12%);
+  --sidebar-ring: oklch(0.72 0.22 260);
+}
+
+/* Custom Animations */
+@keyframes float {
+
+  0%,
+  100% {
+    transform: translateY(0px) rotate(0deg);
+  }
+
+  50% {
+    transform: translateY(-15px) rotate(5deg);
+  }
+}
+
+@keyframes float-delayed {
+
+  0%,
+  100% {
+    transform: translateY(0px) rotate(0deg);
+  }
+
+  50% {
+    transform: translateY(-12px) rotate(-5deg);
+  }
+}
+
+@keyframes pulse-slow {
+
+  0%,
+  100% {
+    opacity: 0.15;
+    transform: scale(1);
+  }
+
+  50% {
+    opacity: 0.25;
+    transform: scale(1.05);
+  }
+}
+
+@keyframes fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes blob {
+
+  0%,
+  100% {
+    transform: translate(0, 0) scale(1);
+  }
+
+  25% {
+    transform: translate(20px, -20px) scale(1.1);
+  }
+
+  50% {
+    transform: translate(-15px, 15px) scale(0.9);
+  }
+
+  75% {
+    transform: translate(15px, 20px) scale(1.05);
+  }
+}
+
+@keyframes float-badge {
+
+  0%,
+  100% {
+    transform: translateY(0px);
+  }
+
+  50% {
+    transform: translateY(-5px);
+  }
+}
+
+@keyframes progress-slide {
+  from {
+    transform: translateX(-100%);
+  }
+
+  to {
+    transform: translateX(0);
+  }
+}
+
+@keyframes rotate-border {
+  0% {
+    transform: rotate(0deg);
+  }
+
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes pulse-glow {
+
+  0%,
+  100% {
+    opacity: 0.5;
+    filter: blur(20px);
+  }
+
+  50% {
+    opacity: 0.8;
+    filter: blur(25px);
+  }
+}
+
+@keyframes pulse {
+
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  50% {
+    opacity: 0.7;
+    transform: scale(1.05);
+  }
+}
+
+/* Enhanced shimmer animation */
+@keyframes shimmer {
+  0% {
+    transform: translateX(-100%) rotate(45deg);
+    opacity: 0;
+  }
+
+  50% {
+    opacity: 0.3;
+  }
+
+  100% {
+    transform: translateX(100%) rotate(45deg);
+    opacity: 0;
+  }
+}
+
+/* Border sparkle animation */
+@keyframes border-sparkle {
+  0% {
+    transform: translateX(-100%) translateY(-100%);
+    opacity: 0;
+  }
+
+  25% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.5;
+  }
+
+  75% {
+    opacity: 1;
+  }
+
+  100% {
+    transform: translateX(100%) translateY(100%);
+    opacity: 0;
+  }
+}
+
+/* Slide animations */
+@keyframes slide-in-right {
+  from {
+    opacity: 0;
+    transform: translateX(100px) scale(0.95);
+    filter: blur(5px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+    filter: blur(0);
+  }
+}
+
+@keyframes slide-in-left {
+  from {
+    opacity: 0;
+    transform: translateX(-100px) scale(0.95);
+    filter: blur(5px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+    filter: blur(0);
+  }
+}
+
+@keyframes slide-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(100px) scale(0.95);
+    filter: blur(5px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
+}
+
+@keyframes slide-in-down {
+  from {
+    opacity: 0;
+    transform: translateY(-100px) scale(0.95);
+    filter: blur(5px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
+}
+
+@keyframes zoom-in {
+  from {
+    opacity: 0;
+    transform: scale(0.8);
+    filter: blur(5px);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+    filter: blur(0);
+  }
+}
+
+@keyframes flip-in {
+  from {
+    opacity: 0;
+    transform: perspective(1000px) rotateY(90deg);
+    filter: blur(5px);
+  }
+
+  to {
+    opacity: 1;
+    transform: perspective(1000px) rotateY(0);
+    filter: blur(0);
+  }
+}
+
+@keyframes fade-in-blur {
+  from {
+    opacity: 0;
+    filter: blur(10px);
+  }
+
+  to {
+    opacity: 1;
+    filter: blur(0);
+  }
+}
+
+@keyframes rotate-in {
+  from {
+    opacity: 0;
+    transform: rotate(-15deg) scale(0.9);
+  }
+
+  to {
+    opacity: 1;
+    transform: rotate(0) scale(1);
+  }
+}
+
+@keyframes bounce-in {
+  0% {
+    opacity: 0;
+    transform: scale(0.3);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scale(1.05);
+  }
+
+  70% {
+    transform: scale(0.9);
+  }
+
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes ripple {
+  0% {
+    transform: scale(0.8);
+    opacity: 1;
+  }
+
+  100% {
+    transform: scale(1.5);
+    opacity: 0;
+  }
+}
+
+@keyframes star-twinkle {
+
+  0%,
+  100% {
+    opacity: 0;
+    transform: scale(0) rotate(0deg);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scale(1) rotate(180deg);
+  }
+}
+
+/* Horizontal shimmer for progress bars */
+@keyframes shimmer-h {
+  0% {
+    background-position: -200% 0;
+  }
+
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+/* Animation Classes */
+.animate-float {
+  animation: float 6s ease-in-out infinite;
+}
+
+.animate-float-delayed {
+  animation: float 7s ease-in-out infinite;
+  animation-delay: 1s;
+}
+
+.animate-pulse-slow {
+  animation: pulse-slow 4s ease-in-out infinite;
+}
+
+.animate-fade-in-up {
+  animation: fade-in-up 0.6s ease-out forwards;
+}
+
+.animate-shimmer {
+  animation: shimmer 3s linear infinite;
+}
+
+.animate-border-sparkle {
+  animation: border-sparkle 4s linear infinite;
+}
+
+.animate-glow-pulse {
+  animation: pulse-glow 3s ease-in-out infinite;
+}
+
+.animate-blob {
+  animation: blob 8s ease-in-out infinite;
+}
+
+.animate-float-badge {
+  animation: float-badge 3s ease-in-out infinite;
+}
+
+.animate-pulse {
+  animation: pulse 2s ease-in-out infinite;
+}
+
+.animate-ripple {
+  animation: ripple 2s ease-out infinite;
+}
+
+.animate-star-twinkle {
+  animation: star-twinkle 2s ease-in-out infinite;
+}
+
+/* Slide animation classes */
+.animate-slide-in-right {
+  animation: slide-in-right 0.8s cubic-bezier(0.23, 1, 0.32, 1) forwards;
+}
+
+.animate-slide-in-left {
+  animation: slide-in-left 0.8s cubic-bezier(0.23, 1, 0.32, 1) forwards;
+}
+
+.animate-slide-in-up {
+  animation: slide-in-up 0.8s cubic-bezier(0.23, 1, 0.32, 1) forwards;
+}
+
+.animate-slide-in-down {
+  animation: slide-in-down 0.8s cubic-bezier(0.23, 1, 0.32, 1) forwards;
+}
+
+.animate-zoom-in {
+  animation: zoom-in 0.8s cubic-bezier(0.23, 1, 0.32, 1) forwards;
+}
+
+.animate-flip-in {
+  animation: flip-in 0.8s cubic-bezier(0.23, 1, 0.32, 1) forwards;
+}
+
+.animate-fade-in-blur {
+  animation: fade-in-blur 0.8s cubic-bezier(0.23, 1, 0.32, 1) forwards;
+}
+
+.animate-rotate-in {
+  animation: rotate-in 0.8s cubic-bezier(0.23, 1, 0.32, 1) forwards;
+}
+
+.animate-bounce-in {
+  animation: bounce-in 0.8s cubic-bezier(0.23, 1, 0.32, 1) forwards;
+}
+
+.animation-delay-200 {
+  animation-delay: 200ms;
+}
+
+.animation-delay-400 {
+  animation-delay: 400ms;
+}
+
+.animation-delay-600 {
+  animation-delay: 600ms;
+}
+
+.animation-delay-800 {
+  animation-delay: 800ms;
+}
+
+.animation-delay-1000 {
+  animation-delay: 1000ms;
+}
+
+.animation-delay-1500 {
+  animation-delay: 1500ms;
+}
+
+.animation-delay-2000 {
+  animation-delay: 2000ms;
+}
+
+.animation-delay-4000 {
+  animation-delay: 4000ms;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html,
+  body {
+    @apply h-full w-full;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+  }
+}
+
+/* Clerk Custom Styles */
+.cl-rootBox {
+  width: 100%;
+}
+
+.cl-card {
+  background: transparent;
+  box-shadow: none;
+  border: none;
+}
+
+.cl-header {
+  display: none;
+}
+
+.cl-socialButtonsBlockButton {
+  height: 44px;
+  padding: 0 16px;
+  border-radius: 9999px;
+  background: var(--muted);
+  color: var(--foreground);
+  font-weight: 500;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  transition: all 200ms ease;
+  border: 1px solid var(--border);
+}
+
+.cl-socialButtonsBlockButton:hover {
+  background: color-mix(in srgb, var(--muted) 90%, transparent);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+}
+
+@media (min-width: 768px) {
+  .cl-socialButtonsBlockButton {
+    height: 52px;
+    font-size: 15px;
+  }
+}
+
+.cl-socialButtonsBlockButtonArrow {
+  display: none;
+}
+
+.cl-socialButtonsBlockButtonText {
+  font-weight: 500;
+}
+
+.cl-socialButtonsProviderIcon {
+  width: 18px;
+  height: 18px;
+}
+
+.cl-dividerLine {
+  background: var(--border);
+}
+
+.cl-dividerText {
+  color: var(--muted-foreground);
+  background: var(--background);
+  padding: 0 12px;
+  font-size: 13px;
+}
+
+.cl-formFieldLabel {
+  color: var(--foreground);
+  font-weight: 500;
+  font-size: 14px;
+  margin-bottom: 6px;
+  display: block;
+}
+
+.cl-formFieldInput {
+  height: 44px;
+  padding: 0 20px;
+  border-radius: 9999px;
+  background: var(--muted);
+  border: 1px solid var(--border);
+  color: var(--foreground);
+  font-size: 14px;
+  transition: all 200ms ease;
+}
+
+.cl-formFieldInput:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+  outline: none;
+}
+
+@media (min-width: 768px) {
+  .cl-formFieldInput {
+    height: 52px;
+    font-size: 15px;
+  }
+}
+
+.cl-formButtonPrimary {
+  height: 44px;
+  border-radius: 9999px;
+  background: linear-gradient(135deg, var(--primary), var(--accent));
+  color: white;
+  font-weight: 500;
+  font-size: 14px;
+  transition: all 200ms ease;
+  border: none;
+}
+
+.cl-formButtonPrimary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 20px rgba(99, 102, 241, 0.2);
+}
+
+.cl-formButtonPrimary:active {
+  transform: translateY(0);
+}
+
+@media (min-width: 768px) {
+  .cl-formButtonPrimary {
+    height: 52px;
+    font-size: 15px;
+  }
+}
+
+.cl-footer {
+  display: none;
+}
+
+.cl-footerActionLink {
+  color: var(--primary);
+  font-weight: 500;
+}
+
+.cl-footerActionLink:hover {
+  text-decoration: underline;
+}
+
+.cl-userButtonBox {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.cl-userButtonOuterIdentifier {
+  font-size: 13px;
+  color: var(--muted-foreground);
+}
+
+.cl-navbar {
+  background: rgba(var(--background), 0.8);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border);
+}
+
+.cl-navbarButton:hover {
+  background: var(--muted);
+}

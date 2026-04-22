@@ -1,0 +1,710 @@
+import { putWithRotation } from "@/lib/blob";
+import { groq } from "@/config/groq";
+import { NextRequest, NextResponse } from "next/server";
+import * as zlib from "node:zlib";
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+const INIT_IMAGE_ENDPOINT     = "https://cloud.leonardo.ai/api/rest/v1/init-image";
+const IMAGE_TO_VIDEO_ENDPOINT = "https://cloud.leonardo.ai/api/rest/v1/generations-image-to-video";
+const POLL_ENDPOINT           = "https://cloud.leonardo.ai/api/rest/v1/generations";
+const KLING_MODEL             = "KLING2_5";
+const SARVAM_BASE             = "https://api.sarvam.ai";
+
+// ─── Key helpers ──────────────────────────────────────────────────────────────
+function getLeonardoKeys(): string[] {
+    const names = [
+        "LEONARDO_API_KEY","LEONARDO_API_KEY1","LEONARDO_API_KEY2","LEONARDO_API_KEY3",
+        "LEONARDO_API_KEY4","LEONARDO_API_KEY5","LEONARDO_API_KEY6","LEONARDO_API_KEY7",
+        "LEONARDO_API_KEY8","LEONARDO_API_KEY9",
+    ];
+    return names.map(n => process.env[n]).filter((k): k is string => !!k && k.length > 0);
+}
+const getSarvamKey  = () => process.env.SARVAM_API_KEY || "";
+
+// ─── Minimal ZIP creator (single file, no compression) ────────────────────────
+function crc32(buf: Buffer): number {
+    const table = new Uint32Array(256);
+    for (let i = 0; i < 256; i++) {
+        let c = i;
+        for (let j = 0; j < 8; j++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+        table[i] = c;
+    }
+    let crc = 0xFFFFFFFF;
+    for (let i = 0; i < buf.length; i++) crc = (crc >>> 8) ^ table[(crc ^ buf[i]) & 0xFF];
+    return (crc ^ 0xFFFFFFFF) >>> 0;
+}
+
+function createSingleFileZip(filename: string, data: Buffer): Buffer {
+    const name    = Buffer.from(filename, "utf8");
+    const crc     = crc32(data);
+    const size    = data.length;
+    const now     = new Date();
+    const dosTime = (now.getHours() << 11) | (now.getMinutes() << 5) | (now.getSeconds() >> 1);
+    const dosDate = ((now.getFullYear() - 1980) << 9) | ((now.getMonth() + 1) << 5) | now.getDate();
+
+    // Local file header (30 + name)
+    const lh = Buffer.alloc(30 + name.length);
+    lh.writeUInt32LE(0x04034b50, 0);
+    lh.writeUInt16LE(20, 4); lh.writeUInt16LE(0, 6); lh.writeUInt16LE(0, 8);
+    lh.writeUInt16LE(dosTime, 10); lh.writeUInt16LE(dosDate, 12);
+    lh.writeUInt32LE(crc, 14); lh.writeUInt32LE(size, 18); lh.writeUInt32LE(size, 22);
+    lh.writeUInt16LE(name.length, 26); lh.writeUInt16LE(0, 28);
+    name.copy(lh, 30);
+
+    // Central directory (46 + name)
+    const cd = Buffer.alloc(46 + name.length);
+    cd.writeUInt32LE(0x02014b50, 0);
+    cd.writeUInt16LE(20, 4); cd.writeUInt16LE(20, 6); cd.writeUInt16LE(0, 8);
+    cd.writeUInt16LE(0, 10); cd.writeUInt16LE(dosTime, 12); cd.writeUInt16LE(dosDate, 14);
+    cd.writeUInt32LE(crc, 16); cd.writeUInt32LE(size, 20); cd.writeUInt32LE(size, 24);
+    cd.writeUInt16LE(name.length, 28); cd.writeUInt16LE(0, 30); cd.writeUInt16LE(0, 32);
+    cd.writeUInt16LE(0, 34); cd.writeUInt16LE(0, 36); cd.writeUInt32LE(0, 38); cd.writeUInt32LE(0, 42);
+    name.copy(cd, 46);
+
+    // End of central directory (22)
+    const ecd = Buffer.alloc(22);
+    ecd.writeUInt32LE(0x06054b50, 0);
+    ecd.writeUInt16LE(0, 4); ecd.writeUInt16LE(0, 6);
+    ecd.writeUInt16LE(1, 8); ecd.writeUInt16LE(1, 10);
+    ecd.writeUInt32LE(cd.length, 12);
+    ecd.writeUInt32LE(lh.length + data.length, 16);
+    ecd.writeUInt16LE(0, 20);
+
+    return Buffer.concat([lh, data, cd, ecd]);
+}
+
+/** Extract first file from a ZIP buffer (handles stored + deflate) */
+function extractFirstFileFromZip(zipBuf: Buffer): string {
+    let offset = 0;
+    while (offset < zipBuf.length - 4 && zipBuf.readUInt32LE(offset) !== 0x04034b50) offset++;
+    if (offset >= zipBuf.length - 30) return "";
+    const compression    = zipBuf.readUInt16LE(offset + 8);
+    const compressedSize = zipBuf.readUInt32LE(offset + 18);
+    const filenameLen    = zipBuf.readUInt16LE(offset + 26);
+    const extraLen       = zipBuf.readUInt16LE(offset + 28);
+    const dataStart      = offset + 30 + filenameLen + extraLen;
+    const fileData       = zipBuf.slice(dataStart, dataStart + compressedSize);
+    try {
+        return compression === 8
+            ? zlib.inflateRawSync(fileData).toString("utf-8")
+            : fileData.toString("utf-8");
+    } catch { return fileData.toString("utf-8"); }
+}
+
+// ─── Step 1a: Sarvam Vision (image caption) ───────────────────────────────────
+async function captionWithSarvam(imgBuf: Buffer, contentType: string): Promise<string> {
+    const key = getSarvamKey();
+    if (!key) throw new Error("No SARVAM_API_KEY");
+
+    const ext         = contentType.includes("png") ? "png" : contentType.includes("webp") ? "webp" : "jpg";
+    const imgFilename = `image.${ext}`;
+    const zipFilename = "image.zip";
+    const zipBuf      = createSingleFileZip(imgFilename, imgBuf);
+
+    const headers = { "api-subscription-key": key, "Content-Type": "application/json" };
+
+    // 1. Create job
+    const createRes = await fetch(`${SARVAM_BASE}/doc-digitization/job/v1`, {
+        method: "POST", headers,
+        body: JSON.stringify({ job_parameters: { language: "en-IN", output_format: "md" } }),
+    });
+    if (!createRes.ok) throw new Error(`Sarvam create job failed: ${createRes.status}`);
+    const { job_id } = await createRes.json();
+    console.log(`📄 [img-to-video] Sarvam job created: ${job_id}`);
+
+    // 2. Get presigned upload URL
+    const uploadUrlRes = await fetch(`${SARVAM_BASE}/doc-digitization/job/v1/upload-files`, {
+        method: "POST", headers,
+        body: JSON.stringify({ job_id, files: [zipFilename] }),
+    });
+    if (!uploadUrlRes.ok) throw new Error(`Sarvam upload-files failed: ${uploadUrlRes.status}`);
+    const uploadData = await uploadUrlRes.json();
+    const fileUrlDetails = uploadData?.upload_urls?.[zipFilename];
+    const fileUrl        = fileUrlDetails?.file_url;
+    if (!fileUrl) throw new Error("No upload URL from Sarvam");
+
+    // 3. PUT ZIP to the presigned URL
+    // ─────────────────────────────────────────────────────────────────────────
+    // Sarvam uses Azure Blob Storage (storage_container_type = "Azure").
+    // Azure SAS-URL PUTs REQUIRE the header `x-ms-blob-type: BlockBlob`.
+    // Without it Azure returns: 400 <?xml…><Error><Code>MissingRequiredHeader
+    // ─────────────────────────────────────────────────────────────────────────
+    const storageType: string = (uploadData?.storage_container_type ||"").toLowerCase();
+    const isAzure = storageType.startsWith("azure") || fileUrl.includes(".blob.core.windows.net");
+
+    // file_metadata may carry additional required headers (some Sarvam backends)
+    const extraHeaders: Record<string, string> = {};
+    const fileMeta = fileUrlDetails?.file_metadata;
+    if (fileMeta && typeof fileMeta === "object") {
+        for (const [k, v] of Object.entries(fileMeta)) {
+            if (typeof v === "string") extraHeaders[k] = v;
+        }
+    }
+
+    const putHeaders: Record<string, string> = {
+        "Content-Type": "application/zip",
+        ...extraHeaders,
+        ...(isAzure ? { "x-ms-blob-type": "BlockBlob" } : {}),
+    };
+
+    console.log(`☁️ [img-to-video] Storage: ${storageType || "unknown"}, Azure: ${isAzure}`);
+
+    const putRes = await fetch(fileUrl, { method: "PUT", headers: putHeaders, body: zipBuf as unknown as BodyInit });
+    if (!putRes.ok && putRes.status !== 201 && putRes.status !== 200) {
+        const errBody = await putRes.text().catch(() => "");
+        throw new Error(`Sarvam ZIP upload failed: ${putRes.status} — ${errBody.slice(0, 200)}`);
+    }
+
+    // 4. Start job
+    const startRes = await fetch(`${SARVAM_BASE}/doc-digitization/job/v1/${job_id}/start`, {
+        method: "POST", headers, body: "{}",
+    });
+    if (!startRes.ok) throw new Error(`Sarvam start failed: ${startRes.status}`);
+    console.log(`🚀 [img-to-video] Sarvam job started`);
+
+    // 5. Poll status (max 15 × 3s = 45s)
+    let jobState = "Pending";
+    for (let i = 0; i < 15; i++) {
+        await new Promise(r => setTimeout(r, 3000));
+        const statusRes = await fetch(`${SARVAM_BASE}/doc-digitization/job/v1/${job_id}/status`, {
+            headers: { "api-subscription-key": key },
+        });
+        if (!statusRes.ok) continue;
+        const sd = await statusRes.json();
+        jobState = sd.job_state;
+        console.log(`⏳ [img-to-video] Sarvam poll ${i + 1}/15: ${jobState}`);
+        if (jobState === "Completed" || jobState === "PartiallyCompleted") break;
+        if (jobState === "Failed") throw new Error(`Sarvam job failed: ${sd.error_message}`);
+    }
+    if (jobState !== "Completed" && jobState !== "PartiallyCompleted") {
+        throw new Error(`Sarvam timed out (state: ${jobState})`);
+    }
+
+    // 6. Get download URLs
+    const dlRes = await fetch(`${SARVAM_BASE}/doc-digitization/job/v1/${job_id}/download-files`, {
+        method: "POST", headers, body: "{}",
+    });
+    if (!dlRes.ok) throw new Error(`Sarvam download-files failed: ${dlRes.status}`);
+    const dlData        = await dlRes.json();
+    const downloadUrls  = dlData?.download_urls || {};
+    const firstKey      = Object.keys(downloadUrls)[0];
+    if (!firstKey) throw new Error("No download URLs from Sarvam");
+
+    // 7. Download output
+    const dlFileUrl  = downloadUrls[firstKey]?.file_url || firstKey;
+    const contentRes = await fetch(dlFileUrl);
+    if (!contentRes.ok) throw new Error(`Sarvam output download failed: ${contentRes.status}`);
+    const contentBuf = Buffer.from(await contentRes.arrayBuffer());
+
+    // Output can be a ZIP or plain markdown
+    let markdown = "";
+    if (contentBuf[0] === 0x50 && contentBuf[1] === 0x4B) {
+        // It's a ZIP
+        markdown = extractFirstFileFromZip(contentBuf);
+    } else {
+        markdown = contentBuf.toString("utf-8");
+    }
+
+    const result = markdown.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 2000);
+    console.log(`✅ [img-to-video] Sarvam caption: "${result.slice(0, 100)}..."`);
+    return result;
+}
+
+// ─── Step 1b: Groq Vision (fallback caption) ──────────────────────────────────
+async function captionWithGroq(imageUrl: string): Promise<string> {
+    const prompt = `Analyze this image for VIDEO ANIMATION. Your goal is to identify every element that CAN MOVE.
+
+For each element, output EXACTLY this format:
+- [ELEMENT TYPE]: [what it is] → [how it could physically move]
+
+Element types: PERSON, ANIMAL, PLANT, WATER, SKY, FABRIC, HAIR, OBJECT, LIGHT, PARTICLE
+
+Examples:
+- PERSON: woman in red dress → chest breathing, eyes blinking, head tilting slightly
+- HAIR: long dark hair → strands drifting in breeze, catching light
+- FABRIC: flowing silk dress → billowing gently, rippling at hem
+- PLANT: palm trees in background → fronds swaying, leaves rustling
+- WATER: ocean waves → rolling forward, foam spreading, reflections dancing
+- LIGHT: golden sunset rays → beams shifting slowly, shadows lengthening
+- PARTICLE: dust in sunlight → motes drifting lazily upward
+
+IMPORTANT:
+- Do NOT describe text, signs, labels, writing, watermarks — skip them entirely
+- Focus ONLY on PHYSICAL elements that can exhibit motion
+- Be specific about body parts, materials, and textures
+- List at least 5-8 movable elements`;
+
+    const caption = await groq.captionImage(imageUrl, prompt);
+    console.log(`✅ [img-to-video] Groq vision caption: "${caption.slice(0, 100)}..."`);
+    return caption;
+}
+
+// ─── Step 2: Groq → KINETIC Kling animation prompt ──────────────────────────
+//
+// CRITICAL DISCOVERY (from Leonardo API docs):
+// The Kling 2.5 Turbo API via Leonardo ONLY supports these params:
+//   prompt, imageId, imageType, resolution, height, width, duration, model, isPublic, endFrameImage
+//
+// negativePrompt, motionStrength, frameInterpolation → ALL SILENTLY IGNORED!
+// The ONLY lever for controlling motion is the PROMPT TEXT itself.
+//
+// Therefore, the prompt must do ALL the heavy lifting:
+//   1. NEVER describe what's IN the image (causes Ken Burns confirmation)
+//   2. Use SPECIFIC KINETIC VERBS for each detected element
+//   3. Describe SMALL, REALISTIC physical actions (not epic wind storms)
+//   4. Use the "stationary camera" trick to force element-level animation
+//   5. Embed anti-text instructions directly in the prompt
+//
+
+// ── Compact anti-text suffix (embedded in prompt since negativePrompt is ignored) ──
+const ANTI_TEXT_SUFFIX = ". Absolutely no text, titles, words, writing, captions, labels, or overlays of any kind in any language.";
+
+/** Detect what element categories exist in the caption for targeted motion */
+function detectCategories(caption: string): string[] {
+    const lower = caption.toLowerCase();
+    const cats: string[] = [];
+    
+    // Person detection
+    if (/\b(person|woman|man|girl|boy|child|people|face|eyes|hair|hand|body|chest|head|smile|expression|portrait|figure|human)\b/.test(lower)) cats.push('person');
+    // Animal detection
+    if (/\b(animal|dog|cat|bird|horse|fish|lion|tiger|elephant|deer|rabbit|insect|butterfly|eagle|whale|dolphin|creature|pet)\b/.test(lower)) cats.push('animal');
+    // Water detection
+    if (/\b(water|ocean|sea|river|lake|rain|wave|waterfall|pool|fountain|stream|pond|drops|splash|ripple|tide|surf)\b/.test(lower)) cats.push('water');
+    // Plant/nature detection
+    if (/\b(tree|plant|flower|grass|leaf|leaves|branch|forest|garden|bush|vine|petal|bloom|fern|palm|field|meadow)\b/.test(lower)) cats.push('plant');
+    // Sky/weather detection
+    if (/\b(sky|cloud|sun|moon|star|sunset|sunrise|storm|lightning|fog|mist|haze|aurora|rainbow)\b/.test(lower)) cats.push('sky');
+    // Fabric/cloth detection
+    if (/\b(fabric|cloth|dress|shirt|scarf|curtain|flag|banner|veil|silk|cotton|linen|sari|cape|cloak|robe|blanket|ribbon)\b/.test(lower)) cats.push('fabric');
+    // Fire/smoke detection
+    if (/\b(fire|flame|candle|smoke|steam|torch|bonfire|ember|spark|incense|lantern)\b/.test(lower)) cats.push('fire');
+    // Architecture/building detection
+    if (/\b(building|temple|tower|castle|bridge|monument|arch|column|dome|wall|gate|door|window|staircase|structure)\b/.test(lower)) cats.push('architecture');
+    
+    if (cats.length === 0) cats.push('general');
+    return cats;
+}
+
+/** Build category-specific motion instructions */
+function getCategoryMotions(categories: string[]): string {
+    const motions: string[] = [];
+    
+    for (const cat of categories) {
+        switch (cat) {
+            case 'person':
+                motions.push(
+                    'The person breathes naturally with subtle chest rise and fall. ' +
+                    'Eyes blink softly every few seconds with a wet gleam on the iris. ' +
+                    'Head tilts slightly to one side. ' +
+                    'Hair strands drift and sway gently with a light breeze. ' +
+                    'Fingers make a tiny involuntary twitch.'
+                );
+                break;
+            case 'animal':
+                motions.push(
+                    'The animal breathes with visible ribcage expansion. ' +
+                    'Ears flick and rotate attentively. ' +
+                    'Fur ripples in passing breeze. ' +
+                    'Tail sways with slow pendulum motion. ' +
+                    'Eyes track sideways with alert focus.'
+                );
+                break;
+            case 'water':
+                motions.push(
+                    'Water surface ripples expand outward in concentric circles. ' +
+                    'Reflections shimmer and distort with each wavelet. ' +
+                    'Foam edges creep forward and recede rhythmically. ' +
+                    'Light dances across the water surface in moving sparkles.'
+                );
+                break;
+            case 'plant':
+                motions.push(
+                    'Leaves rustle and turn showing lighter undersides. ' +
+                    'Branches bob gently up and down in breeze. ' +
+                    'Flower petals tremble with microscopic vibrations. ' +
+                    'Grass blades bend in rolling wave patterns across the field.'
+                );
+                break;
+            case 'sky':
+                motions.push(
+                    'Clouds drift slowly across the sky, edges morphing and dissolving. ' +
+                    'Light rays shift angle gradually, shadows rotate on the ground. ' +
+                    'Atmospheric haze pulses subtly with warm air thermals.'
+                );
+                break;
+            case 'fabric':
+                motions.push(
+                    'Fabric billows outward in a gentle gust then settles back. ' +
+                    'Hem ripples propagate from left to right like a slow wave. ' +
+                    'Folds shift and crease patterns change with the movement. ' +
+                    'Loose threads and edges flutter continuously.'
+                );
+                break;
+            case 'fire':
+                motions.push(
+                    'Flames dance and flicker with chaotic organic motion. ' +
+                    'Embers drift upward in spiraling paths. ' +
+                    'Smoke curls and billows, thinning as it rises. ' +
+                    'Warm light pulses and casts shifting shadows on all surfaces.'
+                );
+                break;
+            case 'architecture':
+                motions.push(
+                    'Light rays sweep slowly across stone surfaces. ' +
+                    'Shadows crawl and lengthen as time passes. ' +
+                    'Dust particles drift through shafts of light. ' +
+                    'Atmospheric haze swirls gently around the structure.'
+                );
+                break;
+            default:
+                motions.push(
+                    'All elements exhibit subtle natural motion. ' +
+                    'Light shifts across surfaces, shadows rotate slowly. ' +
+                    'Dust motes drift through visible light beams. ' +
+                    'Ambient atmospheric particles swirl gently.'
+                );
+        }
+    }
+    return motions.join(' ');
+}
+
+async function buildKlingPrompt(caption: string, narration: string): Promise<string> {
+    if (!caption) return buildFallbackPrompt(caption, narration);
+
+    // Detect element categories from the caption for targeted motion instructions
+    const categories = detectCategories(caption);
+    const categoryList = categories.join(', ');
+    
+    const prompt = `You are a Kling 2.5 Turbo motion prompt engineer. An image is being converted to a 5-second video clip. The AI model ALREADY SEES the image perfectly — you must describe ONLY what MOVES and HOW.
+
+## ABSOLUTE RULES (violating these produces Ken Burns pan/zoom instead of real animation)
+1. NEVER describe what is in the image. The model sees it. Describing it causes static output.
+2. EVERY sentence must start with a KINETIC VERB: breathes, blinks, sways, ripples, drifts, flickers, trembles, billows, pulses, twitches, rustles, crackles, flows, bounces, shimmers, curls
+3. Describe SMALL, REALISTIC motions — not epic events. A slight head turn, not an earthquake.
+4. Camera is COMPLETELY STATIONARY on a locked tripod. Zero camera movement.
+5. NEVER mention: text, words, writing, titles, captions, labels, overlays
+
+## MOTION INTENSITY GUIDE
+- People: subtle breathing, slow eye blinks, micro-expressions, hair drifting
+- Animals: ear flicks, fur rippling, tail sway, breathing
+- Water: ripples expanding, reflections shimmering, foam advancing
+- Plants: leaves turning, branches bobbing, petals trembling, grass waving  
+- Sky: clouds drifting, light rays shifting angle, haze pulsing
+- Fabric: billowing in breeze, hem rippling, folds shifting
+- Fire: flames dancing, embers rising, smoke curling
+- Architecture: shadows crawling, light sweeping across stone, dust drifting
+
+## DETECTED CATEGORIES: ${categoryList}
+
+## OUTPUT FORMAT
+Write 60-90 words of PURE MOTION COMMANDS. Present tense, active voice.
+Start with the most prominent moving element.
+End with: "Stationary camera, locked tripod, zero camera movement."
+
+IMAGE ANALYSIS:
+${caption.slice(0, 800)}
+
+Write kinetic motion commands NOW — ACTIONS ONLY, absolutely no scene description:`;
+
+    try {
+        let refined = await groq.text(
+            'You are a Kling 2.5 Turbo motion prompt engineer. Output ONLY motion commands, no explanation.',
+            prompt,
+            { temperature: 0.6, maxTokens: 300 }
+        );
+        if (!refined || refined.length < 30) return buildFallbackPrompt(caption, narration);
+
+        // Strip any scene-description phrases the model might have included
+        refined = refined
+            .replace(/\b(text|title|caption|subtitle|label|watermark|logo|word|letter|overlay|heading|banner|sign|writing|inscription|credit|quote|annotation|typography|font)[\w]*\b/gi, '')
+            .replace(/\b(the image shows?|in the image|we can see|there is|there are|the scene depicts?|the photo shows?|this is a?|it shows?)\b/gi, '')
+            .replace(/\b(a (photo|picture|image|painting|illustration|render) of)\b/gi, '')
+            .replace(/\s+/g, ' ').trim();
+
+        // Ensure stationary camera instruction is present
+        if (!/(stationary|locked|fixed|tripod|zero camera|no camera)/i.test(refined)) {
+            refined = refined.replace(/\.?\s*$/, '. Stationary camera, locked tripod, zero camera movement.');
+        }
+
+        const result = (refined + ANTI_TEXT_SUFFIX).slice(0, 800);
+        console.log(`\u2705 [img-to-video] Kling prompt (${categories.join('+')}, ${result.length} chars): "${result.slice(0, 150)}..."`);
+        return result;
+    } catch {
+        return buildFallbackPrompt(caption, narration);
+    }
+}
+
+function buildFallbackPrompt(caption: string, _narration: string): string {
+    // Detect categories from whatever caption we have for targeted motion
+    const categories = caption ? detectCategories(caption) : ['general'];
+    const categoryMotions = getCategoryMotions(categories);
+
+    // Build a prompt using detected-category-specific motions, not generic wind storms.
+    // The key insight: small realistic motions >> dramatic epic motions for Kling img2vid.
+    const result = (
+        categoryMotions + ' ' +
+        'Ambient dust particles drift through visible light beams. ' +
+        'Subtle atmospheric shimmer across all surfaces. ' +
+        'Stationary camera, locked tripod, zero camera movement' +
+        ANTI_TEXT_SUFFIX
+    ).trim().slice(0, 800);
+    
+    console.log(`\u2705 [img-to-video] Fallback prompt (${categories.join('+')}, ${result.length} chars)`);
+    return result;
+}
+
+// ─── Leonardo / Kling helpers ────────────────────────────────────────────────
+async function uploadImageToLeonardo(imageUrl: string, apiKey: string): Promise<string> {
+    const imageRes = await fetch(imageUrl);
+    if (!imageRes.ok) throw new Error(`Failed to download image: ${imageRes.status}`);
+    const imageBuffer = await imageRes.arrayBuffer();
+    const contentType = imageRes.headers.get("content-type") || "image/jpeg";
+    const ext = contentType.includes("webp") ? "webp"
+              : contentType.includes("jpeg") || contentType.includes("jpg") ? "jpg"
+              : "png";
+
+    const initRes = await fetch(INIT_IMAGE_ENDPOINT, {
+        method: "POST",
+        headers: { accept: "application/json", authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
+        body: JSON.stringify({ extension: ext }),
+    });
+    if (!initRes.ok) throw new Error(`Leonardo init-image failed (${initRes.status}): ${await initRes.text()}`);
+    const initData  = await initRes.json();
+    const uploadUrl = initData?.uploadInitImage?.url;
+    const imageId   = initData?.uploadInitImage?.id;
+    const fields    = initData?.uploadInitImage?.fields ? JSON.parse(initData.uploadInitImage.fields) : null;
+    if (!uploadUrl || !imageId) throw new Error(`Missing url/id from init-image: ${JSON.stringify(initData).slice(0, 200)}`);
+
+    if (fields) {
+        const form = new FormData();
+        for (const [k, v] of Object.entries(fields)) form.append(k, v as string);
+        form.append("file", new Blob([imageBuffer], { type: contentType }), `upload.${ext}`);
+        const uploadRes = await fetch(uploadUrl, { method: "POST", body: form });
+        if (!uploadRes.ok && uploadRes.status !== 204) throw new Error(`Image upload failed (${uploadRes.status}): ${await uploadRes.text()}`);
+    } else {
+        const uploadRes = await fetch(uploadUrl, { method: "PUT", headers: { "Content-Type": contentType }, body: imageBuffer });
+        if (!uploadRes.ok && uploadRes.status !== 200) throw new Error(`Image upload PUT failed (${uploadRes.status}): ${await uploadRes.text()}`);
+    }
+    return imageId;
+}
+
+// ── submitImg2VidJob — ONLY uses API-documented parameters ──────────────────
+// Per Leonardo API docs, Kling 2.5 Turbo image-to-video accepts ONLY:
+//   prompt, imageId, imageType, resolution, height, width, duration, model, isPublic, endFrameImage
+// negativePrompt, motionStrength, frameInterpolation → silently IGNORED by the API!
+async function submitImg2VidJob(
+    imageId: string, prompt: string, duration: 5 | 10,
+    apiKey: string, forceShorts = true
+): Promise<string> {
+    // Final prompt sanitization
+    let finalPrompt = prompt
+        .replace(/\b(text|title|caption|subtitle|label|watermark|logo|word|letter|overlay|heading|banner|sign|writing|inscription|credit|quote|annotation|typography|font)[\w]*\b/gi, '')
+        .replace(/\b(the image shows?|in the image|we can see|there is|there are|the scene depicts?|the photo shows?|a photo of|an image of|a picture of)\b/gi, '')
+        .replace(/\s+/g, ' ').trim().slice(0, 1200);
+
+    // Ensure anti-text + stationary camera suffix
+    if (!finalPrompt.includes('no text') && !finalPrompt.includes('No text')) {
+        finalPrompt += ANTI_TEXT_SUFFIX;
+    }
+    if (!/(stationary|locked|tripod|zero camera|no camera)/i.test(finalPrompt)) {
+        finalPrompt += ' Stationary camera, locked tripod.';
+    }
+
+    // Try portrait first for Shorts; fall back to landscape if the API rejects it
+    const candidates = forceShorts
+        ? [
+            { width: 1080, height: 1920, label: "9:16 portrait (Shorts)" },
+            { width: 1920, height: 1080, label: "16:9 landscape (fallback)" },
+          ]
+        : [
+            { width: 1920, height: 1080, label: "16:9 landscape" },
+          ];
+
+    let lastError = "";
+    for (const dims of candidates) {
+        // ONLY send parameters documented in Leonardo API
+        const body = JSON.stringify({
+            prompt: finalPrompt,
+            imageId, imageType: "UPLOADED",
+            resolution: "RESOLUTION_1080",
+            width: dims.width, height: dims.height,
+            duration, model: KLING_MODEL,
+            isPublic: false,
+        });
+        console.log(`📐 [img-to-video] Trying ${dims.label} (${dims.width}×${dims.height}), prompt=${finalPrompt.length} chars...`);
+        const res = await fetch(IMAGE_TO_VIDEO_ENDPOINT, {
+            method: "POST",
+            headers: { accept: "application/json", authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
+            body,
+        });
+        if (!res.ok) {
+            const errText = await res.text();
+            lastError = `Kling img2vid submit failed (${res.status}): ${errText}`;
+            console.warn(`⚠️ [img-to-video] ${dims.label} rejected: ${errText.slice(0, 150)}`);
+            continue;
+        }
+        const data = await res.json();
+        const generationId =
+            data?.motionVideoGenerationJob?.generationId ||
+            data?.sdGenerationJob?.generationId ||
+            data?.generationId;
+        if (!generationId) throw new Error(`Missing generationId from Kling: ${JSON.stringify(data).slice(0, 300)}`);
+        console.log(`✅ [img-to-video] Accepted ${dims.label}, generationId=${generationId}`);
+        return generationId;
+    }
+    throw new Error(lastError || "All Kling resolution candidates failed");
+}
+
+async function pollKling(generationId: string, apiKey: string): Promise<string> {
+    const MAX = 80;
+    for (let i = 0; i < MAX; i++) {
+        const delay = i < 3 ? 5000 : i < 8 ? 8000 : i < 18 ? 12000 : 15000;
+        await new Promise(r => setTimeout(r, delay));
+        const res = await fetch(`${POLL_ENDPOINT}/${generationId}`, {
+            headers: { accept: "application/json", authorization: `Bearer ${apiKey}` },
+        });
+        if (res.status === 429) { await new Promise(r => setTimeout(r, 10000)); continue; }
+        if (res.status === 404 && i < 10) { continue; }
+        if (!res.ok) throw new Error(`Kling poll failed (${res.status}): ${await res.text()}`);
+        const data = await res.json();
+        const gen  = data?.generations_by_pk;
+        if (gen?.status === "COMPLETE") {
+            const videos = gen?.generated_images?.filter((img: any) => img.motionMP4URL);
+            if (videos?.length > 0) return videos[0].motionMP4URL;
+            const images = gen?.generated_images;
+            if (images?.length > 0) return images[0].motionMP4URL || images[0].url;
+            throw new Error("Kling COMPLETE but no video URL found");
+        }
+        if (gen?.status === "FAILED") throw new Error(`Kling job FAILED: ${JSON.stringify(data).slice(0, 300)}`);
+    }
+    throw new Error(`Kling img2vid timed out after ${MAX} polls`);
+}
+
+async function uploadVideoToAppwrite(klingVideoUrl: string, sceneIndex: number): Promise<{ finalUrl: string; isKlingFallback: boolean }> {
+    let buffer: Buffer | null = null;
+    try {
+        const res = await fetch(klingVideoUrl);
+        if (res.ok) buffer = Buffer.from(await res.arrayBuffer());
+    } catch (e) {
+        console.warn("[img-to-video] Could not download Kling video:", e);
+    }
+    if (!buffer) return { finalUrl: klingVideoUrl, isKlingFallback: true };
+    try {
+        const pathname = `studio/img2vid/scene${sceneIndex}_${Date.now()}.mp4`;
+        const result   = await putWithRotation(pathname, buffer, { access: "public", contentType: "video/mp4" });
+        console.log(`✅ [img-to-video] Uploaded: ${result.url.slice(0, 80)}`);
+        return { finalUrl: result.url, isKlingFallback: false };
+    } catch (e: any) {
+        console.warn(`[img-to-video] Upload failed: ${e.message?.slice(0, 100)}`);
+        return { finalUrl: klingVideoUrl, isKlingFallback: true };
+    }
+}
+
+export async function processImgToVideo({ 
+    imageUrl, 
+    sceneNarration = "", 
+    sceneIndex = 0, 
+    duration = 5, 
+    forceShorts = true 
+}: { 
+    imageUrl: string; 
+    sceneNarration?: string; 
+    sceneIndex?: number; 
+    duration?: number; 
+    forceShorts?: boolean 
+}) {
+    if (!imageUrl) throw new Error("imageUrl is required");
+
+    const validDuration: 5 | 10 = duration >= 8 ? 10 : 5;
+    const keys = getLeonardoKeys();
+    if (keys.length === 0) throw new Error("No Leonardo API keys configured");
+
+    console.log(`📱 [img-to-video] Format: ${forceShorts ? "SHORTS (9:16 portrait)" : "LANDSCAPE (16:9)"}`);
+
+    // ── Step 1: Download the image for captioning ──────────────────────────
+    let imgBuf: Buffer | null = null;
+    let contentType = "image/jpeg";
+    try {
+        const imgRes = await fetch(imageUrl, { signal: AbortSignal.timeout(60000) });
+        if (imgRes.ok) {
+            imgBuf      = Buffer.from(await imgRes.arrayBuffer());
+            contentType = imgRes.headers.get("content-type") || "image/jpeg";
+            // Normalise content-type
+            if (!contentType.startsWith("image/")) contentType = "image/jpeg";
+        }
+    } catch (e) {
+        console.warn("[img-to-video] Could not download image for captioning:", e);
+    }
+
+    // ── Step 2: Caption the image — Groq Vision first (fast), fallback Sarvam ──
+    let caption = "";
+    try {
+        console.log("🔍 [img-to-video] Step 1: Groq Vision captioning...");
+        caption = await captionWithGroq(imageUrl);
+    } catch (groqErr: any) {
+        console.warn(`⚠️ [img-to-video] Groq vision failed (${groqErr.message?.slice(0, 80)}), trying Sarvam...`);
+        if (imgBuf) {
+            try {
+                caption = await captionWithSarvam(imgBuf, contentType);
+            } catch (sarvamErr: any) {
+                console.warn(`⚠️ [img-to-video] Sarvam also failed: ${sarvamErr.message?.slice(0, 80)}`);
+            }
+        }
+    }
+
+    // ── Step 3: Groq refines caption → Kling subject-preserving, anti-zoom prompt ──
+    console.log("✍️ [img-to-video] Step 2: Building Kling anti-zoom motion prompt...");
+    const klingPrompt = await buildKlingPrompt(caption, sceneNarration);
+    console.log(`📝 [img-to-video] Final Kling prompt: "${klingPrompt.slice(0, 120)}..."`);
+
+    // ── Step 4: Kling animation ────────────────────────────────────────────
+    let klingVideoUrl = "";
+    let lastErr       = "";
+
+    for (const apiKey of keys) {
+        try {
+            console.log(`🎬 [img-to-video] Uploading image to Leonardo (key: ...${apiKey.slice(-6)})...`);
+            const imageId = await uploadImageToLeonardo(imageUrl, apiKey);
+
+            console.log(`🚀 [img-to-video] Submitting Kling job (${validDuration}s, shorts=${forceShorts})...`);
+            const generationId = await submitImg2VidJob(imageId, klingPrompt, validDuration, apiKey, forceShorts);
+
+            console.log(`⏳ [img-to-video] Polling Kling job ${generationId}...`);
+            klingVideoUrl = await pollKling(generationId, apiKey);
+
+            console.log(`🎥 [img-to-video] Kling completed: ${klingVideoUrl.slice(0, 80)}`);
+            break;
+        } catch (e: any) {
+            lastErr = e.message;
+            console.warn(`⚠️ [img-to-video] Key attempt failed: ${e.message?.slice(0, 120)}`);
+        }
+    }
+
+    if (!klingVideoUrl) {
+        throw new Error(`img-to-video failed: ${lastErr}`);
+    }
+
+    // ── Step 5: Upload to Appwrite ─────────────────────────────────────────
+    console.log(`📦 [img-to-video] Uploading to Appwrite...`);
+    const { finalUrl, isKlingFallback } = await uploadVideoToAppwrite(klingVideoUrl, sceneIndex);
+
+    return {
+        ok: true, 
+        videoUrl: finalUrl,
+        durationSec: validDuration, 
+        isKlingFallback,
+        isShorts: !!forceShorts,
+    };
+}
+
+// ─── POST /api/studio/img-to-video ───────────────────────────────────────────
+export async function POST(req: NextRequest) {
+    try {
+        const body = await req.json();
+        const result = await processImgToVideo(body);
+        return NextResponse.json(result);
+    } catch (err: any) {
+        console.error("studio/img-to-video error:", err);
+        return NextResponse.json({ error: err.message }, { status: err.message.includes('required') ? 400 : 500 });
+    }
+}

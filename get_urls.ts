@@ -1,0 +1,1 @@
+import { db } from './config/db'; import { shortVideoAssets } from './config/schema'; import { eq } from 'drizzle-orm'; db.select().from(shortVideoAssets).where(eq(shortVideoAssets.videoId, 'vid_1775291323116_xuhq5p')).then(res =, null, 2)))  
