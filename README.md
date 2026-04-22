@@ -101,35 +101,31 @@ Full creative control — you're the director, the platform is your crew.
 
 ## 🏗️ Architecture
 
-```
-┌──────────────────────────────────────────────────────────────────────────┐
-│                        🖥️  Frontend (Next.js 16 App Router)             │
-│                                                                          │
-│   ┌────────────┐  ┌─────────────┐  ┌───────────────┐  ┌────────────┐   │
-│   │  Video     │  │  Short      │  │  Motion       │  │  Migoo     │   │
-│   │  Courses   │  │  Generator  │  │  Graphics     │  │  Studio    │   │
-│   └────────────┘  └─────────────┘  └───────────────┘  └────────────┘   │
-├──────────────────────────────────────────────────────────────────────────┤
-│                     🔒  Middleware Layer                                  │
-│   Clerk Auth Guard · Rate Limiting (60 req/min) · CSRF Protection        │
-├──────────────────────────────────────────────────────────────────────────┤
-│                     🔌  API Layer (17 Route Handlers)                    │
-│   Course CRUD · AI Orchestration · Motion Graphics Chat · Studio         │
-│   Zod Validation · Typed Responses · Security Headers · CORS             │
-├──────────────────────────────────────────────────────────────────────────┤
-│                     ⚡  Background Jobs (Inngest)                        │
-│   Short Video Pipeline · Motion Graphic Render Pipeline                  │
-├──────────────────────────────────────────────────────────────────────────┤
-│                     🗄️  Data & External Services                        │
-│                                                                          │
-│   ┌──────────┐  ┌───────────┐  ┌──────────┐  ┌─────────────────┐       │
-│   │ Neon DB  │  │  Vercel   │  │  Sarvam  │  │   Gemini /      │       │
-│   │ Postgres │  │  Blob     │  │  TTS/STT │  │   OpenRouter    │       │
-│   └──────────┘  └───────────┘  └──────────┘  └─────────────────┘       │
-│   ┌──────────────┐  ┌────────────────────────────────────────────┐      │
-│   │  Leonardo AI │  │  Remotion (Server-Side Video Rendering)    │      │
-│   └──────────────┘  └────────────────────────────────────────────┘      │
-└──────────────────────────────────────────────────────────────────────────┘
+```text
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                        🖥️  FRONTEND (Next.js 16 App Router)                  │
+│                                                                              │
+│   ┌──────────────┐   ┌──────────────┐   ┌──────────────┐   ┌──────────────┐  │
+│   │ Video Course │   │ Short Video  │   │ Motion Graph │   │ Migoo Studio │  │
+│   │ Generator    │   │ Generator    │   │ Generator    │   │ Director Seat│  │
+│   └──────────────┘   └──────────────┘   └──────────────┘   └──────────────┘  │
+├──────────────────────────────────────────────────────────────────────────────┤
+│                         🔒  AUTHENTICATION & SECURITY                         │
+│       Clerk Auth Guard  ·  IP-Based Rate Limiting  ·  CSRF Validation        │
+├──────────────────────────────────────────────────────────────────────────────┤
+│                         🔌  API ORCHESTRATION LAYER                          │
+│     17+ Route Handlers · Zod Validation · Drizzle ORM · AI Fallbacks         │
+├──────────────────────────────────────────────────────────────────────────────┤
+│                         ⚡  BACKGROUND WORKER PIPELINE                       │
+│      Inngest Durable Workflows · Remotion Server-Side Video Rendering        │
+├──────────────────────────────────────────────────────────────────────────────┤
+│                         🗄️  DATA & EXTERNAL SERVICES                          │
+│                                                                              │
+│   ┌───────────┐   ┌───────────┐   ┌───────────┐   ┌───────────┐   ┌────────┐ │
+│   │  Neon DB  │   │ Appwrite  │   │ Sarvam AI │   │ Gemini /  │   │Leonardo│ │
+│   │  Postgres │   │  Storage  │   │  TTS/STT  │   │ OpenRouter│   │   AI   │ │
+│   └───────────┘   └───────────┘   └───────────┘   └───────────┘   └────────┘ │
+└──────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -164,7 +160,7 @@ Full creative control — you're the director, the platform is your crew.
 <tr><td><b>Text-to-Speech</b></td><td>Sarvam AI, ElevenLabs</td><td>Multi-language narration</td></tr>
 <tr><td><b>Image Generation</b></td><td>Leonardo AI</td><td>Cinematic AI visuals</td></tr>
 <tr><td><b>Video Rendering</b></td><td>Remotion</td><td>Programmatic video composition</td></tr>
-<tr><td><b>Storage</b></td><td>Vercel Blob</td><td>Audio/image/video asset storage</td></tr>
+<tr><td><b>Storage</b></td><td>Appwrite Storage</td><td>Audio/image/video asset storage with multi-config rotation</td></tr>
 <tr><td><b>Background Jobs</b></td><td>Inngest</td><td>Durable, step-based async workflows</td></tr>
 <tr><td><b>Validation</b></td><td>Zod</td><td>Runtime schema validation</td></tr>
 <tr><td><b>Testing</b></td><td>Vitest</td><td>Fast unit & integration tests</td></tr>
@@ -180,7 +176,7 @@ Full creative control — you're the director, the platform is your crew.
 
 - **Node.js** 18+ (recommended: 20 LTS)
 - **npm** (included with Node.js)
-- Accounts: [Clerk](https://clerk.dev), [Neon](https://neon.tech), [Sarvam AI](https://sarvam.ai), [OpenRouter](https://openrouter.ai)
+- Accounts: [Clerk](https://clerk.dev), [Neon](https://neon.tech), [Sarvam AI](https://sarvam.ai), [OpenRouter](https://openrouter.ai), [Appwrite](https://appwrite.io), [Leonardo AI](https://leonardo.ai)
 
 ### Installation
 
@@ -215,13 +211,18 @@ The app will be available at `http://localhost:3000`.
 | `OPENROUTER_API_KEY` | ✅ | OpenRouter API key for LLM access |
 | `GEMINI_API_KEY` | ✅ | Google Gemini API key |
 | `SARVAM_API_KEY` | ✅ | Sarvam AI key for TTS/STT |
-| `BLOB_READ_WRITE_TOKEN` | ✅ | Vercel Blob storage token |
+| `APPWRITE_ENDPOINT` | ✅ | Appwrite Storage endpoint URL |
+| `APPWRITE_PROJECT_ID` | ✅ | Appwrite project ID |
+| `APPWRITE_API_KEY` | ✅ | Appwrite server API key |
+| `APPWRITE_BUCKET_ID` | ✅ | Appwrite storage bucket ID |
 | `LEONARDO_API_KEY` | ✅ | Leonardo AI image generation |
 | `INNGEST_SIGNING_KEY` | ✅ | Inngest webhook signing key |
 
 ---
 
 ## 🗄️ Database Schema
+
+Migoo uses **8 tables** managed by Drizzle ORM:
 
 ```
 ┌──────────────┐       ┌──────────────────┐       ┌──────────────────────┐
@@ -233,9 +234,14 @@ The app will be available at `http://localhost:3000`.
        │                                   │  course_images   │
        │                                   └──────────────────┘
        │
-       └──────1:N──┌──────────────────┐       ┌──────────────────┐
-                   │ short_video_series│──1:N──│ short_video_assets│
-                   └──────────────────┘       └──────────────────┘
+       ├──────1:N──┌──────────────────┐       ┌──────────────────┐
+       │           │ short_video_series│──1:N──│ short_video_assets│
+       │           └──────────────────┘       └──────────────────┘
+       │
+       └──────1:N──┌─────────────────────────┐       ┌─────────────────────────┐
+                   │ motion_graphic_projects  │──1:N──│ motion_graphic_messages  │
+                   │ (scenes+theme+video)     │       │ (AI chat history)        │
+                   └─────────────────────────┘       └─────────────────────────┘
 ```
 
 ### Database Commands
