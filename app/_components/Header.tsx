@@ -9,8 +9,8 @@ function Header() {
     const { isSignedIn, isLoaded } = useUser();
     const pathname = usePathname();
 
-    // Hide header on auth pages and motion-graphics project pages (they have their own top bar)
-    if (pathname === '/sign-in' || pathname === '/sign-up' || /^\/motion-graphics\/[^/]+/.test(pathname)) {
+    // Hide header on auth pages, motion-graphics project pages, and note viewer pages (they have their own top bar)
+    if (pathname === '/sign-in' || pathname === '/sign-up' || /^\/motion-graphics\/[^/]+/.test(pathname) || /^\/notes\/[^/]+/.test(pathname)) {
         return null;
     }
 

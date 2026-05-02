@@ -395,8 +395,7 @@ function mergeWavBuffers(buffers: Buffer[]): Buffer {
 // ─── Inngest functions ───────────────────────────────────────────────────────
 
 export const helloWorld = inngest.createFunction(
-    { id: "hello-world" },
-    { event: "test/hello.world" },
+    { id: "hello-world", triggers: [{ event: "test/hello.world" }] },
     async ({ event, step }) => {
         await step.sleep("wait-a-moment", "1s");
         return { message: `Hello ${event.data.email}!` };
@@ -413,6 +412,7 @@ async function updateSeriesStatus(seriesId: string, status: string) {
 export const generateShortVideo = inngest.createFunction(
     {
         id: "generate-short-video",
+        triggers: [{ event: "shorts/generate.video" }],
         cancelOn: [
             {
                 event: "shorts/generate.cancel",
@@ -438,7 +438,6 @@ export const generateShortVideo = inngest.createFunction(
             }
         }
     },
-    { event: "shorts/generate.video" },
     async ({ event, step }) => {
         const { seriesId, customTopic, studioPayload } = event.data;
         // studioPayload = { scriptData, sceneAssets[], captionStyle, voice, music, contextMarkdown }
@@ -1660,6 +1659,7 @@ async function updateMotionGraphicStatus(projectId: string, status: string) {
 export const generateMotionGraphic = inngest.createFunction(
     {
         id: "generate-motion-graphic",
+        triggers: [{ event: "motion-graphics/generate.video" }],
         cancelOn: [
             {
                 event: "motion-graphics/generate.cancel",
@@ -1674,7 +1674,6 @@ export const generateMotionGraphic = inngest.createFunction(
             }
         }
     },
-    { event: "motion-graphics/generate.video" },
     async ({ event, step }) => {
         const { projectId } = event.data;
         const { motionGraphicProjects, motionGraphicMessages } = require("@/config/schema");

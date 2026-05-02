@@ -1,16 +1,17 @@
 "use client"
 import { useUser } from '@clerk/nextjs'
-import Image from 'next/image'
 import {
     ChevronLeft,
     ChevronRight,
     Clapperboard,
+    GraduationCap,
     Menu,
     Sparkles,
     Video,
     Wand2,
     X,
 } from 'lucide-react'
+import Image from 'next/image'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useEffect, useState } from 'react'
@@ -50,6 +51,13 @@ const navItems: NavItem[] = [
         description: "Director's Chair",
         badge: '⚡',
     },
+    {
+        label: 'Notes Generator',
+        href: '/notes',
+        icon: <GraduationCap className="w-5 h-5" />,
+        description: 'AI-powered study notes',
+        badge: '🆕',
+    },
 ]
 
 function AppSidebar() {
@@ -75,14 +83,16 @@ function AppSidebar() {
     }
 
     const isMotionProjectPage = /^\/motion-graphics\/[^/]+/.test(pathname)
+    const isNoteViewerPage = /^\/notes\/[^/]+/.test(pathname)
+    const showSidebarLogo = isMotionProjectPage || isNoteViewerPage
 
     const sidebarContent = (
         <div className="flex flex-col h-full">
-            {/* Migoo Logo — only shown on motion-graphics project pages (global header is hidden there) */}
-            {isMotionProjectPage && (
+            {/* Migoo Logo — shown when global header is hidden (motion-graphics & note viewer pages) */}
+            {showSidebarLogo && (
                 <div className={`flex items-center ${collapsed ? 'justify-center px-2' : 'justify-start px-4'} py-3 border-b border-border/60`}>
                     <Link href="/">
-                        <Image src="/logo.png" alt="Migoo" width={collapsed ? 32 : 80} height={collapsed ? 32 : 40} className="object-contain" />
+                        <Image src="/logo.png" alt="Migoo" width={collapsed ? 32 : 90} height={collapsed ? 32 : 90} className="object-contain" />
                     </Link>
                 </div>
             )}
