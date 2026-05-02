@@ -181,3 +181,40 @@ export const motionGraphicMessages = pgTable("motion_graphic_messages", {
 
     createdAt: timestamp("created_at").defaultNow(),
 })
+
+// ── Notes Generator Projects ────────────────────────────────
+export const notesProjects = pgTable("notes_projects", {
+    id: integer().primaryKey().generatedAlwaysAsIdentity(),
+    noteId: varchar({ length: 255 }).notNull().unique(),
+    userId: varchar({ length: 255 }).notNull().references(() => usersTable.email),
+
+    // User input
+    title: varchar({ length: 500 }).notNull(),
+    sourceType: varchar("source_type", { length: 50 }).notNull(),  // 'text' | 'document' | 'topic' | 'url'
+    sourceContent: text("source_content"),          // Raw user input text
+    extractedContent: text("extracted_content"),     // After vision/parsing
+
+    // Uploaded assets (images, charts, stats) — stored as JSON array of { url, description, type }
+    uploadedAssets: json("uploaded_assets"),
+
+    // Style & design
+    noteStyle: varchar("note_style", { length: 50 }).notNull().default("cornell"),
+    // 'cornell' | 'mindmap' | 'flashcard' | 'infographic' | 'cheatsheet' | 'timeline'
+    pageDesign: varchar("page_design", { length: 50 }).notNull().default("botanical"),
+    // 'botanical' | 'abstractPastel' | 'geoPebbles' | 'elegantLeaf'
+
+    // Generated output
+    generatedData: json("generated_data"),          // Structured JSON (sections, cards, etc.)
+    generatedHtml: text("generated_html"),           // Rendered HTML string
+
+    // Export
+    exportUrl: text("export_url"),                   // PNG/PDF URL after export
+    thumbnailUrl: text("thumbnail_url"),
+
+    // Status
+    status: varchar({ length: 50 }).default("draft"),
+    // draft | generating | completed | failed
+
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+})

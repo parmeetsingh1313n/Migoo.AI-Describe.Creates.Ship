@@ -851,3 +851,217 @@ export async function generateNanoBananaImagesParallel(
 
     return results;
 }
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// GPT IMAGE-1.5 — with User Image Reference Support
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Upload an image (by URL or Buffer) to Leonardo's init-image endpoint.
+ * Returns the Leonardo image ID to use in guidances.image_reference.
+ *
+ * Always converts to JPEG ≤1024px to stay within S3 pre-data limits.
+ */
+export async function uploadImageToLeonardo(
+    imageUrl: string,
+    apiKey: string
+): Promise<string> {
+    // Step 1: Get upload presigned URL from Leonardo
+    const initRes = await fetch("https://cloud.leonardo.ai/api/rest/v1/init-image", {
+        method: "POST",
+        headers: {
+            "accept": "application/json",
+            "authorization": `Bearer ${apiKey}`,
+            "content-type": "application/json",
+        },
+        body: JSON.stringify({ extension: "jpg" }),
+    });
+    if (!initRes.ok) {
+        throw new Error(`Leonardo init-image failed (${initRes.status}): ${await initRes.text()}`);
+    }
+    const initData = await initRes.json();
+    const uploadUrl: string = initData?.uploadInitImage?.url;
+    const imageId: string = initData?.uploadInitImage?.id;
+
+    // Fields can be a string (JSON) or object
+    let fields: Record<string, string> = {};
+    const rawFields = initData?.uploadInitImage?.fields;
+    if (typeof rawFields === "string") {
+        try { fields = JSON.parse(rawFields); } catch { fields = {}; }
+    } else if (rawFields && typeof rawFields === "object") {
+        fields = rawFields;
+    }
+
+    if (!uploadUrl || !imageId) {
+        throw new Error(`Leonardo init-image missing url/id: ${JSON.stringify(initData)}`);
+    }
+
+    // Step 2: Fetch the image
+    const imgRes = await fetch(imageUrl);
+    if (!imgRes.ok) throw new Error(`Failed to fetch image for upload: ${imgRes.status}`);
+    const imageBuffer = await imgRes.arrayBuffer();
+
+    // Step 3: ALWAYS convert to small JPEG (≤1024px, 80% quality) via sharp
+    // This ensures compatibility and keeps payload small
+    const sharp = (await import("sharp")).default;
+    const uploadBuffer = await sharp(Buffer.from(imageBuffer))
+        .resize(1024, 1024, { fit: "inside", withoutEnlargement: true })
+        .jpeg({ quality: 80 })
+        .toBuffer();
+
+    console.log(`📦 Image prepared for Leonardo upload: ${(uploadBuffer.length / 1024).toFixed(0)}KB`);
+
+    // Step 4: Upload to S3 presigned URL
+    // Only include essential S3 fields to stay under MaxPostPreDataLength (20KB)
+    const essentialFieldNames = [
+        "key", "bucket", "X-Amz-Algorithm", "X-Amz-Credential",
+        "X-Amz-Date", "X-Amz-Security-Token", "Policy", "X-Amz-Signature",
+        "Content-Type", "Content-Disposition", "acl",
+        "x-amz-meta-user_id", "x-amz-meta-team_id",
+        "success_action_status", "success_action_redirect",
+    ];
+
+    const formData = new FormData();
+    for (const [key, value] of Object.entries(fields)) {
+        // Only include known essential fields + any short fields
+        if (essentialFieldNames.some(n => n.toLowerCase() === key.toLowerCase()) || value.length < 200) {
+            formData.append(key, value);
+        }
+    }
+    formData.append("file", new Blob([uploadBuffer], { type: "image/jpeg" }), "image.jpg");
+
+    const uploadRes = await fetch(uploadUrl, {
+        method: "POST",
+        body: formData,
+    });
+    if (!uploadRes.ok && uploadRes.status !== 204) {
+        throw new Error(`S3 upload failed (${uploadRes.status}): ${await uploadRes.text().catch(() => "")}`);
+    }
+
+    console.log(`✅ Image uploaded to Leonardo: id=${imageId}`);
+    return imageId;
+}
+
+/**
+ * Generate images using GPT Image-1.5 with a user reference image.
+ * The user's uploaded image is embedded as image_reference guidance (MID strength).
+ *
+ * @param prompt         - Text prompt describing the image
+ * @param refImageId     - Leonardo image ID (from uploadImageToLeonardo) — pass null to generate without reference
+ * @param quantity       - Number of images to generate (1–4)
+ * @param quality        - "LOW" | "MEDIUM" | "HIGH"
+ * @param width          - 1024 (square) or 1536 (landscape/portrait)
+ * @param height         - 1024 (square) or 1536 (landscape/portrait)
+ */
+export async function generateGptImage15(
+    prompt: string,
+    refImageId: string | null,
+    quantity: number = 1,
+    quality: "LOW" | "MEDIUM" | "HIGH" = "MEDIUM",
+    width: number = 1024,
+    height: number = 1024,
+): Promise<string[]> {
+    const allKeys = getKeys();
+    if (allKeys.length === 0) throw new Error("No LEONARDO_API_KEY found");
+
+    const shuffledKeys = [...allKeys].sort(() => Math.random() - 0.5);
+    const errors: string[] = [];
+
+    const parameters: Record<string, any> = {
+        prompt,
+        quantity: Math.min(quantity, 4),
+        width,
+        height,
+        quality,
+        prompt_enhance: "OFF",
+    };
+
+    // Attach user image as reference if provided
+    if (refImageId) {
+        parameters.guidances = {
+            image_reference: [{
+                image: { id: refImageId, type: "UPLOADED" },
+                strength: "MID",
+            }],
+        };
+    }
+
+    let generationId: string | null = null;
+    let usedApiKey: string | null = null;
+
+    for (const apiKey of shuffledKeys) {
+        const keyLabel = `Key #${allKeys.indexOf(apiKey) + 1}`;
+        try {
+            console.log(`⏳ GPT Image-1.5: submitting (${keyLabel}, qty=${quantity}, quality=${quality})...`);
+            const response = await fetch("https://cloud.leonardo.ai/api/rest/v2/generations", {
+                method: "POST",
+                headers: {
+                    "accept": "application/json",
+                    "authorization": `Bearer ${apiKey}`,
+                    "content-type": "application/json",
+                },
+                body: JSON.stringify({
+                    model: "gpt-image-1.5",
+                    parameters,
+                    public: false,
+                }),
+            });
+
+            if (response.status === 429) {
+                errors.push(`${keyLabel}: Rate limited`);
+                continue;
+            }
+            if (!response.ok) {
+                const text = await response.text();
+                errors.push(`${keyLabel}: ${response.status} - ${text}`);
+                continue;
+            }
+
+            const result = await response.json();
+            console.log(`📦 GPT Image-1.5 raw response: ${JSON.stringify(result).substring(0, 300)}`);
+
+            generationId =
+                result?.generate?.generationId ||
+                result?.data?.generationId ||
+                result?.generationId ||
+                result?.sdGenerationJob?.generationId ||
+                result?.id;
+
+            if (!generationId) {
+                errors.push(`${keyLabel}: missing generationId`);
+                continue;
+            }
+
+            usedApiKey = apiKey;
+            console.log(`✅ GPT Image-1.5 job submitted! ${keyLabel}, id: ${generationId}`);
+            break;
+        } catch (e: any) {
+            errors.push(`${keyLabel}: ${e.message}`);
+        }
+    }
+
+    if (!generationId || !usedApiKey) {
+        throw new Error(`GPT Image-1.5: all keys failed:\n${errors.join("\n")}`);
+    }
+
+    // Poll for result
+    const firstImageUrl = await pollLeonardoJob(generationId, usedApiKey, 150);
+    console.log(`✅ GPT Image-1.5 image ready!`);
+
+    // Fetch all generated images (not just the first)
+    // Poll gives us only the first URL — fetch full generation for all images
+    const statusRes = await fetch(
+        `https://cloud.leonardo.ai/api/rest/v1/generations/${generationId}`,
+        { headers: { "accept": "application/json", "authorization": `Bearer ${usedApiKey}` } }
+    );
+    if (statusRes.ok) {
+        const statusData = await statusRes.json();
+        const allImages: string[] = (statusData?.generations_by_pk?.generated_images || [])
+            .map((img: any) => img.url)
+            .filter(Boolean);
+        if (allImages.length > 0) return allImages;
+    }
+
+    return [firstImageUrl];
+}

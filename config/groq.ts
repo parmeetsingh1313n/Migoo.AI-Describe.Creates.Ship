@@ -37,7 +37,8 @@ interface JSONParseStrategy {
  * Enhanced Groq Client for Video Course Generation
  */
 class EnhancedGroqClient {
-    private apiKey: string;
+    private apiKeys: string[];
+    private currentKeyIndex: number = 0;
     private baseURL: string = 'https://api.groq.com/openai/v1';
 
     // Best models for different tasks
@@ -51,11 +52,39 @@ class EnhancedGroqClient {
     };
 
     constructor() {
-        this.apiKey = process.env.GROQ_API_KEY || '';
+        // Support multiple keys: GROQ_API_KEYS (comma-separated) or single GROQ_API_KEY
+        const multiKeys = process.env.GROQ_API_KEYS || '';
+        const singleKey = process.env.GROQ_API_KEY || '';
 
-        if (!this.apiKey) {
-            throw new Error('GROQ_API_KEY is required');
+        if (multiKeys) {
+            this.apiKeys = multiKeys.split(',').map(k => k.trim()).filter(Boolean);
+        } else if (singleKey) {
+            this.apiKeys = [singleKey];
+        } else {
+            throw new Error('GROQ_API_KEY or GROQ_API_KEYS is required');
         }
+
+        console.log(`🔑 Groq: ${this.apiKeys.length} API key(s) loaded`);
+    }
+
+    /** Get the current active API key */
+    private get apiKey(): string {
+        return this.apiKeys[this.currentKeyIndex];
+    }
+
+    /** Rotate to the next API key (round-robin) */
+    rotateKey(): void {
+        if (this.apiKeys.length <= 1) return;
+        const prev = this.currentKeyIndex;
+        this.currentKeyIndex = (this.currentKeyIndex + 1) % this.apiKeys.length;
+        console.log(`🔄 Groq key rotated: ${prev + 1} → ${this.currentKeyIndex + 1} of ${this.apiKeys.length}`);
+    }
+
+    /** Check if an error is a rate limit error */
+    private isRateLimitError(status: number, body: string): boolean {
+        return status === 429 || status === 413 ||
+            body.includes('rate_limit') ||
+            body.includes('tokens per minute');
     }
 
     /**
@@ -463,6 +492,12 @@ class EnhancedGroqClient {
             if (!response.ok) {
                 const errorText = await response.text();
                 console.error('❌ Groq API Error:', errorText);
+
+                // On rate limit, rotate key for next call
+                if (this.isRateLimitError(response.status, errorText)) {
+                    this.rotateKey();
+                }
+
                 throw new Error(`Groq API failed (${response.status}): ${errorText}`);
             }
 
