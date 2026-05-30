@@ -1,13 +1,13 @@
 /**
  * Script Translation Utility
- * Generates scripts in English (where Llama excels) then translates
- * narrations + title to the target language via Groq/Llama.
- * 
- * Translates SCENE BY SCENE to stay within Groq's free-tier TPM limits.
- * Each scene is ~300 tokens — well under the 6,000 TPM limit.
+ * Generates scripts in English then translates narrations + title
+ * to the target language via OpenRouter (openai/gpt-oss-120b:free).
+ *
+ * gpt-oss-120b supports 100+ languages natively — no TPM throttling.
+ * Translates SCENE BY SCENE for reliability and better output quality.
  */
 
-import { groq } from '@/config/groq';
+import { shortsLLM } from '@/lib/shorts-llm';
 
 interface TranslationInput {
     videoTitle: string;
@@ -35,7 +35,7 @@ const LANGUAGE_NAMES: Record<string, string> = {
 
 /**
  * Translate a single text from English to the target language.
- * Uses groq.text() for minimal token usage (~300 tokens per call).
+ * Uses shortsLLM.text() — no Groq TPM cap, supports 100+ languages.
  */
 async function translateSingleText(
     text: string,
@@ -46,11 +46,10 @@ async function translateSingleText(
 
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
         try {
-            const result = await groq.text(
+            const result = await shortsLLM.text(
                 `You are a professional ${langName} translator. Translate the given English text to natural, conversational ${langName}. Output ONLY the translated text, nothing else. No quotes, no labels, no explanations.`,
                 `Translate this English ${context} to ${langName}. Keep proper nouns, dates, and numbers intact. Use respectful honorifics where culturally appropriate. Output ONLY the translation:\n\n${text}`,
                 {
-                    model: 'llama-3.1-8b-instant',
                     temperature: 0.3,
                     maxTokens: 1024,
                 }
@@ -62,11 +61,11 @@ async function translateSingleText(
             }
             return text; // fallback to original
         } catch (error: any) {
-            const isRateLimit = error.message?.includes('429') || error.message?.includes('rate_limit');
+            const isRateLimit = error.message?.includes('429') || error.message?.includes('RATE_LIMIT');
 
             if (isRateLimit && attempt < MAX_RETRIES) {
-                console.warn(`⏳ Rate limited translating ${context}, waiting 10s...`);
-                await new Promise(resolve => setTimeout(resolve, 10000));
+                console.warn(`⏳ Rate limited translating ${context}, retrying in 5s...`);
+                await new Promise(resolve => setTimeout(resolve, 5000));
                 continue;
             }
 
@@ -80,11 +79,11 @@ async function translateSingleText(
 
 /**
  * Translates script narrations and videoTitle from English to the target language.
- * Translates SCENE BY SCENE to stay within Groq free-tier TPM limits.
- * 
+ * Translates SCENE BY SCENE for best quality output.
+ *
  * Image prompts, video prompts, and other fields are kept in English
  * (they are consumed by AI image/video generators that work best in English).
- * 
+ *
  * Skips translation if target is English.
  */
 export async function translateScript(
@@ -105,15 +104,10 @@ export async function translateScript(
     const translatedTitle = await translateSingleText(videoTitle, langName, 'video title');
     console.log(`  ✅ Title: "${translatedTitle.slice(0, 50)}..."`);
 
-    // Translate each scene narration individually (~300 tokens each, under 6K TPM)
+    // Translate each scene narration individually
     const translatedNarrations: string[] = [];
 
     for (let i = 0; i < narrations.length; i++) {
-        // Small delay between scenes to avoid hitting RPM limits
-        if (i > 0) {
-            await new Promise(resolve => setTimeout(resolve, 1500)); // 1.5s gap
-        }
-
         const translated = await translateSingleText(
             narrations[i],
             langName,

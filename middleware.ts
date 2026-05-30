@@ -1,14 +1,16 @@
 import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server'
 import { NextResponse } from 'next/server'
 
-// Make home page public so users can stay on it when signed out
+// Make home page and course-generator public so users can stay on them when signed out
 const isPublicRoute = createRouteMatcher([
-    '/',  // Home page is public
+    '/',  // Landing page is public
+    '/course-generator',  // Course generator (was previously /)
     '/sign-in(.*)',
     '/sign-up(.*)',
     '/api/webhooks(.*)',
     '/api/inngest(.*)',
-    '/api/user'
+    '/api/user',
+    '/proxy(.*)'  // Remotion asset proxy
 ])
 
 // Rate limiting store for middleware-level protection

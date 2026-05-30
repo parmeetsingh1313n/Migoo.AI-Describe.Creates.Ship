@@ -152,7 +152,7 @@ Generate an AI-powered course structure.
     "course": { ... },
     "metadata": {
       "generatedAt": "2026-03-19T10:00:00.000Z",
-      "model": "z-ai/glm-4.5-air:free",
+      "model": "openrouter/owl-alpha",
       "totalChapters": 10,
       "chaptersGenerated": 10
     }

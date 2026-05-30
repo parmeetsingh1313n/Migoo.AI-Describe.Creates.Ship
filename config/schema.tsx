@@ -1,4 +1,4 @@
-import { integer, json, pgTable, real, text, timestamp, varchar } from "drizzle-orm/pg-core";
+import { boolean, integer, json, pgTable, real, text, timestamp, varchar } from "drizzle-orm/pg-core";
 
 export const usersTable = pgTable("users", {
     id: integer().primaryKey().generatedAlwaysAsIdentity(),
@@ -216,5 +216,31 @@ export const notesProjects = pgTable("notes_projects", {
     // draft | generating | completed | failed
 
     createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+})
+
+// ── Chapter Generation Status ────────────────────────────────
+// Tracks per-chapter generation progress for the course video content pipeline.
+// Status flow: idle → queued → generating:slides → generating:audio → completed | failed
+export const chapterGenerationStatus = pgTable("chapter_generation_status", {
+    id: integer().primaryKey().generatedAlwaysAsIdentity(),
+    courseId: varchar({ length: 255 }).notNull().references(() => coursesTable.courseId),
+    chapterId: varchar({ length: 255 }).notNull().unique(),
+
+    // Status: idle | queued | generating:slides | generating:audio | completed | failed
+    status: varchar({ length: 50 }).default("idle").notNull(),
+
+    // Slide HTML generation progress
+    slidesComplete: integer("slides_complete").default(0).notNull(),
+    slidesTotal: integer("slides_total").default(0).notNull(),
+
+    // TTS audio generation progress
+    audioComplete: integer("audio_complete").default(0).notNull(),
+
+    // Error info (when status = failed)
+    errorMessage: text("error_message"),
+
+    startedAt: timestamp("started_at"),
+    completedAt: timestamp("completed_at"),
     updatedAt: timestamp("updated_at").defaultNow(),
 })

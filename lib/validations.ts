@@ -55,7 +55,7 @@ export const generateCourseLayoutSchema = z.object({
   userInput: safeString(2000),
   courseId: idField,
   type: z.enum(["video", "article", "tutorial", "course"], {
-    errorMap: () => ({ message: "Type must be one of: video, article, tutorial, course" }),
+    message: "Type must be one of: video, article, tutorial, course",
   }),
 });
 
@@ -117,7 +117,9 @@ export const createShortSeriesSchema = z.object({
   title: safeString(500),
   duration: z.string().regex(/^\d+-\d+$/, "Duration format must be like '30-50'"),
   platform: z.enum(["youtube", "instagram", "email"]),
-  publishTime: z.string().datetime(),
+  publishTime: z.string()
+    .refine((val) => !isNaN(Date.parse(val)), { message: 'Invalid date/time value' })
+    .transform((val) => new Date(val).toISOString()), // normalize to UTC ISO string
 });
 
 /** TypeScript type inferred from createShortSeriesSchema */

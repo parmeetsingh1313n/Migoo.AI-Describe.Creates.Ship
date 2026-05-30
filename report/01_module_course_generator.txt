@@ -1,0 +1,261 @@
+================================================================================
+         MODULE 1: VIDEO COURSE GENERATOR
+         "Topic to Multi-Chapter Educational Video in One Click"
+================================================================================
+
+1. MODULE OVERVIEW
+------------------
+
+The Video Course Generator is the foundational module of Migoo. It transforms
+a single text topic (e.g., "Machine Learning Fundamentals") into a complete
+multi-chapter educational video course. The entire pipeline — from course
+structure planning to the final rendered video — is fully automated using AI.
+
+This module demonstrates the core AI-to-video pipeline that powers the entire
+Migoo platform.
+
+Production Pipeline:
+  Topic → AI Course Layout → Slide Generation → TTS Narration →
+  Word-Level Caption Sync → AI Image Generation → Remotion Video Render
+
+
+2. TECHNICAL ARCHITECTURE
+-------------------------
+
+Frontend:
+  - File: app/(routes)/course/page.tsx
+  - Framework: Next.js 16 App Router with React Server Components
+  - UI: ShadCN/UI components + Tailwind CSS v4
+  - State: React hooks (useState, useEffect, useCallback)
+
+API Layer:
+  - POST /api/generate-course-layout — AI course structure generation
+  - POST /api/generate-video-content — Slides + TTS + captions per chapter
+  - POST /api/generate-images — AI cinematic image generation
+  - POST /api/generate-thumbnail — Course thumbnail creation
+  - GET  /api/course — Fetch course data and metadata
+
+Database Schema:
+  - coursesTable: id, userId, courseId, courseName, userInput, type,
+    courseLayout (JSON), courseThumbnail, createdAt
+  - chapterContentSlides: courseId, chapterId, slideId, slideIndex,
+    audioUrl, imageUrl, narration (JSON), captions (JSON), html,
+    revealData (JSON), audioDuration
+  - courseImages: courseId, imageIndex, imagePrompt, imageUrl, width, height
+
+AI Providers Used:
+  - Groq LLM (llama-3.3-70b-versatile) — Course layout + slide content
+  - Sarvam AI (Bulbul v3) — Text-to-speech narration
+  - Leonardo AI — Cinematic image generation
+
+
+3. STEP-BY-STEP PIPELINE IMPLEMENTATION
+-----------------------------------------
+
+STEP 1: COURSE LAYOUT GENERATION
+
+When a user enters a topic (e.g., "Blockchain Technology"), the system calls
+the /api/generate-course-layout endpoint. This endpoint:
+
+  a) Validates input using Zod schema (generateCourseLayoutSchema):
+     - userInput: non-empty string, max 2000 chars, XSS-safe
+     - courseId: alphanumeric ID field
+     - type: enum ["video", "article", "tutorial", "course"]
+
+  b) Sends a structured prompt to Groq LLM via the AI Fallback Client
+     (config/ai-fallback.ts). The prompt instructs the AI to generate a
+     complete course structure as JSON with:
+     - Course name and description
+     - Multiple chapters with titles and subtopics
+     - Learning objectives per chapter
+     - Estimated duration
+
+  c) The AI Fallback Client (class AIFallbackClient) handles:
+     - Prompt sanitization: Strips <json> tag instructions for Groq
+       compatibility
+     - JSON extraction: Parses response, handles markdown fences, extracts
+       JSON from arbitrary text
+     - Error recovery: Multiple parsing attempts with progressive cleanup
+     - Provider fallback: If primary provider fails, tries next in chain
+
+  d) The generated course layout (JSON) is stored in the coursesTable with
+     the courseLayout field containing the full chapter structure.
+
+
+STEP 2: SLIDE CONTENT GENERATION
+
+For each chapter, the system generates presentation slides:
+
+  a) The /api/generate-video-content endpoint receives chapter metadata
+     (validated via generateVideoContentSchema).
+
+  b) Groq LLM generates rich HTML slide content including:
+     - Slide titles and subtitles
+     - Bullet points with explanations
+     - Key definitions and examples
+     - Reveal.js compatible presentation data (revealData JSON)
+
+  c) Each slide is stored in chapterContentSlides with:
+     - Unique slideId for referencing
+     - slideIndex for ordering
+     - html field with rendered HTML content
+     - narration JSON with the text to be spoken
+
+
+STEP 3: TEXT-TO-SPEECH NARRATION (Enhanced TTS Pipeline)
+
+The narration system (lib/enhanced-tts.ts) is a robust, production-grade TTS
+pipeline with the following features:
+
+  a) TEXT SANITIZATION (sanitizeTextForTTS function):
+     - Strips HTML tags completely
+     - Converts smart quotes to regular quotes
+     - Replaces bullet characters with dashes
+     - Removes zero-width Unicode characters
+     - Fixes multiple punctuation (!!!! → !)
+     - Ensures proper spacing after sentence-ending punctuation
+     - Removes control characters
+
+  b) SMART CHUNKING (smartChunkText function):
+     - Maximum chunk size: 2400 characters (Sarvam API limit is 2500)
+     - Sentence-boundary detection using regex
+     - Comma/semicolon splitting for oversized sentences
+     - Preserves natural speech flow across chunk boundaries
+
+  c) RETRY WITH EXPONENTIAL BACKOFF (retryWithBackoff function):
+     - Default: 3 retries, 2000ms initial delay, 10000ms max, 2x multiplier
+     - Retryable errors: 502, 503, 504, Bad Gateway, timeout, ECONNRESET
+     - Non-retryable errors fail immediately
+     - Configurable per-call
+
+  d) SARVAM AI API INTEGRATION:
+     - Endpoint: https://api.sarvam.ai/text-to-speech
+     - Model: Bulbul v3
+     - Sample rate: 22050 Hz
+     - Output codec: WAV
+     - Configurable speaker, pace (default 1.05x), temperature (0.6)
+     - 30-second timeout per request
+
+  e) WAV FILE MERGING (mergeWavFiles function):
+     - Strips WAV headers (44 bytes) from all chunks
+     - Concatenates raw PCM audio data
+     - Builds new WAV header with correct RIFF/WAVE structure
+     - Preserves sample rate, channels, bits per sample from first chunk
+
+  f) Audio is uploaded to Appwrite Storage and URL stored in chapterContentSlides.
+
+
+STEP 4: WORD-LEVEL CAPTION SYNCHRONIZATION
+
+After TTS generation, the system computes word-level timestamps:
+
+  a) Each narration is split into words
+  b) Duration is distributed across words based on character length
+  c) Timestamps are stored in the captions JSON field
+  d) These timestamps drive the Remotion caption overlay during rendering
+
+
+STEP 5: AI IMAGE GENERATION (Leonardo AI)
+
+The /api/generate-images endpoint triggers cinematic image creation:
+
+  a) The system generates image prompts via LLM — descriptive, photorealistic
+     prompts with lighting, angle, texture, and atmosphere details.
+
+  b) Leonardo AI API (lib/leonardo.ts — 44KB implementation) generates images:
+     - Multiple generation styles: NanoBanana, PhotoReal
+     - Resolution: 1024×576 (16:9 widescreen)
+     - Parallel generation support for speed
+     - Rate limiting and retry logic
+
+  c) Generated images are stored in courseImages table and uploaded to
+     Appwrite Storage with URLs saved for video composition.
+
+
+STEP 6: REMOTION VIDEO COMPOSITION
+
+The final video is assembled using Remotion (remotion/Composition.tsx — 40KB):
+
+  a) COMPOSITION STRUCTURE:
+     - Each chapter becomes a video segment
+     - Slides transition with professional animations
+     - Background images from Leonardo AI fill the visual layer
+     - Audio narration plays in sync with slide content
+     - Word-level captions overlay at the bottom with highlight animations
+
+  b) CAPTION RENDERING:
+     - Hormozi-style dynamic captions (lib/caption-styles.ts — 14KB)
+     - Multiple styling presets
+     - Word-by-word highlight as narration progresses
+     - Configurable font, size, color, and animation
+
+  c) VIDEO RENDERING:
+     - lib/video-render.ts (50KB) handles server-side rendering
+     - Remotion CLI used for final MP4 output
+     - Support for multiple aspect ratios
+
+  d) The final rendered video URL is stored and made available for download.
+
+
+4. DATA FLOW DIAGRAM
+---------------------
+
+User enters topic
+      │
+      ▼
+[Zod Validation] → Invalid? → Return 400 error
+      │ Valid
+      ▼
+[Groq LLM] → Generate course layout JSON
+      │
+      ▼
+[Store in coursesTable] → courseLayout JSON
+      │
+      ▼
+For each chapter:
+      │
+      ├─→ [Groq LLM] → Generate slide HTML + narration text
+      │         │
+      │         ▼
+      │   [Store in chapterContentSlides]
+      │
+      ├─→ [Sarvam AI TTS] → Sanitize → Chunk → Generate WAV → Merge
+      │         │
+      │         ▼
+      │   [Upload to Appwrite] → audioUrl saved
+      │
+      ├─→ [Caption Sync] → Word timestamps computed → captions JSON
+      │
+      └─→ [Leonardo AI] → Image prompts → Generate images → Upload
+                │
+                ▼
+          [Store in courseImages]
+      │
+      ▼
+[Remotion] → Compose slides + audio + images + captions → Render MP4
+      │
+      ▼
+Final video URL → User downloads
+
+
+5. KEY TECHNICAL DECISIONS
+---------------------------
+
+  - Groq over GPT-4: Chosen for fastest inference speed (~2 seconds for
+    course layout) on the free tier. The llama-3.3-70b-versatile model
+    provides high-quality structured JSON output.
+
+  - Sarvam AI over ElevenLabs: Selected for superior Indian language
+    support and cost-effective pricing. The Bulbul v3 model delivers
+    natural-sounding narration.
+
+  - Leonardo AI over Stable Diffusion: Chosen for cinematic quality and
+    API reliability. The NanoBanana model produces photorealistic visuals
+    suitable for educational content.
+
+  - Remotion over FFmpeg: Remotion enables React-based programmatic video
+    composition with full control over animations, transitions, and layout
+    — far more flexible than shell-based FFmpeg workflows.
+
+  - WAV over MP3 for TTS: WAV format allows direct concatenation without
+    re-encoding, enabling efficient multi-chunk audio merging.

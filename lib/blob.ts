@@ -104,9 +104,13 @@ export function getBlobToken(): string {
 // UPLOAD HELPER — WITH RETRY + CONFIG ROTATION
 // ═══════════════════════════════════════════════════════════════════════════════
 
-/** Whether an HTTP status code is a transient server error worth retrying */
+/** Whether an HTTP status code is a transient server error worth retrying on the SAME config */
 function isTransient(code: number | undefined): boolean {
-    return code === 502 || code === 503 || code === 504 || code === 429;
+    // Only retry true network-level failures (code === undefined) or rate-limiting (429)
+    // on the SAME config. Server issues like 502, 503, 504 are usually node/project quota/space issues on Appwrite,
+    // so we want to immediately rotate to the next config to succeed instantly!
+    if (code === undefined) return true;
+    return code === 429;
 }
 
 /** Whether an HTTP status code means this config is permanently broken (rotate) */
@@ -191,7 +195,7 @@ export async function putWithRotation(
 
                 console.error(
                     `❌ Appwrite upload failed (config #${configIndex + 1}, attempt ${attempt}/${MAX_PER_CONFIG_RETRIES}): ` +
-                    `code=${code} — ${err?.message?.substring(0, 200)}`
+                    `code=${code ?? 'network'} type=${err?.name ?? 'Error'} — ${err?.message?.substring(0, 200)}`
                 );
 
                 // Auth error — this config's key is bad, immediately rotate to next config

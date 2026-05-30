@@ -5,15 +5,18 @@
  * GET /api/course - Returns all courses for the authenticated user
  * GET /api/course?courseId=xxx - Returns a specific course with all its slides
  *
+ * Falls back to LEGACY_DATABASE_URL for read-only access to historical data
+ * created before the primary database was migrated.
+ *
  * @requires Authentication via Clerk
  */
 
-import { db, dbRetry } from "@/config/db";
+import { db, dbLegacy, dbRetry } from "@/config/db";
 import { chapterContentSlides, coursesTable } from "@/config/schema";
 import { apiError, apiSuccess } from "@/lib/api-helpers";
 import { validateInput, getCourseQuerySchema } from "@/lib/validations";
 import { currentUser } from "@clerk/nextjs/server";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, asc } from "drizzle-orm";
 import { NextRequest } from "next/server";
 
 export async function GET(req: NextRequest) {
@@ -34,8 +37,8 @@ export async function GET(req: NextRequest) {
         }
 
         if (!courseId) {
-            // Return all courses for the authenticated user
-            const userCourses = await dbRetry(() =>
+            // ── List all courses ──────────────────────────────────────────────
+            let userCourses = await dbRetry(() =>
                 db
                     .select()
                     .from(coursesTable)
@@ -43,42 +46,94 @@ export async function GET(req: NextRequest) {
                     .orderBy(desc(coursesTable.id))
             );
 
+            // Fallback: if primary DB is empty, check legacy DB for historical courses
+            if (userCourses.length === 0 && dbLegacy) {
+                console.log('📦 Primary DB empty — checking legacy DB for courses...');
+                try {
+                    const legacyCourses = await dbLegacy
+                        .select()
+                        .from(coursesTable)
+                        .where(eq(coursesTable.userId, user?.primaryEmailAddress?.emailAddress ?? ""))
+                        .orderBy(desc(coursesTable.id));
+                    if (legacyCourses.length > 0) {
+                        console.log(`✅ Legacy DB: found ${legacyCourses.length} courses`);
+                        userCourses = legacyCourses;
+                    }
+                } catch (legacyErr: any) {
+                    console.warn('⚠️ Legacy DB fallback failed (list):', legacyErr.message?.substring(0, 120));
+                }
+            }
+
             return apiSuccess(userCourses);
         }
 
-        // Fetch specific course
+        // ── Fetch specific course ─────────────────────────────────────────────
         let course;
         try {
-            course = await db
-                .select()
-                .from(coursesTable)
-                .where(eq(coursesTable.courseId, courseId));
+            course = await dbRetry(() =>
+                db
+                    .select()
+                    .from(coursesTable)
+                    .where(eq(coursesTable.courseId, courseId))
+            );
         } catch (dbError: any) {
             console.error("❌ DB error fetching course:", dbError.message);
             return apiError("Database error fetching course", 500, "DB_COURSE_ERROR", dbError.message);
+        }
+
+        // Fallback: course not in primary — check legacy DB
+        if ((!course || course.length === 0) && dbLegacy) {
+            console.log(`📦 Course ${courseId} not in primary DB — checking legacy DB...`);
+            try {
+                const legacyCourse = await dbLegacy
+                    .select()
+                    .from(coursesTable)
+                    .where(eq(coursesTable.courseId, courseId));
+                if (legacyCourse && legacyCourse.length > 0) {
+                    console.log(`✅ Legacy DB: course found — ${legacyCourse[0].courseName}`);
+                    course = legacyCourse;
+                }
+            } catch (legacyErr: any) {
+                console.warn('⚠️ Legacy DB fallback failed (course):', legacyErr.message?.substring(0, 120));
+            }
         }
 
         if (!course || course.length === 0) {
             return apiError("Course not found", 404, "COURSE_NOT_FOUND");
         }
 
-        // Get all slides for this course
-        let slides = [];
+        // ── Fetch slides ──────────────────────────────────────────────────────
+        let slides: any[] = [];
         try {
-            slides = await db
-                .select()
-                .from(chapterContentSlides)
-                .where(eq(chapterContentSlides.courseId, courseId));
+            slides = await dbRetry(() =>
+                db
+                    .select()
+                    .from(chapterContentSlides)
+                    .where(eq(chapterContentSlides.courseId, courseId))
+                    .orderBy(asc(chapterContentSlides.chapterId), asc(chapterContentSlides.slideIndex))
+            );
         } catch (dbError: any) {
             console.error("❌ DB error fetching slides:", dbError.message);
-            // Return course without slides rather than failing entirely
-            return apiSuccess({
-                ...course[0],
-                chapterContentSlides: []
-            });
         }
 
-        // Return combined data
+        // Fallback: slides not in primary — check legacy DB
+        if (slides.length === 0 && dbLegacy) {
+            console.log(`📦 No slides in primary DB for ${courseId} — checking legacy DB...`);
+            try {
+                const legacySlides = await dbLegacy
+                    .select()
+                    .from(chapterContentSlides)
+                    .where(eq(chapterContentSlides.courseId, courseId))
+                    .orderBy(asc(chapterContentSlides.chapterId), asc(chapterContentSlides.slideIndex));
+                if (legacySlides.length > 0) {
+                    console.log(`✅ Legacy DB: found ${legacySlides.length} slides`);
+                    slides = legacySlides;
+                }
+            } catch (legacyErr: any) {
+                console.warn('⚠️ Legacy DB fallback failed (slides):', legacyErr.message?.substring(0, 120));
+            }
+        }
+
         return apiSuccess({
             ...course[0],
             chapterContentSlides: slides
@@ -86,7 +141,6 @@ export async function GET(req: NextRequest) {
 
     } catch (error: any) {
         console.error("❌ Course API Error:", error.message);
-        console.error("❌ Full error stack:", error.stack);
         return apiError(
             "Failed to fetch course data",
             500,

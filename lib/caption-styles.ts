@@ -39,6 +39,7 @@ export interface CaptionStyleConfig {
         | 'word-box'
         | 'word-bounce'
         | 'pop'
+        | 'single-word'  // MrBeast: one word at a time, large + centered
     highlightColor: string
     borderRadius: number
     padding: string
@@ -48,47 +49,49 @@ export interface CaptionStyleConfig {
 }
 
 export const captionStyles: CaptionStyleConfig[] = [
-    // ── 1. Hormozi ──────────────────────────────────────────────────────────
+    // ── 1. Hormozi ──────────────────────────────────────────────────────────────
     {
         id: 'hormozi',
         label: 'Hormozi',
         description: 'Bold yellow, word-by-word pop • ALL CAPS',
         fontFamily: "'Montserrat', 'Arial Black', sans-serif",
-        fontSize: 44,
+        fontSize: 48,
         fontWeight: 900,
         color: '#FFFFFF',
         backgroundColor: 'transparent',
+        // Solid black outline via multi-shadow (better than -webkit-text-stroke for fills)
         textStroke: '2px #000000',
-        textShadow: '1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 3px 3px 6px rgba(0,0,0,0.8)',
+        textShadow: '2px 2px 0 #000, -2px 2px 0 #000, 2px -2px 0 #000, -2px -2px 0 #000',
         textTransform: 'uppercase',
         animation: 'word-pop',
-        highlightColor: '#FACC15',
+        highlightColor: '#FACC15',   // Hormozi yellow
         borderRadius: 0,
         padding: '0',
         letterSpacing: '0.05em',
+        activeWordStyle: {
+            textShadow: '2px 2px 0 #000, -2px 2px 0 #000, 2px -2px 0 #000, -2px -2px 0 #000, 0 0 12px rgba(250,204,21,0.5)',
+        },
     },
 
-    // ── 2. MrBeast ──────────────────────────────────────────────────────────
+    // ── 2. MrBeast ──────────────────────────────────────────────────────────────
     {
         id: 'mrbeast',
         label: 'MrBeast',
-        description: 'Giant text, thick black stroke',
+        description: 'One word at a time, giant • ALL CAPS',
         fontFamily: "'Montserrat', 'Impact', 'Arial Black', sans-serif",
-        fontSize: 52,
+        fontSize: 72,        // Much larger — only one word shows at a time
         fontWeight: 900,
         color: '#FFFFFF',
         backgroundColor: 'transparent',
-        textStroke: '3px #000000',
-        textShadow: '2px 2px 0 #000, -2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000, 0 2px 0 #000, 0 -2px 0 #000',
+        // Thick hard black outline — MrBeast signature
+        textStroke: '4px #000000',
+        textShadow: '4px 4px 0 #000, -4px 4px 0 #000, 4px -4px 0 #000, -4px -4px 0 #000, 0 4px 0 #000, 0 -4px 0 #000, 4px 0 0 #000, -4px 0 0 #000',
         textTransform: 'uppercase',
-        animation: 'word-pop',
+        animation: 'single-word',  // KEY DIFFERENCE: one word at a time
         highlightColor: '#FFD700',
         borderRadius: 0,
         padding: '0',
         letterSpacing: '0.04em',
-        activeWordStyle: {
-            textShadow: '2px 2px 0 #000, -2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000, 0 0 16px rgba(255,215,0,0.45)',
-        },
     },
 
     // ── 3. Minimal ──────────────────────────────────────────────────────────

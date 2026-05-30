@@ -1,0 +1,227 @@
+================================================================================
+         MODULE 3: MOTION GRAPHICS GENERATOR
+         "AI Chat-Driven Animated Promo Video Builder"
+================================================================================
+
+1. MODULE OVERVIEW
+------------------
+
+The Motion Graphics Generator enables users to create professional animated
+promotional videos through an AI-powered conversational interface. Instead of
+manually designing scene-by-scene, the user describes their vision in a chat
+conversation, and the AI generates a complete scene breakdown with 25+
+professional animation types, cinematic color palettes, and optional voiceover.
+
+This module is ideal for product launches, startup promos, social media ads,
+brand reveals, and explainer videos.
+
+Production Pipeline:
+  User Prompt → AI Chat Conversation → Scene Generation → Theme Selection →
+  Optional Asset Upload → Voiceover Generation → Remotion Video Render
+
+
+2. TECHNICAL ARCHITECTURE
+-------------------------
+
+Frontend:
+  - File: app/motion-graphics/page.tsx (36KB) — Project dashboard + listing
+  - File: app/motion-graphics/[projectId]/ — Chat interface + scene editor
+
+API Layer:
+  - POST /api/motion-graphics — Create new motion graphic project
+  - GET  /api/motion-graphics — List user's motion graphic projects
+  - POST /api/motion-graphics/[id]/chat — AI conversational scene builder
+  - POST /api/motion-graphics/[id]/generate — Trigger render pipeline
+  - POST /api/motion-graphics/[id]/upload — Upload reference assets (logos,
+    product shots, screenshots)
+
+Database Schema:
+  - motionGraphicProjects: projectId, userId, prompt, duration (15/30/60s),
+    aspectRatio (16:9, 9:16, 1:1), voiceoverEnabled, voice, language, music,
+    theme (JSON), sceneData (JSON), voiceoverScript, audioUrl, audioDuration,
+    remotionProps (JSON), videoUrl, thumbnailUrl, status
+
+  - motionGraphicMessages: projectId, role (user/assistant/system),
+    content (text), metadata (JSON with type: scene_update/status/error)
+
+Remotion Composition:
+  - File: remotion/MotionGraphicComposition.tsx (89KB — largest component)
+  - Renders 25+ animated scene types with full Remotion animation APIs
+
+
+3. CONVERSATIONAL SCENE BUILDER
+---------------------------------
+
+The AI chat interface (POST /api/motion-graphics/[id]/chat) uses a
+multi-turn conversation model:
+
+  a) User describes their video vision:
+     "I want a 30-second product launch video for my SaaS app called
+      CloudSync. Show the logo, key features, pricing, and a CTA."
+
+  b) AI analyzes the request and generates a structured scene breakdown:
+     - Each scene has a type, duration, content elements, and animations
+     - Scenes are ordered for maximum engagement
+     - Total duration matches user's selected length
+
+  c) User can refine through follow-up messages:
+     "Make the logo reveal more dramatic"
+     "Add a stat counter showing 10,000+ users"
+     "Change the color palette to midnight blue"
+
+  d) Each message is stored in motionGraphicMessages for conversation
+     continuity and history playback.
+
+  e) AI responses include metadata with type: "scene_update" containing
+     the updated sceneData JSON array.
+
+
+4. 25+ PROFESSIONAL SCENE TYPES
+---------------------------------
+
+The MotionGraphicComposition.tsx (89KB) implements the following animated
+scene types, each with unique Remotion animations:
+
+  REVEAL SCENES:
+  - Title Reveal — Cinematic text reveal with scaling and blur effects
+  - Logo Reveal — Brand logo entrance with particle effects
+  - Subtitle Reveal — Secondary text with fade-in animation
+  - Tagline Reveal — Motivational tagline with typewriter effect
+
+  DATA & STATISTICS:
+  - Stat Counter — Animated number counter (0 → 10,000+)
+  - Progress Bar — Filling progress visualization
+  - Pie Chart — Animated circular data chart
+  - Bar Chart — Rising bar chart animation
+
+  CONTENT SCENES:
+  - Feature List — Bullet points appearing sequentially
+  - Comparison — Side-by-side A vs B layout
+  - Testimonial — Customer quote with avatar
+  - Pricing Table — Tier-based pricing display
+  - Timeline — Chronological event sequence
+
+  VISUAL SCENES:
+  - Image Showcase — Full-frame product/screenshot display
+  - Split Screen — Dual-panel layout
+  - Gallery — Multi-image grid with hover effects
+  - Kinetic Text — Large animated typography
+
+  TRANSITION SCENES:
+  - Scene Transition — Animated dividers between sections
+  - Background Shift — Gradient color transitions
+  - Zoom Effect — Ken Burns style zoom on images
+
+  CALL-TO-ACTION:
+  - CTA Button — Animated call-to-action with pulse effect
+  - Contact Info — Business details display
+  - Social Media — Platform links with icons
+  - QR Code — Scannable code generation
+  - End Screen — Final frame with logo and message
+
+
+5. CINEMATIC THEME SYSTEM
+----------------------------
+
+The module provides 6 curated color palettes stored in the theme JSON field:
+
+  1. Midnight — Deep navy (#0a0e1a) with electric blue accents
+  2. Sunset — Warm orange-to-pink gradient palette
+  3. Nature — Forest green with earthy tones
+  4. Royal — Purple-to-gold luxury palette
+  5. Minimal — Clean white and gray with black accents
+  6. Neon — Vibrant cyberpunk with pink/cyan/green neons
+
+Each theme includes:
+  - palette: Primary, secondary, accent, background colors
+  - font: Typography selection for headings and body
+  - animationStyle: Default animation timing and easing
+
+
+6. ASSET UPLOAD SYSTEM
+------------------------
+
+Users can upload custom assets via /api/motion-graphics/[id]/upload:
+  - Logos (PNG, SVG, JPEG)
+  - Product screenshots
+  - Team photos
+  - Brand assets
+
+These assets are referenced by the AI when generating scenes and injected
+into the Remotion composition as image sources for Logo Reveal, Image
+Showcase, and other visual scene types.
+
+
+7. VOICEOVER PIPELINE
+-----------------------
+
+When voiceoverEnabled is set to 1:
+
+  a) AI generates a separate voiceoverScript — an energetic narration
+     text that complements the on-screen visual content (NOT the same
+     as on-screen text)
+
+  b) Sarvam AI TTS generates audio using the selected voice and language
+
+  c) Audio duration is calculated and stored in audioDuration
+
+  d) The voiceover audio is synchronized with scene transitions in the
+     Remotion composition
+
+  e) Volume mixing: voiceover at full volume, background music reduced
+
+
+8. RENDER PIPELINE
+-------------------
+
+When the user triggers generation (/api/motion-graphics/[id]/generate):
+
+  a) Status updates progressively:
+     draft → generating:scenes → generating:assets → generating:voice →
+     generating:video → completed (or failed)
+
+  b) remotionProps JSON is assembled with all scene data, theme, audio
+     URLs, and asset references
+
+  c) Remotion renders the video server-side using the
+     MotionGraphicComposition component
+
+  d) Multiple aspect ratios supported:
+     - 16:9 (landscape — YouTube, websites)
+     - 9:16 (portrait — TikTok, Reels, Stories)
+     - 1:1 (square — Instagram feed, LinkedIn)
+
+  e) Final video uploaded to Appwrite Storage
+
+
+9. DATA FLOW DIAGRAM
+---------------------
+
+User creates project (prompt + duration + aspect ratio)
+      │
+      ▼
+[Store in motionGraphicProjects]
+      │
+      ▼
+[AI Chat] ←→ User refines through conversation
+      │
+      ▼
+[Scene Data JSON generated] → 25+ scene types
+      │
+      ├─→ [Upload custom assets] → logos, screenshots
+      │
+      ├─→ [Select theme] → 6 cinematic palettes
+      │
+      └─→ [Toggle voiceover] → Sarvam TTS if enabled
+      │
+      ▼
+[Trigger Generate]
+      │
+      ├─→ [Build remotionProps] — Assemble all data
+      │
+      ├─→ [Remotion Server Render] — 89KB composition
+      │
+      └─→ [Upload final video] → Appwrite Storage
+      │
+      ▼
+status = "completed" → User downloads video

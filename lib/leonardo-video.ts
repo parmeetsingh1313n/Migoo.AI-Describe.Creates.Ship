@@ -21,9 +21,10 @@ const KLING_MODEL = "KLING2_5";
 // Valid durations for Kling 2.5 Turbo (seconds)
 const VALID_DURATIONS = [5, 10] as const;
 
-// 16:9 landscape — Remotion composition uses objectFit:'cover' to crop into portrait frame
-const VIDEO_WIDTH = 1920;
-const VIDEO_HEIGHT = 1080;
+// 9:16 portrait — matches Shorts/Reels format and Nano Banana 2 images (768×1376 → same ratio)
+// Kling RESOLUTION_1080 refers to the SHORT side = 1080px, so 1080×1920 is valid.
+const VIDEO_WIDTH  = 1080;
+const VIDEO_HEIGHT = 1920;
 
 // ── Anti-text + Motion constraints ────────────────────────────────────────────
 // CRITICAL DISCOVERY (from Leonardo API docs):
@@ -332,7 +333,9 @@ async function stretchVideo(videoBuffer: Buffer, targetDuration: number, provide
     }
 
     // Try modern -fps_mode flag first; fall back to legacy -vsync if it fails
-    const buildCmd = (fpsFlag: string) => [
+    // CRF 28: good quality for 9:16 social video at ~8-15 MB per 30s clip.
+    // CRF 18 (old) produced 40-50 MB files that hit Appwrite's Varnish 503 backend write-buffer limit.
+    const buildCmd = (fpsFlag: string, crf: number = 28) => [
         `"${ffmpegBin}"`,
         `-y`,
         `-ss 0`,
@@ -344,15 +347,15 @@ async function stretchVideo(videoBuffer: Buffer, targetDuration: number, provide
         `-g 30`,
         `-c:v libx264`,
         `-pix_fmt yuv420p`,
-        `-preset fast`,
-        `-crf 18`,
+        `-preset medium`,
+        `-crf ${crf}`,
         `-an`,
         `-movflags +faststart`,
         `-avoid_negative_ts make_zero`,
         `"${outPath}"`,
     ].join(' ');
 
-    let cmd = buildCmd(`-fps_mode cfr`);
+    let cmd = buildCmd(`-fps_mode cfr`, 28);
     console.log(`🔧 FFmpeg cmd: ...${cmd.substring(cmd.indexOf('-vf'), cmd.indexOf('-vf') + 120)}...`);
 
     const runFFmpeg = (command: string): Promise<void> =>
@@ -369,7 +372,7 @@ async function stretchVideo(videoBuffer: Buffer, targetDuration: number, provide
         // -fps_mode may not exist in older FFmpeg — fall back to -vsync
         if (e.stderr && e.stderr.includes('fps_mode')) {
             console.warn(`⚠️ -fps_mode not supported, retrying with legacy -vsync cfr...`);
-            cmd = buildCmd(`-vsync cfr`);
+            cmd = buildCmd(`-vsync cfr`, 28);
             try {
                 await runFFmpeg(cmd);
             } catch (e2: any) {
@@ -386,11 +389,39 @@ async function stretchVideo(videoBuffer: Buffer, targetDuration: number, provide
     if (!fs.existsSync(outPath)) {
         throw new Error('FFmpeg produced no output file for stretch');
     }
-    const outBuffer = fs.readFileSync(outPath);
+    let outBuffer = fs.readFileSync(outPath);
     if (outBuffer.length < 5000) {
         throw new Error(`FFmpeg output too small (${outBuffer.length} bytes) — likely a failed encode`);
     }
     console.log(`✅ Stretch complete: ${videoBuffer.length} → ${outBuffer.length} bytes (trimmed to ${trimPoint}s)`);
+
+    // ── 4. Size gate — re-encode at CRF 32 if output is still > 20 MB ────
+    // Appwrite's Varnish cache backend throws 503 "backend write error" for files
+    // larger than ~30-40 MB. Keep uploads well under that by re-encoding if needed.
+    const MAX_UPLOAD_BYTES = 20 * 1024 * 1024; // 20 MB hard cap
+    if (outBuffer.length > MAX_UPLOAD_BYTES) {
+        console.warn(`⚠️ Output ${(outBuffer.length / 1024 / 1024).toFixed(1)} MB exceeds 20 MB cap — re-encoding at CRF 32 to reduce size...`);
+        const reOutPath = outPath.replace('.mp4', '_small.mp4');
+        const reCmd = [
+            `"${ffmpegBin}"`,
+            `-y`,
+            `-i "${outPath}"`,
+            `-c:v libx264 -pix_fmt yuv420p -preset medium -crf 32`,
+            `-an -movflags +faststart`,
+            `"${reOutPath}"`,
+        ].join(' ');
+        try {
+            await runFFmpeg(reCmd);
+            if (fs.existsSync(reOutPath) && fs.statSync(reOutPath).size > 5000) {
+                const reBuffer = fs.readFileSync(reOutPath);
+                console.log(`✅ Re-encode complete: ${(outBuffer.length / 1024 / 1024).toFixed(1)} MB → ${(reBuffer.length / 1024 / 1024).toFixed(1)} MB`);
+                try { fs.unlinkSync(reOutPath); } catch {}
+                outBuffer = reBuffer;
+            }
+        } catch (reErr: any) {
+            console.warn(`⚠️ Size-gate re-encode failed (proceeding with larger file): ${reErr.message?.slice(0, 120)}`);
+        }
+    }
 
     try { fs.unlinkSync(inPath);  } catch {}
     try { fs.unlinkSync(outPath); } catch {}

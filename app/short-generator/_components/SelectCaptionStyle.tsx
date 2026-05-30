@@ -11,9 +11,25 @@ interface Props {
 const previewText = "Create amazing videos"
 const previewWords = previewText.split(' ')
 
+function scaleTextStroke(stroke: string | undefined): string | undefined {
+    if (!stroke || stroke === 'none') return stroke
+    return stroke.replace(/([0-9.]+)\s*px/, (_, val) => {
+        const num = parseFloat(val)
+        return `${Math.max(0.4, num * 0.2)}px`
+    })
+}
+
+function scaleTextShadow(shadow: string | undefined): string | undefined {
+    if (!shadow || shadow === 'none') return shadow
+    return shadow.replace(/(-?[0-9.]+)\s*px/g, (_, val) => {
+        const num = parseFloat(val)
+        return `${num * 0.25}px`
+    })
+}
+
 // Animated preview for each caption style
 function CaptionPreview({ styleId, isSelected }: { styleId: string; isSelected: boolean }) {
-    const style = captionStyles.find(s => s.id === styleId)!
+    const style = captionStyles.find(s => s.id === styleId)
     const [charIndex, setCharIndex] = useState(0)
     const [wordIndex, setWordIndex] = useState(0)
     const [glowPhase, setGlowPhase] = useState(false)
@@ -27,146 +43,217 @@ function CaptionPreview({ styleId, isSelected }: { styleId: string; isSelected: 
         const pauseTicks = 12
         const cycleTicks = totalChars + pauseTicks
         const interval = setInterval(() => {
-            tick = tick % cycleTicks + 1
+            tick = (tick % cycleTicks) + 1
             setCharIndex(Math.min(tick, totalChars))
         }, 80)
         return () => clearInterval(interval)
     }, [styleId])
 
-    // Karaoke word highlighting
+    // Karaoke / active word highlight cycle
     useEffect(() => {
-        if (styleId !== 'karaoke') return
+        if (!style) return
+        const isWordAnim = ['karaoke', 'word-pop', 'word-box', 'word-bounce', 'bounce', 'pop', 'single-word'].includes(style.animation)
+        if (!isWordAnim) return
+
         const interval = setInterval(() => {
             setWordIndex(prev => (prev + 1) % (previewWords.length + 1))
         }, 600)
         return () => clearInterval(interval)
-    }, [styleId])
+    }, [style])
 
     // Neon glow pulsing
     useEffect(() => {
-        if (styleId !== 'neon-glow') return
+        if (!style || style.animation !== 'glow') return
         const interval = setInterval(() => setGlowPhase(prev => !prev), 800)
         return () => clearInterval(interval)
-    }, [styleId])
+    }, [style])
 
-    return (
-        <div className="flex items-center justify-center h-full px-4">
-            {/* Bold Pop */}
-            {styleId === 'bold-pop' && (
+    if (!style) return null
+
+    // 1. Typewriter Animation
+    if (style.animation === 'typewriter') {
+        return (
+            <span
+                className="text-lg font-bold text-center leading-tight"
+                style={{
+                    fontFamily: style.fontFamily,
+                    color: style.color,
+                    backgroundColor: style.backgroundColor,
+                    padding: style.padding || '4px 10px',
+                    borderRadius: `${style.borderRadius}px`,
+                    textShadow: scaleTextShadow(style.textShadow),
+                    letterSpacing: style.letterSpacing,
+                }}
+            >
+                {previewText.slice(0, charIndex)}
                 <motion.span
-                    key={isSelected ? 'sel' : 'unsel'}
-                    initial={{ scale: 0, rotateX: 90 }}
-                    animate={{ scale: 1, rotateX: 0 }}
-                    transition={{ type: 'spring', stiffness: 400, damping: 12 }}
-                    className="text-white font-black text-xl uppercase text-center leading-tight"
-                    style={{
-                        WebkitTextStroke: '1px black',
-                        textShadow: '2px 2px 4px rgba(0,0,0,0.8)',
-                    }}
-                >
-                    {previewText}
-                </motion.span>
-            )}
+                    animate={{ opacity: [1, 0] }}
+                    transition={{ repeat: Infinity, duration: 0.6 }}
+                    className="inline-block w-[2px] h-[1em] bg-current ml-[2px] align-text-bottom"
+                />
+            </span>
+        )
+    }
 
-            {/* Karaoke */}
-            {styleId === 'karaoke' && (
-                <span className="text-lg font-extrabold text-center leading-tight">
-                    {previewWords.map((word, i) => (
-                        <span
+    // 2. Glow Animation
+    if (style.animation === 'glow') {
+        const baseShadow = scaleTextShadow(style.textShadow) || `0 0 4px ${style.color}`
+        const textShadowValue = glowPhase
+            ? `${baseShadow}, 0 0 8px ${style.color}`
+            : baseShadow
+        return (
+            <span
+                className="text-lg font-bold uppercase text-center leading-tight transition-all duration-700"
+                style={{
+                    fontFamily: style.fontFamily,
+                    color: style.color,
+                    WebkitTextStroke: scaleTextStroke(style.textStroke),
+                    textShadow: textShadowValue,
+                    letterSpacing: style.letterSpacing,
+                }}
+            >
+                {previewText}
+            </span>
+        )
+    }
+
+    // 3a. SINGLE-WORD (MrBeast): one giant word at a time with a spring pop
+    if (style.animation === 'single-word') {
+        const wordIdxMod = wordIndex % previewWords.length
+        const displayWord = style.textTransform === 'uppercase'
+            ? previewWords[wordIdxMod].toUpperCase()
+            : previewWords[wordIdxMod]
+        return (
+            <motion.span
+                key={wordIdxMod}
+                initial={{ scale: 0.5, opacity: 0 }}
+                animate={{ scale: [0.5, 1.2, 0.95, 1.0], opacity: 1 }}
+                transition={{ duration: 0.25, ease: 'easeOut' }}
+                className="text-center"
+                style={{
+                    fontFamily: style.fontFamily,
+                    fontWeight: style.fontWeight,
+                    color: style.color,
+                    WebkitTextStroke: scaleTextStroke(style.textStroke),
+                    textShadow: scaleTextShadow(style.textShadow),
+                    letterSpacing: style.letterSpacing,
+                    fontSize: '1.6rem',  // large — only one word fits
+                    lineHeight: 1,
+                }}
+            >
+                {displayWord}
+            </motion.span>
+        )
+    }
+
+    // 3b. Word-by-Word Active Highlights (Hormozi, Karaoke, Boxed, Bounce)
+    const isWordAnim = ['karaoke', 'word-pop', 'word-box', 'word-bounce', 'bounce', 'pop'].includes(style.animation)
+    if (isWordAnim) {
+        return (
+            <span
+                className="text-center leading-tight flex flex-wrap justify-center gap-x-2 gap-y-1"
+                style={{
+                    fontFamily: style.fontFamily,
+                    fontWeight: style.fontWeight,
+                    letterSpacing: style.letterSpacing,
+                    textTransform: style.textTransform as any,
+                    WebkitTextStroke: scaleTextStroke(style.textStroke),
+                    textShadow: scaleTextShadow(style.textShadow),
+                }}
+            >
+                {previewWords.map((word, i) => {
+                    const wordIdxMod = wordIndex % (previewWords.length + 1)
+                    const isActive = i === wordIdxMod
+                    const isPassed = i < wordIdxMod
+
+                    // Start with base word styles — inherit font from wrapper
+                    let wordStyle: React.CSSProperties = {
+                        color: style.color,
+                        backgroundColor: style.backgroundColor !== 'transparent' ? style.backgroundColor : undefined,
+                        borderRadius: style.borderRadius > 0 ? `${style.borderRadius}px` : undefined,
+                        padding: style.padding && style.padding !== '0' ? style.padding : undefined,
+                        transition: 'all 0.2s ease',
+                    }
+
+                    // Per-animation highlight logic
+                    if (style.animation === 'karaoke') {
+                        // karaoke: already-passed words glow in highlight, future stay dim
+                        wordStyle.color = isPassed ? style.highlightColor : style.color
+                    } else if (style.animation === 'word-box') {
+                        if (isActive) {
+                            wordStyle.backgroundColor = style.highlightColor
+                            wordStyle.padding = '2px 6px'
+                            wordStyle.borderRadius = '4px'
+                        }
+                    } else if (style.animation === 'word-pop') {
+                        // Only the active (current) word switches to highlight colour
+                        if (isActive) {
+                            wordStyle.color = style.highlightColor
+                        }
+                    }
+
+                    // Overlay activeWordStyle on the current word only
+                    if (isActive && style.activeWordStyle) {
+                        const scaled = { ...style.activeWordStyle }
+                        if (scaled.textShadow) scaled.textShadow = scaleTextShadow(scaled.textShadow)
+                        if ((scaled as any).WebkitTextStroke) (scaled as any).WebkitTextStroke = scaleTextStroke((scaled as any).WebkitTextStroke)
+                        wordStyle = { ...wordStyle, ...scaled }
+                    }
+
+                    return (
+                        <motion.span
                             key={i}
-                            className="transition-colors duration-200"
-                            style={{
-                                color: i < wordIndex ? '#00E5FF' : '#FFFFFF',
-                                textShadow: i < wordIndex
-                                    ? '0 0 8px rgba(0,229,255,0.6)'
-                                    : '1px 1px 3px rgba(0,0,0,0.7)',
-                            }}
+                            animate={
+                                isActive && (style.animation === 'word-pop')
+                                    ? { scale: [1, 1.3, 1] }
+                                    : isActive && (style.animation === 'word-bounce' || style.animation === 'bounce')
+                                    ? { scale: [1, 1.2, 1], y: [0, -5, 0] }
+                                    : { scale: 1, y: 0 }
+                            }
+                            transition={{ duration: 0.25, ease: 'easeOut' }}
+                            className="inline-block"
+                            style={wordStyle}
                         >
-                            {word}{' '}
-                        </span>
-                    ))}
-                </span>
-            )}
+                            {word}
+                        </motion.span>
+                    )
+                })}
+            </span>
+        )
+    }
 
-            {/* Typewriter */}
-            {styleId === 'typewriter' && (
-                <span
-                    className="text-lg font-bold text-center leading-tight"
-                    style={{
-                        fontFamily: 'monospace',
-                        color: '#00FF88',
-                        backgroundColor: 'rgba(0,0,0,0.6)',
-                        padding: '4px 10px',
-                        borderRadius: '6px',
-                        textShadow: '0 0 8px rgba(0,255,136,0.4)',
-                    }}
-                >
-                    {previewText.slice(0, charIndex)}
-                    <motion.span
-                        animate={{ opacity: [1, 0] }}
-                        transition={{ repeat: Infinity, duration: 0.6 }}
-                        className="inline-block w-[2px] h-[1em] bg-green-400 ml-[2px] align-text-bottom"
-                    />
-                </span>
-            )}
-
-            {/* Neon Glow */}
-            {styleId === 'neon-glow' && (
-                <span
-                    className="text-lg font-bold uppercase text-center leading-tight transition-all duration-700"
-                    style={{
-                        fontFamily: "'Orbitron', sans-serif",
-                        color: '#FF00FF',
-                        textShadow: glowPhase
-                            ? '0 0 8px #FF00FF, 0 0 16px #FF00FF, 0 0 32px #FF00FF'
-                            : '0 0 4px #FF00FF, 0 0 8px #FF00FF',
-                    }}
-                >
-                    {previewText}
-                </span>
-            )}
-
-            {/* Bounce Box */}
-            {styleId === 'bounce-box' && (
-                <motion.span
-                    key={isSelected ? 'sel' : 'unsel'}
-                    initial={{ y: 40, scale: 0.5, opacity: 0 }}
-                    animate={{ y: 0, scale: 1, opacity: 1 }}
-                    transition={{ type: 'spring', stiffness: 300, damping: 15 }}
-                    className="text-white font-extrabold text-base uppercase text-center leading-tight"
-                    style={{
-                        backgroundColor: '#FF3366',
-                        padding: '6px 14px',
-                        borderRadius: '10px',
-                    }}
-                >
-                    {previewText}
-                </motion.span>
-            )}
-
-            {/* Cinematic Fade */}
-            {styleId === 'cinematic-fade' && (
-                <motion.span
-                    key={isSelected ? 'sel' : 'unsel'}
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 1.2, ease: 'easeOut' }}
-                    className="text-white font-bold text-xl text-center leading-tight italic"
-                    style={{
-                        fontFamily: "'Playfair Display', serif",
-                        textShadow: '2px 2px 6px rgba(0,0,0,0.9)',
-                    }}
-                >
-                    {previewText}
-                </motion.span>
-            )}
-        </div>
+    // 4. Default / Fade / Generic style
+    const isUppercase = style.textTransform === 'uppercase'
+    return (
+        <motion.span
+            key={isSelected ? 'sel' : 'unsel'}
+            initial={{ opacity: 0, y: 5 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.8 }}
+            className="text-center leading-tight text-lg"
+            style={{
+                fontFamily: style.fontFamily,
+                color: style.color,
+                fontWeight: style.fontWeight,
+                WebkitTextStroke: scaleTextStroke(style.textStroke),
+                textShadow: scaleTextShadow(style.textShadow),
+                letterSpacing: style.letterSpacing,
+            }}
+        >
+            {isUppercase ? previewText.toUpperCase() : previewText}
+        </motion.span>
     )
 }
 
 function SelectCaptionStyle({ selected, onSelect }: Props) {
     return (
         <div>
+            {/* Load Google Fonts for Caption Previews */}
+            <link 
+                href="https://fonts.googleapis.com/css2?family=Montserrat:ital,wght@0,600;0,700;0,800;0,900;1,700&family=Orbitron:wght@700;800;900&family=Playfair+Display:ital,wght@0,700;1,700&family=Space+Mono:wght@700&family=Poppins:wght@800&family=Inter:wght@600;700;800;900&display=swap" 
+                rel="stylesheet" 
+            />
+
             <h2 className="text-2xl font-bold mb-1">Caption Style</h2>
             <p className="text-muted-foreground mb-6">Choose how captions appear on your videos</p>
 

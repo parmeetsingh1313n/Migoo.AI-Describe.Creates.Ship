@@ -1,0 +1,242 @@
+================================================================================
+      IMAGE GENERATION PROMPTS GUIDE FOR CHATGPT
+      WITH EXACT PLACEMENT IN REPORT
+================================================================================
+
+This file contains 10 ready-to-use ChatGPT image generation prompts.
+Each prompt tells you EXACTLY which section/heading of the report to
+place the generated image under.
+
+
+================================================================================
+IMAGE 1: SYSTEM ARCHITECTURE DIAGRAM
+PLACE UNDER: Section 8 — System Design & Architecture (8.1 Architecture)
+================================================================================
+
+PROMPT:
+"Create a clean, professional system architecture diagram for a web
+application called Migoo. The diagram should show 5 layers stacked
+vertically:
+Layer 1 (top): Frontend with 5 boxes labeled 'Video Course Generator',
+'Short Video Generator', 'Motion Graphics', 'Migoo Studio', 'Notes Generator'
+Layer 2: Security layer with labels 'Clerk Auth', 'Rate Limiting', 'CSRF',
+'Zod Validation'
+Layer 3: API Orchestration with '17+ Route Handlers', 'Drizzle ORM'
+Layer 4: Background Workers with 'Inngest Workflows', 'Remotion Rendering'
+Layer 5 (bottom): External Services with boxes for 'Neon PostgreSQL',
+'Appwrite Storage', 'Sarvam AI', 'Groq LLM', 'Leonardo AI'
+Use a modern tech diagram style with rounded rectangles, soft shadows,
+and a blue-purple color scheme. White background, clean lines. No extra text."
+
+
+================================================================================
+IMAGE 2: DATABASE ER DIAGRAM
+PLACE UNDER: Section 8 — System Design & Architecture (8.2 Database Schema)
+================================================================================
+
+PROMPT:
+"Create a clean ER diagram showing 9 database tables with relationships:
+Center: 'users' table
+Connected 1:N to: 'courses' → 'chapter_content_slides', 'courses' → 'course_images'
+Connected 1:N to: 'short_video_series' → 'short_video_assets'
+Connected 1:N to: 'motion_graphic_projects' → 'motion_graphic_messages'
+Connected 1:N to: 'notes_projects'
+Each table as a rectangle with table name in colored header bar.
+Show primary key and foreign key columns inside each table.
+Use standard ER diagram notation with crow's foot for 1:N relationships.
+Light blue headers, white background, clean professional style.
+Suitable for a B.Tech university project report."
+
+
+================================================================================
+IMAGE 3: SECURITY LAYERS DIAGRAM
+PLACE UNDER: Section 8 — System Design & Architecture (8.3 Security)
+================================================================================
+
+PROMPT:
+"Create a layered security architecture diagram showing 8 concentric
+shield layers from outside to inside:
+Layer 1 (outermost): 'CSRF Origin Validation'
+Layer 2: 'IP Rate Limiting (60 req/min)'
+Layer 3: 'Clerk OAuth Authentication'
+Layer 4: 'Route-Level Authorization'
+Layer 5: 'Zod Input Schema Validation'
+Layer 6: 'XSS Prevention (HTML Sanitization)'
+Layer 7: 'SQL Injection Protection (Drizzle ORM)'
+Layer 8 (innermost): 'Application Logic (Safe Zone)'
+Use a shield or concentric circles design. Red-to-green gradient from
+outside to inside showing increasing safety. Professional security
+diagram style suitable for a project report. White background."
+
+
+================================================================================
+IMAGE 4: VIDEO COURSE GENERATOR PIPELINE
+PLACE UNDER: Section 9 — Module 1: Video Course Generator
+================================================================================
+
+PROMPT:
+"Create a horizontal flowchart showing a video course generation pipeline.
+Steps from left to right connected by arrows:
+1. 'User enters topic' (blue rounded box)
+2. 'Groq LLM generates course layout' (purple box with brain icon)
+3. 'AI generates slide content' (purple box with document icon)
+4. 'Sarvam AI TTS narration' (green box with microphone icon)
+5. 'Word-level caption sync' (orange box with text icon)
+6. 'Leonardo AI image generation' (red box with image icon)
+7. 'Remotion video composition' (dark blue box with video icon)
+8. 'Final MP4 video ready' (blue rounded box with checkmark)
+Modern flat design with small icons inside each step box.
+Clean arrows connecting steps. White background. Professional
+flowchart suitable for a university report."
+
+
+================================================================================
+IMAGE 5: SHORT VIDEO 7-STEP INNGEST PIPELINE
+PLACE UNDER: Section 10 — Module 2: Short Video Generator
+================================================================================
+
+PROMPT:
+"Create a vertical step-by-step pipeline diagram with 7 numbered steps
+connected by downward arrows:
+Step 1: 'Fetch Series Data' with database icon
+Step 2: 'AI Script Generation (Groq LLM)' with brain icon
+Step 3: 'TTS Voice Generation (Sarvam AI)' with microphone icon
+Step 4: 'Caption Synchronization' with subtitle/text icon
+Step 5: 'AI Image Generation (Leonardo AI)' with image icon
+Step 5.5: 'Avatar Clip Injection' with person/video icon
+Step 6: 'Remotion Video Render' with film/video icon
+Step 7: 'Upload & Complete' with cloud upload icon
+Show 'Inngest Durable Workflow' as a vertical sidebar label on the left.
+Each step as a rounded card with step number, title, and small icon.
+Modern gradient style. Show retry arrows on Steps 2, 3, 5 indicating
+automatic retry capability. White background. Professional style."
+
+
+================================================================================
+IMAGE 6: MOTION GRAPHICS 25+ SCENE TYPES GRID
+PLACE UNDER: Section 11 — Module 3: Motion Graphics Generator
+================================================================================
+
+PROMPT:
+"Create a visual grid layout showing 25 motion graphic scene types
+organized in 5 category rows:
+Row 1 'REVEAL': Title Reveal, Logo Reveal, Subtitle, Tagline (4 cards)
+Row 2 'DATA': Stat Counter, Progress Bar, Pie Chart, Bar Chart (4 cards)
+Row 3 'CONTENT': Feature List, Comparison, Testimonial, Pricing, Timeline (5 cards)
+Row 4 'VISUAL': Image Showcase, Split Screen, Gallery, Kinetic Text (4 cards)
+Row 5 'CTA': CTA Button, Contact Info, Social Media, QR Code, End Screen (5 cards)
+Each scene type as a small card with a simple icon and label below.
+Category names on the left as row headers.
+Modern UI card grid with rounded corners, subtle shadows.
+Purple-blue color scheme. White background.
+Professional style suitable for a project report."
+
+
+================================================================================
+IMAGE 7: MIGOO STUDIO WORKFLOW
+PLACE UNDER: Section 12 — Module 4: Migoo Studio
+================================================================================
+
+PROMPT:
+"Create a flowchart showing the Migoo Studio workflow. Steps:
+1. 'Upload Source Document (PDF/ZIP/Image)' at top
+2. Arrow down to 'Sarvam Vision OCR — Extract Text'
+3. Arrow down to 'Groq LLM — Generate 6-Scene Script'
+4. Arrow down to 'Human Script Editor (Touch Score)'
+5. Arrow down splits into 3 parallel paths:
+   Left: 'Scene Asset Manager (per-scene: AI/Upload/Doc/Video)'
+   Center: 'Voice Config (per-scene pace & temp)'
+   Right: 'Caption & Music Selection'
+6. All 3 merge into 'Build studioPayload'
+7. Arrow down to 'Inngest Pipeline (7 steps)'
+8. Arrow down to 'Final Mixed-Media Video'
+Modern flowchart with rounded rectangles, split/merge arrows.
+Blue-green color scheme. White background. Professional style."
+
+
+================================================================================
+IMAGE 8: NOTES GENERATOR TIERED MODEL STRATEGY
+PLACE UNDER: Section 13 — Module 5: AI Notes Generator
+================================================================================
+
+PROMPT:
+"Create a flowchart showing an AI tiered model strategy:
+Start: 'Document Content (any size)' at top
+Arrow to: 'Smart Content Sampler' box (shows 'Detect headings, sample sections')
+Arrow to: 'Tier 1: LLaMA 70B — High Quality (16K chars max)'
+Decision diamond: 'Too large or rate limited?'
+If NO → arrow to 'Generate Structured JSON Notes'
+If YES → arrow to 'Tier 2: LLaMA 8B — High Capacity (55K chars max)'
+Then arrow to 'Generate Structured JSON Notes'
+Arrow to: '6 Note Styles × 4 Page Designs'
+Arrow to: 'A4 Multi-Page Renderer → PDF/PNG Export'
+Clean flowchart with decision diamond, process rectangles.
+Show the escalation path clearly. Green for success path,
+orange for escalation path. White background. Professional style."
+
+
+================================================================================
+IMAGE 9: TTS ENHANCED PIPELINE
+PLACE UNDER: Section 9 — Module 1 (under Step 3: TTS Narration)
+================================================================================
+
+PROMPT:
+"Create a horizontal pipeline flowchart showing text-to-speech processing:
+Input box: 'Raw Narration Text'
+Arrow to Step 1: 'Text Sanitization' (strip HTML, fix quotes, remove Unicode)
+Arrow to Step 2: 'Smart Chunking' (sentence boundaries, max 2400 chars)
+Arrow to Step 3: 'Sarvam AI TTS API' (with retry loop arrow showing
+'3 retries with 2s→4s→8s exponential backoff')
+Arrow to Step 4: 'WAV File Merging' (strip headers, concat PCM, rebuild WAV)
+Arrow to Output: 'Final Merged Audio File'
+Show the retry loop as a circular arrow on Step 3.
+Modern pipeline style with rounded boxes and directional arrows.
+Green color scheme. White background. Clean professional style."
+
+
+================================================================================
+IMAGE 10: COMPLETE PLATFORM DATA FLOW DIAGRAM
+PLACE UNDER: Section 6 — System Overview (6.3 Workflow) OR Section 8
+================================================================================
+
+PROMPT:
+"Create a comprehensive data flow diagram showing 3 parallel user flows
+for a platform called Migoo:
+
+Flow 1 (top): User → 'Create Course' → Groq LLM → Slides →
+Sarvam TTS → Leonardo AI Images → Remotion → Final Video
+
+Flow 2 (middle): User → 'Create Short Series' → Inngest 7-Step Pipeline →
+Script → Voice → Captions → Images → Avatar Clips → Final Video
+
+Flow 3 (bottom): User → 'Upload Document' → Sarvam Vision OCR →
+Groq LLM → Structured Notes JSON → A4 Renderer → PDF Export
+
+All 3 flows share a bottom bar: 'Shared Infrastructure: Neon PostgreSQL |
+Appwrite Storage | Clerk Auth'
+
+Show data stores as cylinders, processes as rectangles, users as stick
+figures. Use 3 different color codes for 3 flows (blue, green, purple).
+White background. Professional DFD style for a project report."
+
+
+================================================================================
+                    QUICK PLACEMENT SUMMARY
+================================================================================
+
+Image #    Report Section                           Page
+-------    ---------------------------------------- ----
+Image 1    8. System Design & Architecture          ~23
+Image 2    8. System Design (Database Schema)       ~23
+Image 3    8. System Design (Security)              ~23
+Image 4    9. Module 1: Video Course Generator      ~24
+Image 5    10. Module 2: Short Video Generator      ~27
+Image 6    11. Module 3: Motion Graphics Generator  ~30
+Image 7    12. Module 4: Migoo Studio               ~33
+Image 8    13. Module 5: AI Notes Generator         ~36
+Image 9    9. Module 1 (TTS Pipeline subsection)    ~25
+Image 10   6. System Overview OR 8. Architecture    ~14/23
+
+TIP: You can also use Image 10 as the full-page diagram on the
+"System Design & Architecture Diagram" page (like the original
+Talk2Hire report had a full-page architecture diagram).

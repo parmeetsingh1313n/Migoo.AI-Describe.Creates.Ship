@@ -24,6 +24,8 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
+import MorphingText from './_components/MorphingText'
+import EmptyShortsState from './_components/EmptyShortsState'
 
 interface ShortSeries {
     id: number
@@ -196,12 +198,30 @@ function ShortGeneratorPage() {
                 transition={{ duration: 0.5 }}
                 className="text-center mb-8"
             >
-                <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-gradient-to-r from-primary/10 to-accent/10 border border-primary/10 mb-4">
-                    <Zap className="w-4 h-4 text-primary" />
-                    <span className="text-sm font-medium text-primary">AI Short Video Generator</span>
-                </div>
-                <h1 className="text-3xl md:text-4xl font-bold">
-                    Your <span className="bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">Short Series</span>
+
+                <h1 
+                  className="text-4xl md:text-5xl text-center text-foreground"
+                  style={{
+                    fontFamily: "'Instrument Serif', serif",
+                    fontStyle: 'italic',
+                    fontWeight: 700,
+                    letterSpacing: '-0.3px',
+                    lineHeight: '1.25',
+                    minHeight: '60px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}
+                >
+                    <MorphingText
+                      texts={[
+                        ["Your", "Short Series"],
+                        ["Create", "Viral Content"],
+                        ["Engage", "Your Audience"],
+                        ["Describe It,", "Ship It"]
+                      ]}
+                      holdDelay={3000}
+                    />
                 </h1>
             </motion.div>
 
@@ -315,26 +335,7 @@ function ShortGeneratorPage() {
 
                     {/* Empty State */}
                     {!loading && series.length === 0 && (
-                        <motion.div
-                            initial={{ opacity: 0, scale: 0.95 }}
-                            animate={{ opacity: 1, scale: 1 }}
-                            className="text-center py-16"
-                        >
-                            <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-primary/10 to-accent/10 flex items-center justify-center mx-auto mb-5">
-                                <Clapperboard className="w-10 h-10 text-primary/50" />
-                            </div>
-                            <h3 className="text-xl font-bold mb-2">No series yet</h3>
-                            <p className="text-muted-foreground text-sm mb-6 max-w-sm mx-auto">
-                                Create your first AI-generated short video series and start producing viral content
-                            </p>
-                            <Link
-                                href="/short-generator/create"
-                                className="inline-flex items-center gap-2 px-6 py-3 rounded-xl text-sm font-semibold bg-gradient-to-r from-primary to-accent text-white shadow-lg shadow-primary/20 hover:shadow-xl hover:scale-[1.02] transition-all"
-                            >
-                                <Plus className="w-4 h-4" />
-                                Create Your First Series
-                            </Link>
-                        </motion.div>
+                        <EmptyShortsState />
                     )}
 
                     {/* Series Grid */}

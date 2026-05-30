@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, memo, useCallback } from "react";
 import {
   AbsoluteFill,
   Audio,
@@ -41,10 +41,64 @@ const AUTO_SCALE_SCRIPT = `
   var MAX_SCALE = 1.5;
   var lastScale = -1;
 
+  // ── Apply Reveal.js data-background-* attributes as real CSS ──────────────
+  // Our runtime doesn't use Reveal.js, so data-background-gradient / color
+  // are never applied automatically. Without this fix all slides render on
+  // a plain white background, making white text invisible.
+  function applyBackgrounds() {
+    // Handle data-background-gradient
+    document.querySelectorAll('[data-background-gradient]').forEach(function(el) {
+      var grad = el.getAttribute('data-background-gradient');
+      if (grad) {
+        el.style.background = grad;
+        el.style.backgroundImage = grad;
+        // Ensure the element covers the full viewport
+        if (!el.style.minHeight) el.style.minHeight = VIEWPORT_H + 'px';
+        if (!el.style.minWidth)  el.style.minWidth  = VIEWPORT_W + 'px';
+      }
+    });
+
+    // Handle data-background-color
+    document.querySelectorAll('[data-background-color]').forEach(function(el) {
+      var col = el.getAttribute('data-background-color');
+      if (col) {
+        el.style.backgroundColor = col;
+        if (!el.style.minHeight) el.style.minHeight = VIEWPORT_H + 'px';
+        if (!el.style.minWidth)  el.style.minWidth  = VIEWPORT_W + 'px';
+      }
+    });
+
+    // Handle data-background-image
+    document.querySelectorAll('[data-background-image]').forEach(function(el) {
+      var img = el.getAttribute('data-background-image');
+      if (img) {
+        el.style.backgroundImage = 'url(' + img + ')';
+        el.style.backgroundSize = 'cover';
+        el.style.backgroundPosition = 'center';
+        if (!el.style.minHeight) el.style.minHeight = VIEWPORT_H + 'px';
+        if (!el.style.minWidth)  el.style.minWidth  = VIEWPORT_W + 'px';
+      }
+    });
+
+    // Mirror first slide's background onto body for seamless look
+    var firstBg = document.querySelector('[data-background-gradient]');
+    if (firstBg) {
+      document.body.style.background = firstBg.getAttribute('data-background-gradient') || '';
+    } else {
+      var firstCol = document.querySelector('[data-background-color]');
+      if (firstCol) {
+        document.body.style.backgroundColor = firstCol.getAttribute('data-background-color') || '';
+      } else {
+        // Default dark background so white text is always visible
+        document.body.style.background = 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)';
+      }
+    }
+  }
+
   function getWrapper() {
     var children = document.body.children;
     for (var i = 0; i < children.length; i++) {
-      if (children[i].tagName === 'DIV') return children[i];
+      if (children[i].tagName === 'DIV' || children[i].tagName === 'SECTION') return children[i];
     }
     return children[0];
   }
@@ -66,9 +120,22 @@ const AUTO_SCALE_SCRIPT = `
     var naturalH = wrapper.scrollHeight;
     var naturalW = wrapper.scrollWidth;
 
+    // Baseline slide dimensions are 1280x720. If content is smaller or collapses due to
+    // absolutely positioned or floated elements, treat the baseline as 720px/1280px.
+    // This resolves layout collapses and prevents sparse slides from scaling up excessively.
+    if (naturalH < VIEWPORT_H) naturalH = VIEWPORT_H;
+    if (naturalW < VIEWPORT_W) naturalW = VIEWPORT_W;
+
+    // ── OVERFLOW PREVENTION: Never zoom out below scale = 1.0 ──────────────────
+    // If content overflows 720px/1280px, it is CLIPPED by the CSS on <section>
+    // (overflow:hidden; height:720px). We do NOT zoom out — that makes text tiny
+    // and unreadable. Cap naturalH/W to viewport so scale never drops below 1.
+    if (naturalH > VIEWPORT_H) naturalH = VIEWPORT_H;
+    if (naturalW > VIEWPORT_W) naturalW = VIEWPORT_W;
+
     var scaleY = VIEWPORT_H / Math.max(naturalH, 1);
     var scaleX = VIEWPORT_W / Math.max(naturalW, 1);
-    var scale = Math.min(scaleX, scaleY);
+    scale = Math.min(scaleX, scaleY);
     scale = Math.min(scale, MAX_SCALE);
     scale = Math.max(scale, MIN_SCALE);
 
@@ -94,6 +161,7 @@ const AUTO_SCALE_SCRIPT = `
   });
 
   function init() {
+    applyBackgrounds(); // ← run backgrounds FIRST, before scaling
     var wrapper = getWrapper();
     if (wrapper) {
       observer.observe(wrapper, { childList: true, subtree: true, attributes: true });
@@ -245,8 +313,15 @@ const FRAGMENT_RUNTIME_SCRIPT = `
  * Handles both old (data-reveal) and new (data-fragment-index) slide formats.
  * NO CDN dependencies — everything is inlined.
  */
-const injectRuntime = (html: string): string => {
+export const injectRuntime = (html: string): string => {
   let content = html;
+
+  // ── FIX LLM ATTRIBUTE QUOTE MISMATCHES ─────────────────────────────────────
+  // Sometimes LLMs generate mismatched quotes, like style='margin-bottom: 6px;"
+  // or style='font-weight: 600;". This character-level sanitize ensures all
+  // attributes are properly matched before injecting into the iframe.
+  content = content.replace(/(\w+)='([^']*?)"/g, "$1='$2'");
+  content = content.replace(/(\w+)="([^"]*?)'/g, "$1=\"$2\"");
 
   // Strip structural tags
   content = content.replace(/<!DOCTYPE[^>]*>/gi, '');
@@ -280,6 +355,8 @@ const injectRuntime = (html: string): string => {
   <meta charset="UTF-8">
   ${headContent}
   <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Outfit:wght@300;400;500;600;700;800;900&family=Poppins:wght@300;400;500;600;700;800;900&family=Space+Grotesk:wght@400;500;600;700&family=Playfair+Display:ital,wght@0,400..900;1,400..900&family=Instrument+Serif:ital@0;1&family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&display=swap');
+
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
     /* ---- HIDE SCROLLBAR APPEARANCE (cosmetic only) ---- */
@@ -364,6 +441,506 @@ const injectRuntime = (html: string): string => {
 
     /* Ensure images behave */
     img { max-width: 100%; }
+
+    /* ── HALLUCINATION RECOVERY ────────────────────────────────────────────────
+     * owl-alpha sometimes generates CSS class names instead of inline styles.
+     * These rules ensure those class names always render correctly,
+     * fixing all existing slides in the DB without re-generation.
+     * ──────────────────────────────────────────────────────────────────────── */
+
+    /* Glassmorphism cards */
+    .glassmorphism-card, .glassmorphism, .glass-card, .glass {
+      background: rgba(255,255,255,0.07) !important;
+      backdrop-filter: blur(16px) !important;
+      -webkit-backdrop-filter: blur(16px) !important;
+      border: 1px solid rgba(255,255,255,0.13) !important;
+      border-radius: 14px !important;
+      padding: 12px 16px !important;
+      color: #e2e8f0;
+    }
+
+    /* Gradient border / glowing edge cards */
+    .gradient-border-card, .gradient-border, .glowing-card, .glow-card {
+      background: #0f172a !important;
+      box-shadow: 0 0 0 2px rgba(139,92,246,0.55) !important;
+      border-radius: 12px !important;
+      padding: 12px 16px !important;
+      color: #e2e8f0;
+    }
+
+    /* Outlined / minimal cards */
+    .outlined-card, .outlined, .border-card, .minimal-card {
+      background: transparent !important;
+      border: 1.5px solid rgba(255,255,255,0.22) !important;
+      border-radius: 10px !important;
+      padding: 12px 16px !important;
+      color: #e2e8f0;
+    }
+
+    /* Neumorphic dark cards */
+    .neumorphic-card, .neumorphic, .neu-card {
+      background: #1e293b !important;
+      box-shadow: 6px 6px 12px rgba(0,0,0,0.45), -4px -4px 10px rgba(255,255,255,0.04) !important;
+      border-radius: 16px !important;
+      padding: 12px 16px !important;
+      color: #e2e8f0;
+    }
+
+    /* Gradient fill cards */
+    .gradient-fill-card, .gradient-card, .gradient-fill {
+      background: linear-gradient(135deg, rgba(59,130,246,0.18), rgba(139,92,246,0.18)) !important;
+      border: 1px solid rgba(255,255,255,0.09) !important;
+      border-radius: 12px !important;
+      padding: 12px 16px !important;
+      color: #e2e8f0;
+    }
+
+    /* Minimal tag / pill */
+    .minimal-tag, .tag-card, .pill-card, .chip {
+      background: rgba(255,255,255,0.09) !important;
+      border-radius: 24px !important;
+      padding: 6px 16px !important;
+      display: inline-flex !important;
+      align-items: center !important;
+      gap: 8px !important;
+      color: #e2e8f0;
+    }
+
+    /* Generic card / box fallback */
+    .card, .box, .content-box, .info-card, .feature-card, .stat-card {
+      background: rgba(255,255,255,0.07) !important;
+      border: 1px solid rgba(255,255,255,0.12) !important;
+      border-radius: 12px !important;
+      padding: 12px 16px !important;
+      color: #e2e8f0;
+    }
+
+    /* Badge / chip */
+    .badge, .label-badge, .status-badge {
+      display: inline-flex !important;
+      align-items: center !important;
+      padding: 4px 12px !important;
+      border-radius: 20px !important;
+      font-size: 11px !important;
+      font-weight: 600 !important;
+      background: rgba(139,92,246,0.2) !important;
+      border: 1px solid rgba(139,92,246,0.4) !important;
+      color: #c4b5fd !important;
+    }
+
+    /* Divider line */
+    .divider { height: 1px; background: rgba(255,255,255,0.12); margin: 8px 0; }
+    .divider-vertical { width: 1px; background: rgba(255,255,255,0.12); margin: 0 8px; align-self: stretch; }
+
+    /* Accent text colors the model might use by class */
+    .accent { color: #8b5cf6 !important; }
+    .accent-blue { color: #3b82f6 !important; }
+    .accent-pink { color: #ec4899 !important; }
+    .accent-green { color: #10b981 !important; }
+    .accent-cyan { color: #06b6d4 !important; }
+    .accent-orange { color: #f59e0b !important; }
+    .text-muted { color: #94a3b8 !important; }
+    .text-light { color: #cbd5e1 !important; }
+
+    /* Progress bars the model generates as class-based */
+    .progress-bar-container {
+      width: 100%; height: 10px;
+      background: rgba(255,255,255,0.06);
+      border-radius: 5px; overflow: hidden;
+    }
+    .progress-bar-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #3b82f6, #8b5cf6);
+      border-radius: 5px;
+    }
+
+    /* ── PREMIUM LAYOUT UTILITIES (PREVENTS OVERFLOW) ────────────────────────── */
+    .grid-2-col {
+      display: grid !important;
+      grid-template-columns: repeat(2, 1fr) !important;
+      gap: 16px !important;
+      width: 100% !important;
+    }
+    .grid-3-col {
+      display: grid !important;
+      grid-template-columns: repeat(3, 1fr) !important;
+      gap: 16px !important;
+      width: 100% !important;
+    }
+    .grid-4-col {
+      display: grid !important;
+      grid-template-columns: repeat(4, 1fr) !important;
+      gap: 12px !important;
+      width: 100% !important;
+    }
+    .flex-row-layout {
+      display: flex !important;
+      flex-direction: row !important;
+      gap: 16px !important;
+      align-items: stretch !important;
+      width: 100% !important;
+    }
+    .flex-col-layout {
+      display: flex !important;
+      flex-direction: column !important;
+      gap: 12px !important;
+      width: 100% !important;
+    }
+
+    /* Premium Tables */
+    .premium-table {
+      width: 100% !important;
+      border-collapse: collapse !important;
+      border-radius: 12px !important;
+      overflow: hidden !important;
+      background: rgba(255, 255, 255, 0.03) !important;
+      border: 1px solid rgba(255, 255, 255, 0.08) !important;
+      margin: 4px 0 !important;
+    }
+    .premium-table th {
+      background: linear-gradient(90deg, rgba(59, 130, 246, 0.15), rgba(139, 92, 246, 0.15)) !important;
+      color: #ffffff !important;
+      font-weight: 700 !important;
+      text-align: left !important;
+      padding: 10px 14px !important;
+      font-size: 13px !important;
+      border-bottom: 1.5px solid rgba(255, 255, 255, 0.15) !important;
+    }
+    .premium-table td {
+      padding: 8px 14px !important;
+      font-size: 11px !important;
+      color: #cbd5e1 !important;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important;
+    }
+    .premium-table tr:last-child td {
+      border-bottom: none !important;
+    }
+
+    /* Bento Grid System */
+    .bento-grid {
+      display: grid !important;
+      grid-template-columns: repeat(3, 1fr) !important;
+      gap: 14px !important;
+      width: 100% !important;
+    }
+    .bento-span-2 {
+      grid-column: span 2 !important;
+    }
+    .bento-span-3 {
+      grid-column: span 3 !important;
+    }
+
+    /* Process Flow System */
+    .process-row {
+      display: flex !important;
+      flex-direction: row !important;
+      justify-content: space-between !important;
+      width: 100% !important;
+      gap: 12px !important;
+      margin: 4px 0 !important;
+    }
+    .process-step {
+      flex: 1 !important;
+      background: rgba(255, 255, 255, 0.05) !important;
+      border: 1px solid rgba(255, 255, 255, 0.08) !important;
+      border-radius: 12px !important;
+      padding: 12px !important;
+      text-align: center !important;
+      position: relative !important;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15) !important;
+    }
+    .process-step-number {
+      width: 26px !important;
+      height: 26px !important;
+      border-radius: 50% !important;
+      background: linear-gradient(135deg, #3b82f6, #8b5cf6) !important;
+      display: flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      margin: 0 auto 8px auto !important;
+      font-size: 11px !important;
+      font-weight: 800 !important;
+      color: #ffffff !important;
+      box-shadow: 0 0 10px rgba(139, 92, 246, 0.4) !important;
+    }
+
+    /* Horizontal Timelines */
+    .timeline-row {
+      display: flex !important;
+      flex-direction: row !important;
+      justify-content: space-between !important;
+      align-items: flex-start !important;
+      width: 100% !important;
+      position: relative !important;
+      padding-top: 24px !important;
+      margin-top: 10px !important;
+    }
+    .timeline-bar {
+      position: absolute !important;
+      top: 6px !important;
+      left: 10% !important;
+      right: 10% !important;
+      height: 3px !important;
+      background: linear-gradient(90deg, #3b82f6, #8b5cf6, #ec4899) !important;
+      border-radius: 2px !important;
+      z-index: 0 !important;
+    }
+    .timeline-node {
+      display: flex !important;
+      flex-direction: column !important;
+      align-items: center !important;
+      text-align: center !important;
+      flex: 1 !important;
+      position: relative !important;
+      z-index: 1 !important;
+    }
+    .timeline-dot {
+      width: 14px !important;
+      height: 14px !important;
+      border-radius: 50% !important;
+      background: #ffffff !important;
+      border: 3px solid #8b5cf6 !important;
+      box-shadow: 0 0 8px #8b5cf6 !important;
+      margin-bottom: 8px !important;
+    }
+
+    /* Alert / Callout / Highlight Boxes */
+    .alert-box {
+      background: rgba(245, 158, 11, 0.08) !important;
+      border-left: 4px solid #f59e0b !important;
+      border-radius: 8px !important;
+      padding: 10px 14px !important;
+      color: #fef08a !important;
+      font-size: 12px !important;
+    }
+    .info-box {
+      background: rgba(59, 130, 246, 0.08) !important;
+      border-left: 4px solid #3b82f6 !important;
+      border-radius: 8px !important;
+      padding: 10px 14px !important;
+      color: #93c5fd !important;
+      font-size: 12px !important;
+    }
+    .success-box {
+      background: rgba(16, 185, 129, 0.08) !important;
+      border-left: 4px solid #10b981 !important;
+      border-radius: 8px !important;
+      padding: 10px 14px !important;
+      color: #a7f3d0 !important;
+      font-size: 12px !important;
+    }
+    .gradient-box {
+      background: linear-gradient(135deg, rgba(59, 130, 246, 0.1), rgba(139, 92, 246, 0.1)) !important;
+      border: 1px solid rgba(255, 255, 255, 0.08) !important;
+      border-left: 4px solid #8b5cf6 !important;
+      border-radius: 8px !important;
+      padding: 10px 14px !important;
+      color: #e9d5ff !important;
+      font-size: 12px !important;
+    }
+
+    /* Premium Lists */
+    .premium-list {
+      display: flex !important;
+      flex-direction: column !important;
+      gap: 8px !important;
+      width: 100% !important;
+      list-style: none !important;
+    }
+    .premium-list-item {
+      display: flex !important;
+      align-items: center !important;
+      gap: 10px !important;
+      padding: 6px 10px !important;
+      background: rgba(255, 255, 255, 0.03) !important;
+      border-radius: 8px !important;
+      font-size: 12px !important;
+      color: #cbd5e1 !important;
+    }
+
+    /* Code Block Premium */
+    .code-block-premium {
+      font-family: 'Space Mono', monospace !important;
+      font-size: 11px !important;
+      line-height: 1.4 !important;
+      max-height: 350px !important;
+      overflow: hidden !important;
+      border-radius: 12px !important;
+      border: 1px solid rgba(255, 255, 255, 0.08) !important;
+      background: #090d16 !important;
+      padding: 14px !important;
+      box-shadow: inset 0 2px 8px rgba(0,0,0,0.8) !important;
+    }
+
+    /* ── NEW PREMIUM VISUAL COMPONENTS ─────────────────────────────────────── */
+
+    /* 1. Stat / Metric Display */
+    .stat-block {
+      display: flex !important; flex-direction: column !important;
+      align-items: center !important; text-align: center !important;
+      padding: 14px 10px !important;
+      background: rgba(255,255,255,0.05) !important;
+      border-radius: 14px !important; border: 1px solid rgba(255,255,255,0.09) !important;
+    }
+    .stat-number {
+      font-size: 34px !important; font-weight: 900 !important; line-height: 1 !important;
+      background: linear-gradient(135deg, #3b82f6, #8b5cf6) !important;
+      -webkit-background-clip: text !important; -webkit-text-fill-color: transparent !important;
+    }
+    .stat-label {
+      font-size: 11px !important; color: #94a3b8 !important; margin-top: 5px !important;
+    }
+
+    /* 2. Two-Tone Split Card */
+    .split-card {
+      display: flex !important; border-radius: 12px !important;
+      overflow: hidden !important; border: 1px solid rgba(255,255,255,0.08) !important;
+    }
+    .split-card-accent {
+      width: 5px !important; flex-shrink: 0 !important;
+      background: linear-gradient(180deg, #3b82f6, #8b5cf6) !important;
+    }
+    .split-card-body {
+      flex: 1 !important; padding: 10px 14px !important;
+      background: rgba(255,255,255,0.04) !important;
+    }
+
+    /* 3. Terminal / Console Style Card */
+    .terminal-card {
+      background: #0a0f1a !important; border-radius: 10px !important;
+      border: 1px solid rgba(255,255,255,0.09) !important; overflow: hidden !important;
+    }
+    .terminal-header {
+      background: #111827 !important; padding: 7px 12px !important;
+      display: flex !important; align-items: center !important; gap: 6px !important;
+      border-bottom: 1px solid rgba(255,255,255,0.07) !important;
+    }
+    .terminal-dot {
+      width: 9px !important; height: 9px !important; border-radius: 50% !important;
+    }
+    .terminal-body {
+      padding: 10px 14px !important; font-family: 'Space Mono', monospace !important;
+      font-size: 11px !important; line-height: 1.6 !important; color: #a3e635 !important;
+    }
+
+    /* 4. Kanban-style 3-Column Board */
+    .kanban-board {
+      display: grid !important; grid-template-columns: repeat(3, 1fr) !important;
+      gap: 10px !important; width: 100% !important;
+    }
+    .kanban-column {
+      background: rgba(255,255,255,0.03) !important; border-radius: 10px !important;
+      border: 1px solid rgba(255,255,255,0.07) !important; overflow: hidden !important;
+    }
+    .kanban-header {
+      padding: 7px 10px !important; font-size: 11px !important; font-weight: 700 !important;
+      text-transform: uppercase !important; letter-spacing: 0.5px !important;
+    }
+    .kanban-item {
+      margin: 5px 7px !important; padding: 7px 9px !important;
+      background: rgba(255,255,255,0.05) !important; border-radius: 7px !important;
+      font-size: 11px !important; color: #cbd5e1 !important; border-left: 3px solid !important;
+    }
+
+    /* 5. Quote / Blockquote Card */
+    .quote-card {
+      border-left: 4px solid #8b5cf6 !important;
+      background: rgba(139,92,246,0.07) !important;
+      border-radius: 0 10px 10px 0 !important;
+      padding: 11px 16px !important; font-style: italic !important;
+      font-size: 13px !important; color: #e2e8f0 !important;
+    }
+    .quote-attribution {
+      font-size: 11px !important; color: #8b5cf6 !important;
+      margin-top: 6px !important; font-style: normal !important; font-weight: 600 !important;
+      display: block !important;
+    }
+
+    /* 6. Feature Matrix (4-col icon + label grid) */
+    .feature-matrix {
+      display: grid !important; grid-template-columns: repeat(4, 1fr) !important;
+      gap: 10px !important; width: 100% !important;
+    }
+    .feature-matrix-cell {
+      display: flex !important; flex-direction: column !important;
+      align-items: center !important; padding: 11px 8px !important;
+      background: rgba(255,255,255,0.04) !important; border-radius: 10px !important;
+      border: 1px solid rgba(255,255,255,0.07) !important; text-align: center !important;
+      font-size: 11px !important; color: #cbd5e1 !important; gap: 6px !important;
+    }
+
+    /* 7. Hotspot / Glow-Indicator Card */
+    .hotspot-card {
+      position: relative !important; padding: 11px 14px !important;
+      background: rgba(255,255,255,0.05) !important; border-radius: 12px !important;
+      border: 1px solid rgba(255,255,255,0.10) !important;
+    }
+    .hotspot-dot {
+      position: absolute !important; top: -4px !important; right: -4px !important;
+      width: 11px !important; height: 11px !important; border-radius: 50% !important;
+      background: #10b981 !important; box-shadow: 0 0 8px #10b981 !important;
+    }
+
+    /* 8. Alternating Row List */
+    .row-list {
+      display: flex !important; flex-direction: column !important;
+      width: 100% !important; border-radius: 10px !important; overflow: hidden !important;
+    }
+    .row-list-item {
+      display: flex !important; align-items: center !important; gap: 12px !important;
+      padding: 9px 14px !important; font-size: 12px !important; color: #cbd5e1 !important;
+    }
+    .row-list-item:nth-child(odd) { background: rgba(255,255,255,0.04) !important; }
+    .row-list-item:nth-child(even) { background: rgba(255,255,255,0.02) !important; }
+    .row-list-icon {
+      font-size: 16px !important; flex-shrink: 0 !important;
+      width: 24px !important; text-align: center !important;
+    }
+
+    /* 9. Before / After Diff Panel */
+    .diff-panel {
+      display: grid !important; grid-template-columns: 1fr 1fr !important;
+      gap: 3px !important; width: 100% !important;
+    }
+    .diff-panel-left {
+      background: rgba(244,63,94,0.07) !important;
+      border: 1px solid rgba(244,63,94,0.22) !important;
+      padding: 11px 14px !important; border-radius: 10px 0 0 10px !important;
+    }
+    .diff-panel-right {
+      background: rgba(16,185,129,0.07) !important;
+      border: 1px solid rgba(16,185,129,0.22) !important;
+      padding: 11px 14px !important; border-radius: 0 10px 10px 0 !important;
+    }
+    .diff-label {
+      font-size: 10px !important; font-weight: 700 !important;
+      text-transform: uppercase !important; letter-spacing: 0.6px !important;
+      margin-bottom: 8px !important; display: block !important;
+    }
+
+    /* ── HARD HEIGHT CLAMP: clips overflow, PREVENTS zoom-out ───────────────── */
+    /* The auto-scale script is patched to never zoom below scale=1.0.           */
+    /* Content that exceeds 720px is clipped here — not zoomed out or scrolled.  */
+    /* This guarantees slides always fill 1280×720 at full legible size.          */
+    section {
+      width: 1280px !important;
+      height: 720px !important;
+      max-height: 720px !important;
+      overflow: hidden !important;
+      box-sizing: border-box !important;
+    }
+    /* Clip the primary content wrapper div inside section */
+    section > div {
+      max-height: 720px !important;
+      overflow: hidden !important;
+      box-sizing: border-box !important;
+    }
+    /* Full-bleed / watermark absolute containers must respect 720px */
+    div[style*='height: 720px'],
+    div[style*='height:720px'] {
+      overflow: hidden !important;
+      max-height: 720px !important;
+    }
   </style>
 </head>
 <body${bodyAttrs} style="margin:0; padding:0; width:1280px; height:720px; overflow:hidden;">
@@ -376,11 +953,48 @@ const injectRuntime = (html: string): string => {
   return fullHtml;
 };
 
+/* ------------------- Isolated Static Slide IFrame ------------------- */
+
+/**
+ * Static component that is isolated from the 30fps useCurrentFrame() tick.
+ * This guarantees the iframe only loads and compiles ONCE when the slide mounts,
+ * rather than refreshing or reloading on every single frame, which blocks
+ * the main thread and causes severe audio preview stuttering/repetition.
+ */
+const StaticSlideIFrame = memo(({
+  html,
+  iframeRef,
+  onLoad
+}: {
+  html: string;
+  iframeRef: React.RefObject<HTMLIFrameElement | null>;
+  onLoad: () => void;
+}) => {
+  const srcDoc = useMemo(() => injectRuntime(html), [html]);
+
+  return (
+    <iframe
+      ref={iframeRef}
+      srcDoc={srcDoc}
+      onLoad={onLoad}
+      sandbox="allow-scripts allow-same-origin"
+      style={{
+        width: 1280,
+        height: 720,
+        border: "none",
+        display: "block",
+        backgroundColor: "#000"
+      }}
+    />
+  );
+});
+StaticSlideIFrame.displayName = "StaticSlideIFrame";
+
 /* ------------------- Slide iframe with fragment control ------------------- */
 
 const SlideIFrameWithReveal = ({ slide }: { slide: Slide }) => {
   const frame = useCurrentFrame();
-  const { fps } = useVideoConfig();
+  const { fps, durationInFrames } = useVideoConfig();
   const time = frame / fps;
 
   const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -447,10 +1061,22 @@ const SlideIFrameWithReveal = ({ slide }: { slide: Slide }) => {
     return () => window.removeEventListener('message', handleMessage);
   }, []);
 
-  const handleLoad = () => {
+  const handleLoad = useCallback(() => {
     // Also set ready on load as a fallback
     setTimeout(() => setReady(true), 100);
-  };
+  }, []);
+
+  const lastIndexRef = useRef<number>(-1);
+  const sentRevealIds = useRef<Set<string>>(new Set());
+  const lastTimeRef = useRef<number>(0);
+
+  // Reset tracking when ready transitions or slideId changes
+  useEffect(() => {
+    lastIndexRef.current = -1;
+    sentRevealIds.current.clear();
+    hasShownHeading.current = false;
+    lastTimeRef.current = 0;
+  }, [slide.slideId, ready]);
 
   // Drive reveals/fragments based on current time
   useEffect(() => {
@@ -459,15 +1085,29 @@ const SlideIFrameWithReveal = ({ slide }: { slide: Slide }) => {
     const win = iframeRef.current?.contentWindow;
     if (!win) return;
 
+    const isBackward = time < lastTimeRef.current;
+    lastTimeRef.current = time;
+
     if (isLegacy || (!isNewFragment && revealPlan.length > 0 && 'id' in revealPlan[0])) {
-      // LEGACY: send REVEAL messages with string IDs
+      // If we seeked backward, reset reveals
+      if (isBackward) {
+        sentRevealIds.current.clear();
+        hasShownHeading.current = false;
+        win.postMessage({ type: "RESET" }, "*");
+      }
+
+      // LEGACY: send REVEAL messages with string IDs only if they haven't been sent yet
       for (const item of revealPlan) {
         if ('id' in item && time >= item.at) {
-          if (!hasShownHeading.current && item.id === 'r1') {
-            win.postMessage({ type: "REVEAL_IMMEDIATE", id: "r1" }, "*");
-            hasShownHeading.current = true;
-          } else {
-            win.postMessage({ type: "REVEAL", id: item.id }, "*");
+          const id = item.id;
+          if (!sentRevealIds.current.has(id)) {
+            if (!hasShownHeading.current && id === 'r1') {
+              win.postMessage({ type: "REVEAL_IMMEDIATE", id: "r1" }, "*");
+              hasShownHeading.current = true;
+            } else {
+              win.postMessage({ type: "REVEAL", id }, "*");
+            }
+            sentRevealIds.current.add(id);
           }
         }
       }
@@ -476,6 +1116,7 @@ const SlideIFrameWithReveal = ({ slide }: { slide: Slide }) => {
       if (!hasShownHeading.current) {
         win.postMessage({ type: "REVEAL_IMMEDIATE", id: "r1" }, "*");
         hasShownHeading.current = true;
+        sentRevealIds.current.add('r1');
       }
     } else {
       // NEW FRAGMENT: send NAVIGATE_FRAGMENT with highest visible index
@@ -485,26 +1126,32 @@ const SlideIFrameWithReveal = ({ slide }: { slide: Slide }) => {
           targetIndex = item.index;
         }
       }
-      win.postMessage({ type: 'NAVIGATE_FRAGMENT', index: targetIndex }, '*');
+
+      // Only post if index changed or we seeked backward
+      if (targetIndex !== lastIndexRef.current || isBackward) {
+        win.postMessage({ type: 'NAVIGATE_FRAGMENT', index: targetIndex }, '*');
+        lastIndexRef.current = targetIndex;
+      }
     }
   }, [time, ready, revealPlan]);
 
+  // Soft audio fade-out in final 8 frames to prevent hard audio cuts between slides
+  const FADE_OUT_FRAMES = 8;
+  const audioVolume = interpolate(
+    frame,
+    [durationInFrames - FADE_OUT_FRAMES, durationInFrames],
+    [1, 0],
+    { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' }
+  );
+
   return (
     <AbsoluteFill style={{ backgroundColor: "#000" }}>
-      <iframe
-        ref={iframeRef}
-        srcDoc={injectRuntime(slide.html)}
+      <StaticSlideIFrame
+        html={slide.html}
+        iframeRef={iframeRef}
         onLoad={handleLoad}
-        sandbox="allow-scripts allow-same-origin"
-        style={{
-          width: 1280,
-          height: 720,
-          border: "none",
-          display: "block",
-          backgroundColor: "#000"
-        }}
       />
-      <Audio src={slide.audioFileUrl} />
+      <Audio src={slide.audioFileUrl} volume={audioVolume} pauseWhenBuffering />
     </AbsoluteFill>
   );
 };
@@ -566,8 +1213,6 @@ type Props = {
 export const CourseComposition = ({ slides, durationsBySlideId }: Props) => {
   const { fps } = useVideoConfig();
 
-  const TRANSITION_FRAMES = 10;
-
   const timeline = useMemo(() => {
     let from = 0;
     return slides.map((slide, index) => {
@@ -579,7 +1224,12 @@ export const CourseComposition = ({ slides, durationsBySlideId }: Props) => {
         isFirstSlide: index === 0
       };
 
-      from += dur - (index < slides.length - 1 ? TRANSITION_FRAMES : 0);
+      // ── NO transition overlap! ────────────────────────────────────────────────
+      // Overlapping sequences means two <Audio> elements play at the same time,
+      // causing the "repeating seconds" audio glitch. Each slide starts exactly
+      // when the previous one ends. The visual fade-in on SlideWithTransition
+      // still creates a smooth look without any audio overlap.
+      from += dur;
 
       return item;
     });
@@ -588,10 +1238,10 @@ export const CourseComposition = ({ slides, durationsBySlideId }: Props) => {
   return (
     <AbsoluteFill style={{ backgroundColor: "#000" }}>
       {timeline.map(({ slide, from, dur, isFirstSlide }) => (
-        <Sequence key={slide.slideId} from={from} durationInFrames={dur}>
+        <Sequence key={slide.slideId} from={from} durationInFrames={dur} premountFor={30}>
           <SlideWithTransition slide={slide} isFirstSlide={isFirstSlide} />
         </Sequence>
       ))}
     </AbsoluteFill>
   );
-};
+};

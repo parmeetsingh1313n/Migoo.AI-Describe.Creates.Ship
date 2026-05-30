@@ -3,6 +3,8 @@ import { useUser } from '@clerk/nextjs'
 import { motion } from 'framer-motion'
 import { ArrowRight, BookOpen, Brain, Clapperboard, Film, Layers, Mic2, Music, Sparkles, Wand2, Zap } from 'lucide-react'
 import Link from 'next/link'
+import SplittingText from './_components/SplittingText'
+import StudioFeatureCard from './_components/StudioFeatureCard'
 const features = [
     { icon: BookOpen,    label: "Document Source",       desc: "Upload PDFs, ZIPs, or Images",    color: "from-amber-400 to-orange-400" },
     { icon: Film,        label: "Scene Asset Manager",   desc: "Inject your photos & clips",     color: "from-pink-400 to-rose-400"   },
@@ -25,14 +27,29 @@ export default function StudioPage() {
                     transition={{ duration: 0.5, ease: [0.23, 1, 0.32, 1] }}
                     className="text-center mb-12"
                 >
-                    <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-white border border-border mb-5 shadow-sm">
-                        <Sparkles className="w-4 h-4 text-primary" />
-                        <span className="text-sm font-medium text-foreground">Migoo Studio</span>
-                    </div>
-                    <h1 className="text-4xl md:text-5xl font-bold tracking-tight mb-4 leading-tight text-foreground">
-                        You're the{" "}
-                        <span className="text-primary border-b border-primary/30">
-                            Director.
+                    <h1 
+                      className="text-4xl md:text-5xl text-center mb-4 flex items-center justify-center gap-x-2.5 flex-wrap text-foreground"
+                      style={{
+                        fontFamily: "'Instrument Serif', serif",
+                        fontStyle: 'italic',
+                        fontWeight: 700,
+                        letterSpacing: '-0.3px',
+                        lineHeight: '1.25',
+                        minHeight: '60px'
+                      }}
+                    >
+                        <SplittingText
+                          text="You're the"
+                          className="text-foreground"
+                          stagger={0.04}
+                        />
+                        <span className="text-primary border-b border-primary/30 shrink-0">
+                            <SplittingText
+                              text="Director."
+                              className="text-primary"
+                              stagger={0.04}
+                              delay={0.35}
+                            />
                         </span>
                     </h1>
                     <p className="text-muted-foreground max-w-lg mx-auto leading-relaxed">
@@ -111,23 +128,20 @@ export default function StudioPage() {
                     <p className="text-center text-sm font-bold text-muted-foreground/80 uppercase tracking-[0.2em] mb-8">
                         What makes Migoo Studio different
                     </p>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-5">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-12 pt-4">
                         {features.map((f, i) => (
                             <motion.div
                                 key={f.label}
                                 initial={{ opacity: 0, scale: 0.92, y: 10 }}
                                 animate={{ opacity: 1, scale: 1, y: 0 }}
                                 transition={{ delay: 0.45 + i * 0.08, duration: 0.4, ease: [0.23, 1, 0.32, 1] }}
-                                className="group relative flex items-start gap-4 p-5 rounded-2xl bg-white/80 backdrop-blur-md border border-white/40 hover:border-primary/20 shadow-[0_2px_10px_-3px_rgba(0,0,0,0.05)] hover:shadow-[0_8px_30px_-4px_rgba(0,0,0,0.1)] hover:-translate-y-1 transition-all duration-300 overflow-hidden"
                             >
-                                <div className="absolute inset-0 bg-gradient-to-br from-primary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none" />
-                                <div className={`w-11 h-11 rounded-2xl bg-gradient-to-br ${f.color} flex items-center justify-center shrink-0 shadow-md transform group-hover:scale-110 transition-transform duration-300`}>
-                                    <f.icon className="w-5 h-5 text-white" />
-                                </div>
-                                <div className="relative z-10 pt-0.5">
-                                    <p className="text-sm font-bold text-foreground mb-1 group-hover:text-primary transition-colors">{f.label}</p>
-                                    <p className="text-xs text-muted-foreground leading-relaxed">{f.desc}</p>
-                                </div>
+                                <StudioFeatureCard
+                                    label={f.label}
+                                    desc={f.desc}
+                                    color={f.color}
+                                    icon={f.icon}
+                                />
                             </motion.div>
                         ))}
                     </div>

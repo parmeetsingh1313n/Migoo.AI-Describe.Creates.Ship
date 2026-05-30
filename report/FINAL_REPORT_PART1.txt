@@ -1,0 +1,398 @@
+1 | P a g e
+
+                              Project Report
+                                  on
+              MIGOO – AI VIDEO CREATION PLATFORM
+                "Describe It. AI Creates It. Ship It."
+
+                            Submitted to
+                          GLA University
+
+              In Partial Fulfilment of the Requirement
+                      For the Degree of
+          Bachelor of Technology (Hons) in
+          Computer Science and Engineering
+
+                            Submitted by
+              Parmeet Singh (2315800059)
+              Vaishvik Sharma (2315800091)
+
+                       Under the Guidance of
+                       Ms. ANUSHKA SHUKLA
+
+          Department of Computer Engineering Applications
+                  GLA University, Mathura
+                          2025-26
+
+                       Mentor Signature -
+                        …………………..
+
+2 | P a g e
+
+                              ABSTRACT
+
+Video content has become the dominant form of communication across education, marketing, and social media. However, producing professional-quality videos typically demands an entire production team — scriptwriters, voice-over artists, graphic designers, video editors, and post-production specialists. This makes video creation prohibitively expensive and time-consuming for individuals, educators, small businesses, and content creators.
+
+To address this challenge, we developed Migoo — a full-stack AI video creation platform that automates the entire production pipeline from a simple text prompt to a fully rendered, downloadable video. The platform is built using Next.js 16 (frontend and API layer), TypeScript (end-to-end type safety), Neon PostgreSQL with Drizzle ORM (database), Clerk (authentication), Remotion (programmatic video rendering), and a multi-provider AI orchestration layer integrating Groq LLM, Google Gemini, OpenRouter, Sarvam AI (text-to-speech), and Leonardo AI (image generation).
+
+Migoo delivers five distinct production modules:
+
+1. Video Course Generator — Transforms a topic into a multi-chapter educational video course with AI-generated slides, narration, captions, and cinematic visuals.
+
+2. Short Video Generator — Produces viral short-form content (TikTok, Reels, Shorts) through a 7-step automated Inngest durable workflow.
+
+3. Motion Graphics Generator — Uses an AI chat interface to build animated promotional videos with 25+ professional scene types and 6 cinematic color palettes.
+
+4. Migoo Studio (Director's Chair) — Gives full creative control: upload source documents, inject custom assets per scene, edit scripts with a gamified Human Touch Score, and mix AI-generated content with user footage.
+
+5. AI Notes Generator — Converts topics, pasted content, or uploaded documents (PDF/images via Sarvam Vision OCR) into beautifully formatted, multi-page, printer-ready study notes in 6 styles with 4 decorative page designs.
+
+The system employs enterprise-grade security including Clerk authentication, IP-based rate limiting (60 req/min sliding window), CSRF origin validation, Zod schema validation on every API endpoint, XSS prevention, and SQL injection protection through Drizzle ORM's parameterized queries. The architecture uses Inngest for durable background job orchestration, Appwrite for cloud asset storage, and GitHub Actions for CI/CD automation. This report explains the complete development process, system architecture, module-wise implementation details, results, and future enhancements of Migoo.
+
+
+3 | P a g e
+
+                           ACKNOWLEDGEMENT
+
+We would like to express our sincere gratitude to our mentor and the Department of Computer Engineering and Applications, GLA University, for guiding and supporting us throughout the development of this project.
+
+This project, Migoo – AI Video Creation Platform, would not have been possible without the encouragement, feedback, and resources provided during the semester. We also thank our friends and classmates for their continuous motivation and collaboration.
+
+I would like to take this opportunity to express my heartfelt thanks to my guide Miss. Anushka Shukla, for her esteemed guidance and encouragement, especially through difficult times. Her suggestions broadened my vision and guided me to succeed in this work. I am also very grateful for her guidance and comments while studying part of my seminar and learnt many things under her leadership.
+
+I also extend my thanks to Dr. Ruby Panwar, Programme Coordinator of BTech(Hons) Computer Engineering & Applications, GLA University, Mathura for her valuable support. Also, I would like to thank all the faculty members for their encouragement, cooperation and help. My greatest thanks are to all who wished me success especially my parents, my friends whose support and care makes me stay on earth.
+
+Mr. Parmeet Singh
+Mr. Vaishvik Sharma
+BTech(Hons) CSE
+III Year, 2025-26
+
+
+4 | P a g e
+
+                              CONTENTS
+
+ 1. Introduction .................................................. 6
+ 2. Problem Statement ............................................. 7
+ 3. Objectives .................................................... 8
+ 4. Features & Feature Scope ...................................... 9
+ 5. Literature Review ............................................. 12
+ 6. System Overview ............................................... 14
+ 7. Methodology ................................................... 19
+ 8. System Design & Architecture .................................. 23
+ 9. Module 1 – Video Course Generator ............................. 24
+10. Module 2 – Short Video Generator .............................. 27
+11. Module 3 – Motion Graphics Generator .......................... 30
+12. Module 4 – Migoo Studio (Director's Chair) .................... 33
+13. Module 5 – AI Notes Generator ................................. 36
+14. Results & Analysis ............................................ 39
+15. Screenshots / Implementation Snippets ......................... 41
+16. Individual Work Contribution .................................. 43
+17. Team Work Summary ............................................. 44
+18. Conclusion .................................................... 45
+19. Future Scope .................................................. 46
+20. References .................................................... 47
+
+
+5 | P a g e
+
+                          1. INTRODUCTION
+
+The digital content landscape has undergone a radical transformation. Video is now the most consumed content format worldwide — over 80% of internet traffic is video, and platforms like YouTube, Instagram Reels, and TikTok collectively reach billions of users daily. In education, video-based learning has become the standard, with platforms like Coursera, Udemy, and Khan Academy relying entirely on video courses.
+
+Despite this explosive demand, creating professional videos remains a bottleneck. A single 10-minute educational video can require a scriptwriter to plan the content, a designer to build slides and graphics, a voice-over artist for narration, an image creator for visual assets, a video editor for composition, and a post-production specialist for captions and effects. This multi-person, multi-tool pipeline costs thousands of dollars and takes days or weeks.
+
+To solve this, we developed Migoo — a platform where a user simply describes what they want, and AI handles the rest. Migoo takes a text prompt and autonomously generates scripts, slides, narration, images, captions, and the final rendered video. It does this through five specialized production modules:
+
+    1. Video Course Generator — Full multi-chapter educational courses
+    2. Short Video Generator — Viral short-form content for social media
+    3. Motion Graphics Generator — Animated promotional/explainer videos
+    4. Migoo Studio — Full creative control with document-based workflows
+    5. AI Notes Generator — Printable study notes from any source material
+
+The platform integrates Next.js 16, TypeScript, Neon PostgreSQL, Clerk authentication, Remotion video engine, and multiple AI providers (Groq LLM, Sarvam AI, Leonardo AI) to deliver an end-to-end automated creation experience.
+
+
+6 | P a g e
+
+                       2. PROBLEM STATEMENT
+
+The current video and content creation ecosystem faces several critical limitations:
+
+• HIGH PRODUCTION COST — Professional video production requires hiring multiple specialists (scriptwriters, designers, voice artists, editors). A single short video can cost $500–$5000, making it inaccessible for students and small teams.
+
+• TIME-INTENSIVE WORKFLOW — Creating a 10-minute educational video manually involves 8–15 hours of work across scriptwriting, slide design, recording, editing, and post-production.
+
+• FRAGMENTED TOOL ECOSYSTEM — Creators must juggle 5–8 different tools (Google Slides, Canva, Audacity, Premiere Pro, etc.) that do not communicate with each other, leading to data loss and format incompatibilities.
+
+• NO AI-NATIVE VIDEO PIPELINE — Existing platforms offer AI for individual tasks (script generation OR image creation OR TTS) but none provide a unified, end-to-end pipeline that goes from text prompt to rendered video autonomously.
+
+• LIMITED CONTENT FORMATS — Most tools specialize in one format. Creators need separate solutions for courses, shorts, motion graphics, and study materials — each with different learning curves.
+
+• NO DOCUMENT-TO-VIDEO CONVERSION — Educators and professionals have existing content in PDFs, documents, and presentations but lack tools to automatically transform this material into video format.
+
+• LACK OF MULTI-LANGUAGE SUPPORT — Global content creation demands multi-language narration, but most platforms only support English TTS with limited voice options.
+
+
+7 | P a g e
+
+                          3. OBJECTIVES
+
+The main objectives of Migoo are:
+
+• Automate the entire video creation pipeline — Eliminate the need for manual scriptwriting, slide design, voice recording, image sourcing, and video editing by using AI at every stage.
+
+• Provide five specialized production modules — Cover all major content creation needs: educational courses, viral shorts, motion graphics, studio-quality mixed-media videos, and printable notes.
+
+• Implement multi-provider AI orchestration — Use Groq LLM for script/layout generation, Sarvam AI for multi-language text-to-speech, Leonardo AI for cinematic image generation, and Gemini for document analysis — with automatic fallback chains.
+
+• Build a scalable full-stack architecture — Use Next.js 16 App Router for the frontend and API layer, Neon PostgreSQL with Drizzle ORM for the database, Inngest for durable background workflows, and Appwrite for cloud storage.
+
+• Ensure enterprise-grade security — Implement Clerk authentication, IP-based rate limiting, CSRF protection, Zod input validation, XSS prevention, and parameterized SQL queries.
+
+• Enable document-to-content conversion — Allow users to upload PDFs and images, extract content using Sarvam Vision OCR, and generate videos or notes from the extracted material.
+
+• Support multi-language content creation — Provide TTS narration in multiple Indian and international languages using Sarvam AI's Bulbul v3 model with configurable voice, pace, and temperature settings.
+
+• Deliver professional-quality output — Generate videos with word-level synchronized captions, cinematic AI visuals, background music, and smooth transitions — comparable to manually produced professional content.
+
+
+8 | P a g e
+
+                    4. FEATURES & FEATURE SCOPE
+
+4.1 Core Features
+
+1. Multi-Module AI Video Platform — Five distinct production workflows under one unified platform: Video Courses, Short Videos, Motion Graphics, Studio, and AI Notes.
+
+2. Multi-Provider AI Orchestration — Automatic fallback between Groq LLM, Google Gemini, and OpenRouter. If one provider fails or rate-limits, the system transparently switches.
+
+3. AI-Generated Scripts & Course Layouts — Groq LLM (llama-3.3-70b-versatile) generates structured JSON outputs for course chapters, video scripts, scene breakdowns, and study notes.
+
+4. Multi-Language Text-to-Speech — Sarvam AI Bulbul v3 model with configurable voice, pace, temperature. Supports English, Hindi, and other Indian languages.
+
+5. Cinematic AI Image Generation — Leonardo AI generates photorealistic, stylized visuals per scene. Multiple styles: Realistic, Cyberpunk, GTA, Anime, Watercolor, etc.
+
+6. Programmatic Video Rendering — Remotion engine composes slides, images, audio, captions, and music into professional MP4 videos — no manual editing required.
+
+7. Document-to-Content Conversion — Upload PDFs or images, Sarvam Vision OCR extracts text, AI generates videos or study notes from the extracted material.
+
+8. Word-Level Caption Synchronization — Hormozi-style dynamic captions with word-by-word highlight animations and multiple styling presets.
+
+9. Durable Background Workflows — Inngest step-based workflows that survive server restarts. Each step is independently retryable — no work is lost on failure.
+
+10. Enterprise Security Layer — Clerk auth, IP rate limiting, CSRF protection, Zod validation, XSS prevention, SQL injection protection via Drizzle ORM.
+
+11. 25+ Motion Graphic Scene Types — Title reveals, stat counters, comparisons, kinetic text, logo reveals, pricing tables, testimonials, and more.
+
+12. 6 Study Note Styles + 4 Page Designs — Cornell, Mind Map, Flashcard, Infographic, Cheat Sheet, Timeline with Botanical, Abstract Pastel, Geo Pebbles, Elegant Leaf designs.
+
+13. Clerk Google OAuth Authentication — Secure delegated authentication — no passwords stored in database.
+
+14. Responsive Dashboard UI — ShadCN/UI + Tailwind CSS v4 with Framer Motion animations.
+
+
+9 | P a g e
+
+4.2 Feature Scope (Future Enhancements)
+
+• AI Avatar Video Presenter with lip-sync animation
+• Advanced analytics dashboard with viewer engagement metrics
+• Company SaaS version with team workspaces and billing
+• Agentic AI scheduling based on optimal posting times
+• Mobile app for on-the-go content creation
+• Multi-language subtitle generation and translation
+• Real-time collaboration for team video editing
+• API access for third-party integrations
+
+
+10 | P a g e
+
+                       5. LITERATURE REVIEW
+
+5.1 Traditional Video Creation Tools
+Existing tools like Adobe Premiere Pro, Final Cut Pro, and DaVinci Resolve are powerful but require significant manual expertise. They handle editing only — users must separately source scripts, audio, images, and assets. No AI automation exists in these traditional pipelines.
+
+5.2 AI in Content Generation
+Recent advances in Large Language Models (LLMs) have demonstrated the ability to generate coherent, contextual scripts from minimal prompts, structure content into chapters and scenes, produce multi-format outputs (JSON, HTML, Markdown), and maintain consistency across long-form content. Models like LLaMA 3.3 (70B parameters) achieve near-GPT-4 quality on structured generation tasks while running at significantly faster inference speeds on specialized hardware (Groq's LPU architecture).
+
+5.3 Text-to-Speech Evolution
+
+Method              Description                     Limitations
+Concatenative TTS   Joins pre-recorded speech units  Robotic, limited voices
+Parametric TTS      Statistical speech synthesis     Better but still unnatural
+Neural TTS          Deep learning end-to-end         High quality, GPU-intensive
+Sarvam Bulbul v3    Multilingual neural TTS          Best for Indian languages
+
+Sarvam AI's Bulbul v3 model was selected for its superior Indian language support, natural prosody, and configurable pace/temperature controls.
+
+5.4 Programmatic Video Generation
+
+Tool            Approach           Pros                    Cons
+FFmpeg          CLI-based          Fast, lightweight       No complex animations
+MoviePy         Python scripting   Easy                    Limited effects
+Remotion        React components   Full animation control  Heavier runtime
+After Effects   Manual editing     Professional            Not programmable
+
+Remotion enables declaring video scenes as React components with full access to CSS animations, Framer Motion, and custom rendering logic.
+
+5.5 Modern Full-Stack Solutions
+The use of Next.js 16 App Router, Neon PostgreSQL, Drizzle ORM, Inngest, and Clerk reflects industry best practices for building scalable, maintainable, production-grade web applications.
+
+
+11 | P a g e
+
+                       6. SYSTEM OVERVIEW
+
+Migoo is a full-stack AI video creation platform divided into five major production modules, supported by a shared infrastructure layer.
+
+6.1 Overall System Structure
+
+The project is organized into four architectural layers:
+
+1. Frontend (Next.js 16 + TypeScript + ShadCN + Tailwind CSS v4)
+Used by all 5 modules: Video Course Generator, Short Video Generator, Motion Graphics Generator, Migoo Studio, and Notes Generator. Provides dashboards, creation wizards, preview interfaces, and export tools.
+
+2. API Orchestration (17+ Next.js Route Handlers)
+Handles input validation via Zod schemas, authentication via Clerk middleware, rate limiting (60 req/min per IP), CSRF protection, database operations via Drizzle ORM, AI provider communication, and file upload processing.
+
+3. Background Workers (Inngest Durable Workflows)
+Handles the 7-step short video generation pipeline, motion graphics asset generation and rendering, and long-running AI operations that exceed HTTP timeout limits with automatic retry and failure recovery.
+
+4. Data & External Services
+Neon PostgreSQL (serverless database, 9 tables), Appwrite Storage (audio, image, video assets), Sarvam AI (TTS + Vision OCR), Groq LLM (script generation), Leonardo AI (image generation), Kling AI (image-to-video conversion).
+
+6.2 What Makes Migoo Unique
+
+Feature                         Why It Is Unique
+End-to-End Automation           Text prompt to rendered video — zero manual steps
+5 Production Modules            Courses, shorts, motion graphics, studio, notes
+Multi-Provider AI               Automatic fallback across LLM providers
+Durable Workflows               Inngest step functions survive crashes
+25+ Scene Animations            Professional motion graphic templates
+Document-to-Video               Upload PDF, get a video summarizing it
+Human Touch Score               Gamified script editing for authenticity
+Tiered Model Strategy           Auto-escalate from 70B to 8B model on rate limits
+Multi-Language TTS              Indian language support via Sarvam AI
+
+6.3 High-Level System Workflow
+
+STEP 1: User Login (Clerk Auth) — User logs in using Google OAuth.
+STEP 2: Select Module — User chooses one of 5 production modules.
+STEP 3: Provide Input — Topic text, niche selection, chat prompt, document upload, or note title.
+STEP 4: AI Processing — Groq LLM generates scripts/layouts/notes as structured JSON.
+STEP 5: Asset Generation — Sarvam TTS for narration, Leonardo AI for images, caption sync.
+STEP 6: Video/Note Rendering — Remotion composes all assets into final MP4, or A4 renderer for notes.
+STEP 7: Download/Export — User downloads rendered video or exports notes as PDF/PNG.
+
+
+12 | P a g e
+
+                       7. METHODOLOGY
+
+7.1 Development Methodology
+We followed an iterative and incremental development model. Each module was designed, implemented, tested, and refined independently before integration.
+
+7.2 Steps Followed
+
+STEP 1 — Requirement Gathering: Identified 5 distinct content creation use cases, mapped user workflows, defined database schemas for all 9 tables, selected AI providers.
+
+STEP 2 — Technology Selection:
+
+Layer           Technology               Reason
+Framework       Next.js 16 App Router    SSR, API routes, Server Components
+Language        TypeScript 5             End-to-end type safety
+Auth            Clerk                    Delegated OAuth, session management
+Database        Neon PostgreSQL          Serverless, auto-scaling
+ORM             Drizzle ORM              Type-safe SQL, zero runtime overhead
+Styling         Tailwind CSS v4          Utility-first responsive design
+UI Library      ShadCN/UI + Radix UI     Accessible, composable components
+AI/LLM          Groq, Gemini, OpenRouter Multi-provider orchestration
+TTS             Sarvam AI (Bulbul v3)    Multi-language Indian TTS
+Image Gen       Leonardo AI              Cinematic AI visuals
+Video Engine    Remotion                 React-based programmatic rendering
+Storage         Appwrite                 Multi-config asset storage
+Background Jobs Inngest                  Durable step-based workflows
+Validation      Zod                      Runtime schema validation
+Testing         Vitest                   Fast unit and integration tests
+CI/CD           GitHub Actions           Automated type-check, lint, test
+
+STEP 3 — Database Design: 9 tables created with Drizzle ORM (users, courses, chapter_content_slides, course_images, short_video_series, short_video_assets, motion_graphic_projects, motion_graphic_messages, notes_projects).
+
+STEP 4 — Module-by-Module Implementation: Each module developed independently.
+
+STEP 5 — Security Implementation: Clerk middleware, rate limiter, CSRF validation, Zod schemas, XSS prevention, security headers.
+
+STEP 6 — Testing: 41 Vitest test cases across 4 suites.
+
+STEP 7 — Deployment: Frontend on Vercel, Database on Neon, Background Jobs on Inngest Cloud, Storage on Appwrite Cloud.
+
+7.3 Tools Used
+
+Category            Tools
+IDE                 VS Code
+Package Manager     npm
+API Testing         Postman
+Version Control     GitHub
+UI Framework        ShadCN/UI + Radix UI
+Animations          Framer Motion
+CI/CD               GitHub Actions
+
+
+13 | P a g e
+
+                 8. SYSTEM DESIGN & ARCHITECTURE
+
+8.1 Architecture Diagram
+
+┌──────────────────────────────────────────────────────────────────────┐
+│                  FRONTEND (Next.js 16 App Router)                    │
+│  ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌────────────┐       │
+│  │Video Course│ │Short Video │ │Motion Graph│ │Migoo Studio│       │
+│  │ Generator  │ │ Generator  │ │ Generator  │ │Director Seat│      │
+│  └────────────┘ └────────────┘ └────────────┘ └────────────┘       │
+│                       ┌────────────┐                                │
+│                       │AI Notes Gen│                                │
+│                       └────────────┘                                │
+├──────────────────────────────────────────────────────────────────────┤
+│   SECURITY: Clerk Auth · IP Rate Limiting · CSRF · Zod Validation    │
+├──────────────────────────────────────────────────────────────────────┤
+│   API LAYER: 17+ Route Handlers · Drizzle ORM · AI Fallback Client   │
+├──────────────────────────────────────────────────────────────────────┤
+│   WORKERS: Inngest Durable Workflows · Remotion Server Rendering     │
+├──────────────────────────────────────────────────────────────────────┤
+│  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌────────┐       │
+│  │ Neon DB │ │Appwrite │ │Sarvam AI│ │ Groq /  │ │Leonardo│       │
+│  │Postgres │ │ Storage │ │ TTS/OCR │ │Gemini/OR│ │   AI   │       │
+│  └─────────┘ └─────────┘ └─────────┘ └─────────┘ └────────┘       │
+└──────────────────────────────────────────────────────────────────────┘
+
+8.2 Database Schema Diagram
+
+┌──────────────┐       ┌──────────────────┐       ┌──────────────────────┐
+│    users     │──1:N──│     courses      │──1:N──│chapter_content_slides│
+└──────────────┘       └──────────────────┘       └──────────────────────┘
+       │                       └──1:N──┌──────────────────┐
+       │                               │  course_images   │
+       │                               └──────────────────┘
+       ├──1:N──┌──────────────────┐       ┌──────────────────┐
+       │       │short_video_series│──1:N──│short_video_assets│
+       │       └──────────────────┘       └──────────────────┘
+       ├──1:N──┌─────────────────────┐       ┌─────────────────────┐
+       │       │motion_graphic_projs │──1:N──│motion_graphic_msgs  │
+       │       └─────────────────────┘       └─────────────────────┘
+       └──1:N──┌──────────────────┐
+               │  notes_projects  │
+               └──────────────────┘
+
+8.3 Security Architecture
+
+Layer               Implementation              Details
+Authentication      Clerk (delegated)           OAuth + email; no passwords in DB
+Authorization       Route-level guards          clerkMiddleware protects non-public routes
+Rate Limiting       IP-based sliding window     60 req/min per IP on all API routes
+Input Validation    Zod schemas                 Every endpoint validates request body
+CSRF Protection     Origin header validation    Blocks cross-origin mutations
+XSS Prevention      HTML entity sanitization    <script> tag detection via Zod refine
+Security Headers    Middleware-injected         HSTS, X-Frame-Options, etc.
+SQL Injection       Drizzle ORM parameterized   All queries use type-safe builder

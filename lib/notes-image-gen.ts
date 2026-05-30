@@ -238,8 +238,16 @@ export async function generateNotesImages(noteId: string): Promise<{
         }
 
         // ── Step 5: Save to DB ───────────────────────────────
+        // Re-fetch project to avoid overwriting coverImageUrl if it was set while we were generating content images
+        const [latestProject] = await db
+            .select()
+            .from(notesProjects)
+            .where(eq(notesProjects.noteId, noteId));
+            
+        const latestGenData = latestProject?.generatedData as any || generatedData;
+
         const updatedData = {
-            ...generatedData,
+            ...latestGenData,
             pageImages,
             imagesGeneratedAt: new Date().toISOString(),
             imageModel: refImageId ? "gpt-image-1.5" : "nano-banana-2",

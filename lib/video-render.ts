@@ -32,17 +32,29 @@ async function prepVideoToNewPath(srcPath: string, destPath: string): Promise<bo
         return false;
     }
 
+    // ── Always re-encode from source — never skip based on mtime. ──────────────
+    // A stale _prepped.mp4 (from a previous render without tpad, or from a
+    // truncated download) must NEVER be reused. Re-encoding is the only way to
+    // guarantee the 6-frame tpad safety buffer is always present.
+    if (fs.existsSync(destPath)) {
+        try { fs.unlinkSync(destPath); } catch { }
+    }
+
     const ffmpegBin = getFFmpegPath();
 
-    // Probe actual duration first — we'll use it to set a safe -t trim
-    // Trim 0.5s from end to ensure no unseekable trailing frames
+    // Probe actual duration first — we'll use it to set a safe -t trim.
+    // Trim 2.0s from end: the Remotion Rust compositor can fail seeking to
+    // the very last decodable frame due to container/PTS rounding errors.
+    // A 2.0s margin ensures the SAFETY_MARGIN_SEC in Composition.tsx (3.0s)
+    // always keeps seek positions well within the physical video length.
     const probedDur = await probeVideoDuration(srcPath);
-    const trimArg = probedDur && probedDur > 1.0 ? `-t ${(probedDur - 0.5).toFixed(3)}` : '';
-
+    // Adaptive end-trim: remove only min(0.5s, 5% of duration) to avoid
+    // PTS rounding errors at the tail WITHOUT losing meaningful content on
     const cmd = [
         `"${ffmpegBin}"`,
         `-y`,
         `-i "${srcPath}"`,
+        `-vf "tpad=stop=6:stop_mode=clone"`,  // 6 cloned boundary frames → any seek at EOF always valid
         `-c:v libx264`,
         `-preset fast`,
         `-crf 18`,
@@ -53,9 +65,9 @@ async function prepVideoToNewPath(srcPath: string, destPath: string): Promise<bo
         `-pix_fmt yuv420p`,
         `-r 30`,
         `-fps_mode cfr`,
-        trimArg,
         `-an`,
-        `-movflags +faststart`,
+        `-video_track_timescale 30`,   // tbn=30 → PTS are integers 0,1,2,...
+        `-movflags +faststart`,         // floor(time*30) always hits an exact PTS
         `-avoid_negative_ts make_zero`,
         `"${destPath}"`,
     ].filter(Boolean).join(' ');
@@ -86,13 +98,20 @@ async function prepVideoToNewPath(srcPath: string, destPath: string): Promise<bo
                 const sizeMB = fs.existsSync(destPath)
                     ? (fs.statSync(destPath).size / 1024 / 1024).toFixed(1)
                     : '?';
-                console.log(`✅ Prepped ${path.basename(srcPath)} → ${path.basename(destPath)} (${sizeMB} MB)`);
-                // Validate output file
+                // Log any warnings from stderr even on success (helps detect silent tpad failures)
+                if (stderr && stderr.length > 0) {
+                    const warnings = stderr.split('\n').filter((l: string) => l.includes('Error') || l.includes('error') || l.includes('tpad') || l.includes('filter'));
+                    if (warnings.length > 0) {
+                        console.warn(`⚠️ prepVideoToNewPath stderr for ${path.basename(srcPath)}:\n${warnings.slice(0, 5).join('\n')}`);
+                    }
+                }
+                // Validate output file is large enough (< 1KB → definitely corrupt/empty)
                 if (fs.existsSync(destPath) && fs.statSync(destPath).size < 1024) {
                     console.warn(`⚠️ Prepped file suspiciously small (${fs.statSync(destPath).size} bytes), may be corrupt`);
                     resolve(false);
                     return;
                 }
+                console.log(`✅ Prepped ${path.basename(srcPath)} → ${path.basename(destPath)} (${sizeMB} MB)`);
                 resolve(true);
             }
         });
@@ -111,14 +130,11 @@ async function prepVideoForRemotion(filePath: string): Promise<void> {
     const ffmpegBin = getFFmpegPath();
     const tmpOutput = filePath.replace('.mp4', '_prepped.mp4');
 
-    // Probe duration and trim 0.5s from end to avoid unseekable trailing frames
-    const probedDur = await probeVideoDuration(filePath);
-    const trimArg = probedDur && probedDur > 1.0 ? `-t ${(probedDur - 0.5).toFixed(3)}` : '';
-
     const cmd = [
         `"${ffmpegBin}"`,
         `-y`,
         `-i "${filePath}"`,
+        `-vf "tpad=stop=6:stop_mode=clone"`,  // 6 cloned boundary frames → any EOF seek always valid
         `-c:v libx264`,
         `-preset fast`,
         `-crf 23`,
@@ -129,8 +145,8 @@ async function prepVideoForRemotion(filePath: string): Promise<void> {
         `-pix_fmt yuv420p`,
         `-r 30`,                      // constant 30fps
         `-fps_mode cfr`,
-        trimArg,
         `-an`,
+        `-video_track_timescale 30`,   // tbn=30 → PTS integers → no seek misses
         `-movflags +faststart`,
         `-avoid_negative_ts make_zero`,
     ].filter(Boolean).join(' ') + ` "${tmpOutput}"`;
@@ -182,7 +198,7 @@ async function mergeSplitVideos(topPath: string, bottomPath: string, outputPath:
         `-i "${topPath}"`,
         `-i "${bottomPath}"`,
         `-filter_complex`,
-        `"[0:v]scale=1080:960:force_original_aspect_ratio=increase,crop=1080:960,setsar=1[top];[1:v]scale=1080:960:force_original_aspect_ratio=increase,crop=1080:960,setsar=1[bottom];[top][bottom]vstack=inputs=2[out]"`,
+        `"[0:v]scale=1080:960:force_original_aspect_ratio=increase,crop=1080:960,setsar=1[top];[1:v]scale=1080:960:force_original_aspect_ratio=increase,crop=1080:960,setsar=1[bottom];[top][bottom]vstack=inputs=2,tpad=stop=6:stop_mode=clone[out]"`,
         `-map "[out]"`,
         `-c:v libx264`,
         `-preset fast`,
@@ -282,6 +298,85 @@ async function probeVideoDuration(filePath: string): Promise<number | undefined>
     });
 }
 
+/**
+ * Stretch a video file in-place using FFmpeg's setpts filter so its duration
+ * equals targetSec. Returns the final duration (seconds), or the original
+ * duration if stretching was not needed / failed.
+ * Uses timescale 90000 which Remotion's compositor handles correctly with
+ * playbackRate=1.0 (frame PTS values are exact multiples of 3000).
+ */
+async function stretchSceneVideoToFit(
+    srcPath: string,
+    targetSec: number
+): Promise<number | undefined> {
+    const probedDur = await probeVideoDuration(srcPath);
+    if (!probedDur || probedDur <= 0) return probedDur;
+
+    // Only stretch when video is shorter than the target scene duration.
+    // Add 0.6s buffer so safeLength (dur - 0.4s) always exceeds targetSec
+    // → Remotion uses playbackRate=1.0 → no fractional PTS seeks.
+    const needed = targetSec + 0.6;
+    if (probedDur >= needed) return probedDur; // already long enough
+
+    const ratio = (needed / probedDur).toFixed(6);
+    const tmpPath = srcPath.replace(/\.mp4$/i, '_sx.mp4');
+    const ffmpegBin = getFFmpegPath();
+
+    console.log(`⏩ Stretching scene video: ${probedDur.toFixed(2)}s → ${needed.toFixed(2)}s (×${ratio})`);
+
+    const baseArgs = [
+        `"${ffmpegBin}" -y -i "${srcPath}"`,
+        `-vf "setpts=${ratio}*PTS,tpad=stop=6:stop_mode=clone"`,  // stretch + 6 boundary clone frames
+        `-c:v libx264 -preset fast -crf 23`,
+        `-g 1 -bf 0 -pix_fmt yuv420p`,
+        `-r 30 -fps_mode cfr`,
+        `-video_track_timescale 30`,   // PTS = integers 0,1,2,... → no seek misses
+        `-an -movflags +faststart -avoid_negative_ts make_zero`,
+        `"${tmpPath}"`,
+    ];
+
+    return new Promise<number | undefined>((resolve) => {
+        const cmd = baseArgs.join(' ');
+        exec(cmd, { maxBuffer: 100 * 1024 * 1024 }, async (err, _out, stderr) => {
+            const tryLegacy = !!err && stderr?.includes('fps_mode');
+            const run = (c: string) => new Promise<boolean>(res => {
+                exec(c, { maxBuffer: 100 * 1024 * 1024 }, async (e2) => {
+                    if (e2 || !fs.existsSync(tmpPath) || fs.statSync(tmpPath).size < 10_000) {
+                        try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch {}
+                        res(false);
+                    } else {
+                        res(true);
+                    }
+                });
+            });
+
+            const ok = err
+                ? (tryLegacy ? await run(cmd.replace('-fps_mode cfr', '-vsync cfr')) : false)
+                : (fs.existsSync(tmpPath) && fs.statSync(tmpPath).size > 10_000);
+
+            if (!ok) {
+                console.warn(`⚠️ stretchSceneVideoToFit failed, using original duration ${probedDur.toFixed(2)}s`);
+                resolve(probedDur);
+                return;
+            }
+
+            // Swap files
+            try { fs.unlinkSync(srcPath); } catch {}
+            try { fs.renameSync(tmpPath, srcPath); }
+            catch {
+                fs.copyFileSync(tmpPath, srcPath);
+                try { fs.unlinkSync(tmpPath); } catch {}
+            }
+
+            const newDur = await probeVideoDuration(srcPath);
+            console.log(`✅ Scene video stretched → ${(newDur ?? 0).toFixed(2)}s`);
+            resolve(newDur);
+        });
+    });
+}
+
+const activeRenders = new Set<string>();
+
 export async function triggerRender(videoId: string, props: Record<string, any>) {
     const appUrl = process.env.NEXT_PUBLIC_APP_URL
         || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null);
@@ -289,11 +384,16 @@ export async function triggerRender(videoId: string, props: Record<string, any>)
     const isLocal = !appUrl;
 
     if (isLocal) {
+        if (activeRenders.has(videoId)) {
+            console.log(`⚠️ Video ${videoId} is already actively rendering in this process. Skipping duplicate trigger.`);
+            return { success: true, mode: 'local', skipped: true };
+        }
+
         console.log(`🎬 Starting LOCAL render for: ${videoId}`);
 
         const [existing] = await db.select().from(shortVideoAssets).where(eq(shortVideoAssets.videoId, videoId));
         if (existing && existing.status === 'rendering') {
-            console.log(`⚠️ Video ${videoId} is already rendering. Skipping duplicate render.`);
+            console.log(`⚠️ Video ${videoId} is already rendering in DB status. Skipping duplicate render.`);
             return { success: true, mode: 'local', skipped: true };
         }
         if (existing && existing.status === 'completed' && existing.videoUrl) {
@@ -302,6 +402,7 @@ export async function triggerRender(videoId: string, props: Record<string, any>)
             return { success: true, mode: 'local', skipped: true };
         }
 
+        activeRenders.add(videoId);
         await db.update(shortVideoAssets).set({ status: 'rendering' }).where(eq(shortVideoAssets.videoId, videoId));
 
         renderLocally(videoId, props).catch((err) => {
@@ -353,11 +454,18 @@ async function downloadToLocal(url: string | undefined, destAbsPath: string): Pr
     // ── FIX: Sanitize double-slashes in Appwrite URLs (v1//storage → v1/storage) ──
     sanitizedUrl = sanitizedUrl.replace(/\/v1\/\/storage/g, '/v1/storage');
 
+    // ── FIX: Convert /view to /download for faster, direct file downloads ──
+    if (sanitizedUrl.includes('/view')) {
+        sanitizedUrl = sanitizedUrl.replace('/view', '/download');
+    }
+
     fs.mkdirSync(path.dirname(destAbsPath), { recursive: true });
 
     try {
         // Build headers — add Appwrite API key for Appwrite storage URLs
-        const headers: Record<string, string> = {};
+        const headers: Record<string, string> = {
+            'Connection': 'keep-alive'
+        };
         if (sanitizedUrl.includes('appwrite.io') && sanitizedUrl.includes('/storage')) {
             // Extract project ID from ?project= query param in the URL
             const projectMatch = sanitizedUrl.match(/[?&]project=([^&]+)/);
@@ -378,41 +486,80 @@ async function downloadToLocal(url: string | undefined, destAbsPath: string): Pr
                 }
             }
 
-            if (!matchedKey) {
-                console.warn(`⚠️ No APPWRITE_API_KEY for project: ${urlProjectId}`);
-            } else {
-                console.log(`🔑 Appwrite Auth for project: ${urlProjectId}`);
-            }
-
             // Fallback to default if no match found
             if (!matchedKey) {
                 matchedKey = process.env.APPWRITE_API_KEY;
                 matchedProject = process.env.APPWRITE_PROJECT_ID;
+                console.warn(`⚠️ No specific APPWRITE_API_KEY for project ${urlProjectId}, using default`);
+            } else {
+                console.log(`🔑 Appwrite Auth matched for project: ${urlProjectId}`);
             }
 
             if (matchedKey) headers['X-Appwrite-Key'] = matchedKey;
             if (matchedProject) headers['X-Appwrite-Project'] = matchedProject;
 
-            // ── CRITICAL: Also try fetching WITHOUT ?project= in URL ──
-            // Appwrite REST API expects auth via headers, not query params.
-            // The ?project= param is for client-side browser sessions only.
-            // Remove it when using server-side API key auth.
-            const urlWithoutProjectParam = sanitizedUrl.replace(/[?&]project=[^&]+/, '').replace(/\?$/, '');
-            if (urlWithoutProjectParam !== sanitizedUrl) {
-                sanitizedUrl = urlWithoutProjectParam;
+            // ── IMPORTANT: Keep ?project= in the URL for /download endpoint ──
+            // Appwrite's /download endpoint validates project from BOTH the query
+            // param AND the X-Appwrite-Project header. Removing it causes 401/abort.
+            // Do NOT strip the ?project= param here.
+        }
+
+        const maxAttempts = 6;
+        let lastError: any;
+
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+            const controller = new AbortController();
+            // 150s timeout — covers full download of large Kling scene videos (up to 60MB)
+            const timeoutId = setTimeout(() => controller.abort(), 150000);
+
+            try {
+                if (attempt > 1) {
+                    console.log(`⏳ Retry attempt ${attempt}/${maxAttempts} for ${path.basename(destAbsPath)}...`);
+                } else {
+                    console.log(`📥 Downloading asset: ${path.basename(destAbsPath)}...`);
+                }
+
+                let res = await fetch(sanitizedUrl, { 
+                    headers,
+                    signal: controller.signal
+                });
+
+                if (!res.ok) {
+                    clearTimeout(timeoutId);
+                    throw new Error(`HTTP ${res.status} ${res.statusText}`);
+                }
+
+                let buffer: Buffer;
+                try {
+                    buffer = Buffer.from(await res.arrayBuffer());
+                } finally {
+                    clearTimeout(timeoutId); // always clear after body read
+                }
+
+                if (buffer.length < 100) throw new Error('Downloaded file too small');
+                fs.writeFileSync(destAbsPath, buffer);
+                
+                console.log(`✅ Downloaded asset: ${path.basename(destAbsPath)} (${(buffer.length / 1024 / 1024).toFixed(2)} MB)`);
+
+                // Return a local HTTP URL that Next.js can serve
+                const relToPublic = path.relative(path.join(process.cwd(), 'public'), destAbsPath).replace(/\\/g, '/');
+                return `/${relToPublic}`;
+
+            } catch (err: any) {
+                clearTimeout(timeoutId);
+                lastError = err;
+                console.warn(`⚠️ Attempt ${attempt}/${maxAttempts} failed for ${path.basename(destAbsPath)}: ${err.message}`);
+                
+                if (attempt < maxAttempts) {
+                    const delay = Math.pow(2, attempt) * 1000;
+                    console.log(`⏳ Waiting ${delay}ms before next attempt...`);
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                }
             }
         }
 
-        const res = await fetch(sanitizedUrl, { headers });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const buffer = Buffer.from(await res.arrayBuffer());
-        if (buffer.length < 100) throw new Error('Downloaded file too small');
-        fs.writeFileSync(destAbsPath, buffer);
-        // Return a local HTTP URL that Next.js can serve
-        const relToPublic = path.relative(path.join(process.cwd(), 'public'), destAbsPath).replace(/\\/g, '/');
-        return `/${relToPublic}`;
-    } catch (err: any) {
-        console.warn(`⚠️ Failed to download ${sanitizedUrl}: ${err.message}. Creating local placeholder.`);
+        // If we reach here, all attempts failed. Create local placeholder.
+        console.warn(`❌ Failed to download ${sanitizedUrl} after ${maxAttempts} attempts: ${lastError?.message}. Creating local placeholder.`);
 
         const relToPublic = path.relative(path.join(process.cwd(), 'public'), destAbsPath).replace(/\\/g, '/');
 
@@ -436,6 +583,7 @@ async function downloadToLocal(url: string | undefined, destAbsPath: string): Pr
                 );
                 fs.writeFileSync(destAbsPath, placeholderJpeg);
                 console.log(`📷 Created placeholder image: ${path.basename(destAbsPath)}`);
+                try { fs.writeFileSync(`${destAbsPath}.is_placeholder`, 'true'); } catch {}
                 return `/${relToPublic}`;
             } catch { }
         }
@@ -443,6 +591,7 @@ async function downloadToLocal(url: string | undefined, destAbsPath: string): Pr
         // ── CRITICAL: Placeholder for VIDEO files ──
         // Generate a 2-second black MP4 using FFmpeg so Remotion NEVER
         // receives a remote Appwrite URL (which would 403 in the browser).
+        // Forces a clean standard timescale (30000) to match exact integer seeks.
         if (destAbsPath.match(/\.(mp4|mov|webm)$/i)) {
             try {
                 const ffmpegBin = getFFmpegPath();
@@ -452,6 +601,7 @@ async function downloadToLocal(url: string | undefined, destAbsPath: string): Pr
                     `-c:v libx264 -preset ultrafast -crf 28`,
                     `-g 1 -keyint_min 1 -bf 0`,
                     `-pix_fmt yuv420p -movflags +faststart`,
+                    `-video_track_timescale 30000`,
                     `-an`,
                     `"${destAbsPath}"`,
                 ].join(' ');
@@ -461,6 +611,7 @@ async function downloadToLocal(url: string | undefined, destAbsPath: string): Pr
 
                 if (fs.existsSync(destAbsPath) && fs.statSync(destAbsPath).size > 100) {
                     console.log(`🎬 Created placeholder video: ${path.basename(destAbsPath)}`);
+                    try { fs.writeFileSync(`${destAbsPath}.is_placeholder`, 'true'); } catch {}
                     return `/${relToPublic}`;
                 }
             } catch (ffErr: any) {
@@ -468,13 +619,51 @@ async function downloadToLocal(url: string | undefined, destAbsPath: string): Pr
             }
         }
 
+        // ── CRITICAL: Placeholder for AUDIO files ──
+        // Generate a 2-second silent audio file so Remotion NEVER
+        // receives a remote Appwrite URL (which would desync / timeout in Chromium).
+        if (destAbsPath.match(/\.(wav|mp3|m4a|aac)$/i)) {
+            try {
+                const ffmpegBin = getFFmpegPath();
+                const cmd = [
+                    `"${ffmpegBin}"`, `-y`,
+                    `-f lavfi -i anullsrc=r=44100:cl=stereo -t 2`,
+                    `-c:a pcm_s16le`,
+                    `"${destAbsPath}"`,
+                ].join(' ');
+
+                const { execSync } = require('child_process');
+                execSync(cmd, { maxBuffer: 10 * 1024 * 1024, timeout: 15000 });
+
+                if (fs.existsSync(destAbsPath) && fs.statSync(destAbsPath).size > 100) {
+                    console.log(`🎵 Created silent placeholder audio: ${path.basename(destAbsPath)}`);
+                    try { fs.writeFileSync(`${destAbsPath}.is_placeholder`, 'true'); } catch {}
+                    return `/${relToPublic}`;
+                }
+            } catch (ffErr: any) {
+                console.warn(`⚠️ FFmpeg audio placeholder failed: ${ffErr.message?.slice(0, 100)}`);
+            }
+        }
+
         // ── NEVER return a remote Appwrite URL — it will 403 in Remotion's browser ──
         console.warn(`⚠️ No placeholder created for ${path.basename(destAbsPath)}, returning undefined`);
+        return undefined;
+    } catch (globalErr: any) {
+        console.error(`❌ Global error in downloadToLocal for ${path.basename(destAbsPath)}: ${globalErr.message}`);
         return undefined;
     }
 }
 
 async function renderLocally(videoId: string, props: Record<string, any>) {
+    try {
+        await _renderLocallyInternal(videoId, props);
+    } finally {
+        activeRenders.delete(videoId);
+        console.log(`🔓 Released render lock for video: ${videoId}`);
+    }
+}
+
+async function _renderLocallyInternal(videoId: string, props: Record<string, any>) {
     const cwd = process.cwd();
 
     const tmpDir = path.join(cwd, 'public', 'tmp');
@@ -484,21 +673,24 @@ async function renderLocally(videoId: string, props: Record<string, any>) {
 
 
 
-    // Clean up ALL stale files from tmp/ (asset dirs, old prop files, etc.)
+    // Clean up ONLY stale files from tmp/ (older than 1 hour) to avoid deleting active parallel renders
     try {
         const tmpFiles = fs.readdirSync(tmpDir);
+        const oneHourAgo = Date.now() - 60 * 60 * 1000;
         for (const file of tmpFiles) {
             if (file === `assets_${videoId}`) continue; // keep current
             if (file === `props-${videoId}.json`) continue; // keep current
             try {
                 const fullPath = path.join(tmpDir, file);
                 const stat = fs.statSync(fullPath);
-                if (stat.isDirectory()) {
-                    fs.rmSync(fullPath, { recursive: true, force: true });
-                } else {
-                    fs.unlinkSync(fullPath);
+                if (stat.mtimeMs < oneHourAgo) {
+                    if (stat.isDirectory()) {
+                        fs.rmSync(fullPath, { recursive: true, force: true });
+                    } else {
+                        fs.unlinkSync(fullPath);
+                    }
+                    console.log(`🧹 Cleaned stale tmp file: ${file}`);
                 }
-                console.log(`🧹 Cleaned stale tmp file: ${file}`);
             } catch { }
         }
     } catch { }
@@ -507,255 +699,226 @@ async function renderLocally(videoId: string, props: Record<string, any>) {
     const assetsDirAbs = path.join(cwd, 'public', assetsDirRel);
     fs.mkdirSync(assetsDirAbs, { recursive: true });
 
-    const sceneVideoDurations: (number | undefined)[] = [];
+    const newUrls = props.sceneVideoUrls ? [...props.sceneVideoUrls] : [];
 
-    // ── Download all remote assets ────────────────────────────────────────────
+    // ── Download all remote assets in parallel ────────────────────────────────
     try {
-        console.log(`📥 Downloading assets for ${videoId}...`);
+        console.log(`📥 Collecting all asset download tasks for ${videoId}...`);
+
+        const downloadTasks: Array<{
+            url: string;
+            destAbs: string;
+            onComplete: (localUrl: string) => void | Promise<void>;
+        }> = [];
+
+        const postProcessTasks: (() => Promise<void>)[] = [];
+
+        // Pre-allocate array for scene durations
+        const sceneVideoDurations: (number | undefined)[] = new Array(newUrls.length).fill(undefined);
 
         // Scene videos
         if (props.sceneVideoUrls && Array.isArray(props.sceneVideoUrls)) {
-            const newUrls = [...props.sceneVideoUrls];
-
             for (let i = 0; i < newUrls.length; i++) {
-                if (!newUrls[i]) { sceneVideoDurations.push(undefined); continue; }
+                const urlOrJson = newUrls[i];
+                if (!urlOrJson) continue;
 
                 // Check for JSON payload (composite/split)
                 try {
-                    const parsed = JSON.parse(newUrls[i]);
+                    const parsed = JSON.parse(urlOrJson);
 
                     if (parsed?.type === 'composite' && Array.isArray(parsed.assets)) {
                         let assetIdx = 0;
                         for (const asset of parsed.assets) {
+                            const currentAssetIdx = assetIdx;
                             if (asset.kind === 'video' && asset.url) {
-                                const destAbs = path.join(assetsDirAbs, `scene_${i}_v${assetIdx}.mp4`);
-                                const local = await downloadToLocal(asset.url, destAbs);
-                                if (local) { asset.url = local; asset.durationSec = await probeVideoDuration(destAbs); }
+                                const destAbs = path.join(assetsDirAbs, `scene_${i}_v${currentAssetIdx}.mp4`);
+                                downloadTasks.push({
+                                    url: asset.url,
+                                    destAbs,
+                                    onComplete: (local) => {
+                                        asset.url = local;
+                                    }
+                                });
                             } else if (asset.kind === 'image' && asset.url) {
                                 const ext = asset.url.match(/\.(png|jpg|jpeg|webp|gif)/i)?.[1] || 'jpg';
-                                const destAbs = path.join(assetsDirAbs, `scene_${i}_img${assetIdx}.${ext}`);
-                                const local = await downloadToLocal(asset.url, destAbs);
-                                if (local) { asset.url = local; }
+                                const destAbs = path.join(assetsDirAbs, `scene_${i}_img${currentAssetIdx}.${ext}`);
+                                downloadTasks.push({
+                                    url: asset.url,
+                                    destAbs,
+                                    onComplete: (local) => {
+                                        asset.url = local;
+                                    }
+                                });
                             } else if (asset.kind === 'split' && Array.isArray(asset.urls)) {
-                                // Download both split videos
-                                const topDest = path.join(assetsDirAbs, `scene_${i}_sp${assetIdx}_0.mp4`);
-                                const botDest = path.join(assetsDirAbs, `scene_${i}_sp${assetIdx}_1.mp4`);
-                                const localTop = await downloadToLocal(asset.urls[0], topDest);
-                                const localBot = await downloadToLocal(asset.urls[1], botDest);
+                                const topDest = path.join(assetsDirAbs, `scene_${i}_sp${currentAssetIdx}_0.mp4`);
+                                const botDest = path.join(assetsDirAbs, `scene_${i}_sp${currentAssetIdx}_1.mp4`);
 
-                                // MERGE into single video to avoid concurrent OffthreadVideo crash
-                                const mergedDest = path.join(assetsDirAbs, `scene_${i}_sp${assetIdx}_merged.mp4`);
-                                const merged = await mergeSplitVideos(topDest, botDest, mergedDest);
-                                if (merged) {
-                                    // Convert split → video with the merged file
-                                    asset.kind = 'video';
-                                    asset.url = `/${assetsDirRel}/scene_${i}_sp${assetIdx}_merged.mp4`;
-                                    asset.durationSec = await probeVideoDuration(mergedDest);
-                                    delete asset.urls;
-                                    delete asset.durationsSec;
-                                    console.log(`✅ Split→merged for composite scene ${i}, asset ${assetIdx}`);
-                                } else {
-                                    // Fallback: keep as split (might still crash)
-                                    if (!asset.durationsSec) asset.durationsSec = [];
-                                    asset.urls[0] = localTop || asset.urls[0];
-                                    asset.urls[1] = localBot || asset.urls[1];
-                                    asset.durationsSec[0] = fs.existsSync(topDest) ? await probeVideoDuration(topDest) : undefined;
-                                    asset.durationsSec[1] = fs.existsSync(botDest) ? await probeVideoDuration(botDest) : undefined;
-                                    const validDurs = (asset.durationsSec || []).filter(Boolean);
-                                    if (validDurs.length > 0) asset.durationSec = Math.min(...validDurs);
-                                }
+                                downloadTasks.push({
+                                    url: asset.urls[0],
+                                    destAbs: topDest,
+                                    onComplete: (local) => {
+                                        asset.urls[0] = local;
+                                    }
+                                });
+                                downloadTasks.push({
+                                    url: asset.urls[1],
+                                    destAbs: botDest,
+                                    onComplete: (local) => {
+                                        asset.urls[1] = local;
+                                    }
+                                });
+
+                                // Merge split composite post-download
+                                const sceneIndex = i;
+                                postProcessTasks.push(async () => {
+                                    const mergedDest = path.join(assetsDirAbs, `scene_${sceneIndex}_sp${currentAssetIdx}_merged.mp4`);
+                                    const merged = await mergeSplitVideos(topDest, botDest, mergedDest);
+                                    if (merged) {
+                                        asset.kind = 'video';
+                                        asset.url = `/${assetsDirRel}/scene_${sceneIndex}_sp${currentAssetIdx}_merged.mp4`;
+                                        asset.durationSec = await probeVideoDuration(mergedDest);
+                                        delete asset.urls;
+                                        delete asset.durationsSec;
+                                        console.log(`✅ Split→merged for composite scene ${sceneIndex}, asset ${currentAssetIdx}`);
+                                    } else {
+                                        if (!asset.durationsSec) asset.durationsSec = [];
+                                        asset.durationsSec[0] = fs.existsSync(topDest) ? await probeVideoDuration(topDest) : undefined;
+                                        asset.durationsSec[1] = fs.existsSync(botDest) ? await probeVideoDuration(botDest) : undefined;
+                                        const validDurs = (asset.durationsSec || []).filter(Boolean);
+                                        if (validDurs.length > 0) asset.durationSec = Math.min(...validDurs);
+                                    }
+                                });
                             }
                             assetIdx++;
                         }
-                        newUrls[i] = JSON.stringify(parsed);
-                        const allDurs = parsed.assets.map((a: any) =>
-                            a.durationSec || (a.durationsSec ? Math.min(...a.durationsSec.filter(Boolean)) : 0)
-                        ).filter(Boolean);
-                        sceneVideoDurations.push(allDurs.length > 0 ? Math.min(...allDurs) : undefined);
+
+                        const sceneIndex = i;
+                        postProcessTasks.push(async () => {
+                            newUrls[sceneIndex] = JSON.stringify(parsed);
+                            const allDurs = parsed.assets.map((a: any) =>
+                                a.durationSec || (a.durationsSec ? Math.min(...a.durationsSec.filter(Boolean)) : 0)
+                            ).filter(Boolean);
+                            sceneVideoDurations[sceneIndex] = allDurs.length > 0 ? Math.min(...allDurs) : undefined;
+                        });
                         continue;
                     }
 
                     if (parsed?.type === 'split' && Array.isArray(parsed.urls)) {
-                        // Download both split videos
                         const topDest = path.join(assetsDirAbs, `scene_${i}_split_0.mp4`);
                         const botDest = path.join(assetsDirAbs, `scene_${i}_split_1.mp4`);
-                        const localTop = await downloadToLocal(parsed.urls[0], topDest);
-                        const localBot = await downloadToLocal(parsed.urls[1], botDest);
 
-                        // MERGE into single video to avoid concurrent OffthreadVideo crash
-                        const mergedDest = path.join(assetsDirAbs, `scene_${i}_split_merged.mp4`);
-                        const merged = await mergeSplitVideos(topDest, botDest, mergedDest);
-                        if (merged) {
-                            // Replace split JSON with simple video URL
-                            newUrls[i] = `/${assetsDirRel}/scene_${i}_split_merged.mp4`;
-                            const dur = await probeVideoDuration(mergedDest);
-                            sceneVideoDurations.push(dur);
-                            console.log(`✅ Split→merged for scene ${i}`);
-                        } else {
-                            // Fallback: keep as split
-                            if (!parsed.durationsSec) parsed.durationsSec = [];
-                            parsed.urls[0] = localTop || parsed.urls[0];
-                            parsed.urls[1] = localBot || parsed.urls[1];
-                            parsed.durationsSec[0] = fs.existsSync(topDest) ? await probeVideoDuration(topDest) : undefined;
-                            parsed.durationsSec[1] = fs.existsSync(botDest) ? await probeVideoDuration(botDest) : undefined;
-                            newUrls[i] = JSON.stringify(parsed);
-                            const validDurs = (parsed.durationsSec || []).filter(Boolean);
-                            sceneVideoDurations.push(validDurs.length > 0 ? Math.min(...validDurs) : undefined);
-                        }
+                        downloadTasks.push({
+                            url: parsed.urls[0],
+                            destAbs: topDest,
+                            onComplete: (local) => {
+                                parsed.urls[0] = local;
+                            }
+                        });
+                        downloadTasks.push({
+                            url: parsed.urls[1],
+                            destAbs: botDest,
+                            onComplete: (local) => {
+                                parsed.urls[1] = local;
+                            }
+                        });
+
+                        const sceneIndex = i;
+                        postProcessTasks.push(async () => {
+                            const mergedDest = path.join(assetsDirAbs, `scene_${sceneIndex}_split_merged.mp4`);
+                            const merged = await mergeSplitVideos(topDest, botDest, mergedDest);
+                            if (merged) {
+                                newUrls[sceneIndex] = `/${assetsDirRel}/scene_${sceneIndex}_split_merged.mp4`;
+                                const dur = await probeVideoDuration(mergedDest);
+                                sceneVideoDurations[sceneIndex] = dur;
+                                console.log(`✅ Split→merged for scene ${sceneIndex}`);
+                            } else {
+                                if (!parsed.durationsSec) parsed.durationsSec = [];
+                                parsed.durationsSec[0] = fs.existsSync(topDest) ? await probeVideoDuration(topDest) : undefined;
+                                parsed.durationsSec[1] = fs.existsSync(botDest) ? await probeVideoDuration(botDest) : undefined;
+                                newUrls[sceneIndex] = JSON.stringify(parsed);
+                                const validDurs = (parsed.durationsSec || []).filter(Boolean);
+                                sceneVideoDurations[sceneIndex] = validDurs.length > 0 ? Math.min(...validDurs) : undefined;
+                            }
+                        });
                         continue;
                     }
-                } catch { /* not JSON, regular URL */ }
+                } catch {
+                    // not JSON, regular URL
+                }
 
-                // Regular video URL — CRITICAL: Appwrite URLs don't have .mp4 extension!
-                // e.g. /storage/buckets/.../files/.../view?project=...
-                // Must also match remote URLs stored in Appwrite or any cloud storage.
-                const isSkipMarker = newUrls[i] === 'SKIP_T2V' || newUrls[i] === 'SKIP_VEO' || newUrls[i] === '';
-                const hasVideoExt = /\.(mp4|mov|webm)/i.test(newUrls[i]);
-                const isAppwriteVideo = newUrls[i].includes('appwrite') && newUrls[i].includes('/storage/');
-                const isRemoteUrl = newUrls[i].startsWith('http://') || newUrls[i].startsWith('https://');
+                const isSkipMarker = urlOrJson === 'SKIP_T2V' || urlOrJson === 'SKIP_VEO' || urlOrJson === '';
+                const hasVideoExt = /\.(mp4|mov|webm)/i.test(urlOrJson);
+                const isAppwriteVideo = urlOrJson.includes('appwrite') && urlOrJson.includes('/storage/');
+                const isRemoteUrl = urlOrJson.startsWith('http://') || urlOrJson.startsWith('https://');
                 const isDirectVideo = !isSkipMarker && (hasVideoExt || isAppwriteVideo || isRemoteUrl);
 
                 if (isDirectVideo) {
-                    console.log(`🎬 Scene ${i}: downloading video (ext=${hasVideoExt}, appwrite=${isAppwriteVideo}, remote=${isRemoteUrl}): ${newUrls[i].substring(0, 80)}...`);
                     const destAbs = path.join(assetsDirAbs, `scene_${i}.mp4`);
-                    const local = await downloadToLocal(newUrls[i], destAbs);
-                    if (local) {
-                        newUrls[i] = local;
-                        sceneVideoDurations.push(await probeVideoDuration(destAbs));
-                    } else {
-                        sceneVideoDurations.push(undefined);
-                    }
-                } else {
-                    sceneVideoDurations.push(undefined);
+                    const sceneIndex = i;
+                    downloadTasks.push({
+                        url: urlOrJson,
+                        destAbs,
+                        onComplete: async (local) => {
+                            newUrls[sceneIndex] = local;
+                            const dur = await probeVideoDuration(destAbs);
+                            sceneVideoDurations[sceneIndex] = dur;
+                        }
+                    });
                 }
             }
-
-            props.sceneVideoUrls = newUrls;
-            props.sceneVideoDurations = sceneVideoDurations;
         }
 
         // Narration audio
         if (props.audioUrl) {
             const destAbs = path.join(assetsDirAbs, 'audio.wav');
-            const local = await downloadToLocal(props.audioUrl, destAbs);
-            if (local) props.audioUrl = local;
+            downloadTasks.push({
+                url: props.audioUrl,
+                destAbs,
+                onComplete: (local) => {
+                    props.audioUrl = local;
+                }
+            });
         }
 
         // Background music
         if (props.musicUrl) {
             const destAbs = path.join(assetsDirAbs, 'music.mp3');
-            const local = await downloadToLocal(props.musicUrl, destAbs);
-            if (local) props.musicUrl = local;
-        }
-
-        // ── Avatar clips: CRITICAL FIX ─────────────────────────────────────────
-        // We NEVER copy from public/avatars/* and then re-encode in-place.
-        // Instead we use prepVideoToNewPath() which writes to a SEPARATE destination file.
-        // This is Windows-safe (no rename/unlink on a file that may be locked).
-
-        if (props.introClip?.videoUrl) {
-            const rawUrl = props.introClip.videoUrl.replace(/^\//, '');
-            const srcAbs = path.join(cwd, 'public', rawUrl);       // e.g. public/avatars/avatar1-intro.mp4
-            const destAbs = path.join(assetsDirAbs, 'intro_video_prepped.mp4');
-
-            if (fs.existsSync(srcAbs)) {
-                console.log(`🎬 Prepping intro avatar: ${path.basename(srcAbs)} → intro_video_prepped.mp4`);
-                const ok = await prepVideoToNewPath(srcAbs, destAbs);
-
-                if (ok && fs.existsSync(destAbs)) {
-                    const probedDur = await probeVideoDuration(destAbs);
-                    console.log(`📏 Intro video probed duration: ${probedDur?.toFixed(3)}s, file size: ${(fs.statSync(destAbs).size / 1024 / 1024).toFixed(1)} MB`);
-                    if (!probedDur || probedDur < 0.5) {
-                        console.warn(`⚠️ Intro video duration invalid (${probedDur}s), using raw file fallback`);
-                        const rawDestAbs = path.join(assetsDirAbs, 'intro_video.mp4');
-                        fs.copyFileSync(srcAbs, rawDestAbs);
-                        const rawDur = await probeVideoDuration(rawDestAbs);
-                        props.introClip = { ...props.introClip, videoUrl: `/${assetsDirRel}/intro_video.mp4`, videoDurationSec: rawDur };
-                    } else {
-                        props.introClip = {
-                            ...props.introClip,
-                            videoUrl: `/${assetsDirRel}/intro_video_prepped.mp4`,
-                            videoDurationSec: probedDur,
-                        };
-                    }
-                    console.log(`✅ Intro avatar prepped → ${props.introClip.videoUrl} (${props.introClip.videoDurationSec?.toFixed(2)}s)`);
-                } else {
-                    // Fallback: just copy the raw file (better than nothing)
-                    console.warn(`⚠️ prepVideoToNewPath failed for intro — copying raw file`);
-                    const rawDestAbs = path.join(assetsDirAbs, 'intro_video.mp4');
-                    fs.copyFileSync(srcAbs, rawDestAbs);
-                    const probedDur = await probeVideoDuration(rawDestAbs);
-                    props.introClip = {
-                        ...props.introClip,
-                        videoUrl: `/${assetsDirRel}/intro_video.mp4`,
-                        videoDurationSec: probedDur,
-                    };
+            downloadTasks.push({
+                url: props.musicUrl,
+                destAbs,
+                onComplete: (local) => {
+                    props.musicUrl = local;
                 }
-            } else {
-                console.warn(`⚠️ Intro avatar video not found at: ${srcAbs}`);
-            }
+            });
         }
 
+        // Intro/outro audio
         if (props.introClip?.audioUrl) {
             const destAbs = path.join(assetsDirAbs, 'intro_audio.wav');
-            const local = await downloadToLocal(props.introClip.audioUrl, destAbs);
-            if (local) props.introClip = { ...props.introClip, audioUrl: local };
-        }
-
-        if (props.outroClip?.videoUrl) {
-            const rawUrl = props.outroClip.videoUrl.replace(/^\//, '');
-            const srcAbs = path.join(cwd, 'public', rawUrl);
-            const destAbs = path.join(assetsDirAbs, 'outro_video_prepped.mp4');
-
-            if (fs.existsSync(srcAbs)) {
-                console.log(`🎬 Prepping outro avatar: ${path.basename(srcAbs)} → outro_video_prepped.mp4`);
-                const ok = await prepVideoToNewPath(srcAbs, destAbs);
-
-                if (ok && fs.existsSync(destAbs)) {
-                    const probedDur = await probeVideoDuration(destAbs);
-                    console.log(`📏 Outro video probed duration: ${probedDur?.toFixed(3)}s, file size: ${(fs.statSync(destAbs).size / 1024 / 1024).toFixed(1)} MB`);
-                    if (!probedDur || probedDur < 0.5) {
-                        console.warn(`⚠️ Outro video duration invalid (${probedDur}s), using raw file fallback`);
-                        const rawDestAbs = path.join(assetsDirAbs, 'outro_video.mp4');
-                        fs.copyFileSync(srcAbs, rawDestAbs);
-                        const rawDur = await probeVideoDuration(rawDestAbs);
-                        props.outroClip = { ...props.outroClip, videoUrl: `/${assetsDirRel}/outro_video.mp4`, videoDurationSec: rawDur };
-                    } else {
-                        props.outroClip = {
-                            ...props.outroClip,
-                            videoUrl: `/${assetsDirRel}/outro_video_prepped.mp4`,
-                            videoDurationSec: probedDur,
-                        };
-                    }
-                    console.log(`✅ Outro avatar prepped → ${props.outroClip.videoUrl} (${props.outroClip.videoDurationSec?.toFixed(2)}s)`);
-                } else {
-                    console.warn(`⚠️ prepVideoToNewPath failed for outro — copying raw file`);
-                    const rawDestAbs = path.join(assetsDirAbs, 'outro_video.mp4');
-                    fs.copyFileSync(srcAbs, rawDestAbs);
-                    const probedDur = await probeVideoDuration(rawDestAbs);
-                    props.outroClip = {
-                        ...props.outroClip,
-                        videoUrl: `/${assetsDirRel}/outro_video.mp4`,
-                        videoDurationSec: probedDur,
-                    };
+            downloadTasks.push({
+                url: props.introClip.audioUrl,
+                destAbs,
+                onComplete: (local) => {
+                    props.introClip.audioUrl = local;
                 }
-            } else {
-                console.warn(`⚠️ Outro avatar video not found at: ${srcAbs}`);
-            }
+            });
         }
 
         if (props.outroClip?.audioUrl) {
             const destAbs = path.join(assetsDirAbs, 'outro_audio.wav');
-            const local = await downloadToLocal(props.outroClip.audioUrl, destAbs);
-            if (local) props.outroClip = { ...props.outroClip, audioUrl: local };
+            downloadTasks.push({
+                url: props.outroClip.audioUrl,
+                destAbs,
+                onComplete: (local) => {
+                    props.outroClip.audioUrl = local;
+                }
+            });
         }
 
-        // ── Download imageUrls locally ──────────────────────────────────────
-        // CRITICAL: Remote image URLs (Appwrite/cloud) can return 403/401 during
-        // render, causing Remotion's <Img> to cancelRender after 3 retries.
-        // Downloading all images to local disk prevents this.
+        // Image URLs
         if (props.imageUrls && Array.isArray(props.imageUrls)) {
             const newImageUrls = [...props.imageUrls];
+
             for (let i = 0; i < newImageUrls.length; i++) {
                 const imgUrl = newImageUrls[i];
                 if (!imgUrl || !imgUrl.startsWith('http')) continue;
@@ -765,108 +928,368 @@ async function renderLocally(videoId: string, props: Record<string, any>) {
                     const parsed = JSON.parse(imgUrl);
                     if (parsed?.type === 'slideshow' && Array.isArray(parsed.urls)) {
                         for (let j = 0; j < parsed.urls.length; j++) {
-                            if (parsed.urls[j]?.startsWith('http')) {
-                                const ext = parsed.urls[j].match(/\.(png|jpg|jpeg|webp|gif)/i)?.[1] || 'jpg';
+                            const slideUrl = parsed.urls[j];
+                            if (slideUrl?.startsWith('http')) {
+                                const ext = slideUrl.match(/\.(png|jpg|jpeg|webp|gif)/i)?.[1] || 'jpg';
                                 const destAbs = path.join(assetsDirAbs, `slide_${i}_${j}.${ext}`);
-                                const local = await downloadToLocal(parsed.urls[j], destAbs);
-                                if (local) parsed.urls[j] = local;
+                                const slideIndex = j;
+                                downloadTasks.push({
+                                    url: slideUrl,
+                                    destAbs,
+                                    onComplete: (local) => {
+                                        parsed.urls[slideIndex] = local;
+                                    }
+                                });
                             }
                         }
-                        newImageUrls[i] = JSON.stringify(parsed);
+                        const imageIndex = i;
+                        postProcessTasks.push(async () => {
+                            newImageUrls[imageIndex] = JSON.stringify(parsed);
+                        });
                         continue;
                     }
-                } catch { /* not JSON */ }
+                } catch {
+                    // not JSON
+                }
 
                 // Regular image URL
                 if (/SKIP_T2V|SKIP_VEO/i.test(imgUrl)) continue;
                 const ext = imgUrl.match(/\.(png|jpg|jpeg|webp|gif)/i)?.[1] || 'jpg';
                 const destAbs = path.join(assetsDirAbs, `image_${i}.${ext}`);
-                const local = await downloadToLocal(imgUrl, destAbs);
-                if (local) newImageUrls[i] = local;
+                const imageIndex = i;
+                downloadTasks.push({
+                    url: imgUrl,
+                    destAbs,
+                    onComplete: (local) => {
+                        newImageUrls[imageIndex] = local;
+                    }
+                });
             }
-            props.imageUrls = newImageUrls;
+
+            postProcessTasks.push(async () => {
+                props.imageUrls = newImageUrls;
+            });
         }
 
-        console.log(`✅ All assets downloaded for ${videoId}`);
+        // Avatar Clip prepping in parallel
+        const avatarPrepTasks: Promise<void>[] = [];
+
+        if (props.introClip?.videoUrl) {
+            const rawUrl = props.introClip.videoUrl.replace(/^\//, '');
+            const srcAbs = path.join(cwd, 'public', rawUrl);
+            const destAbs = path.join(assetsDirAbs, 'intro_video_prepped.mp4');
+
+            if (fs.existsSync(srcAbs)) {
+                avatarPrepTasks.push((async () => {
+                    console.log(`🎬 Prepping intro avatar: ${path.basename(srcAbs)} → intro_video_prepped.mp4`);
+                    const ok = await prepVideoToNewPath(srcAbs, destAbs);
+
+                    if (ok && fs.existsSync(destAbs)) {
+                        const probedDur = await probeVideoDuration(destAbs);
+                        console.log(`📏 Intro video probed duration: ${probedDur?.toFixed(3)}s`);
+                        if (!probedDur || probedDur < 0.5) {
+                            const rawDestAbs = path.join(assetsDirAbs, 'intro_video.mp4');
+                            fs.copyFileSync(srcAbs, rawDestAbs);
+                            const rawDur = await probeVideoDuration(rawDestAbs);
+                            props.introClip = { ...props.introClip, videoUrl: `/${assetsDirRel}/intro_video.mp4`, videoDurationSec: rawDur };
+                        } else {
+                            props.introClip = {
+                                ...props.introClip,
+                                videoUrl: `/${assetsDirRel}/intro_video_prepped.mp4`,
+                                videoDurationSec: probedDur,
+                            };
+                        }
+                    } else {
+                        const rawDestAbs = path.join(assetsDirAbs, 'intro_video.mp4');
+                        fs.copyFileSync(srcAbs, rawDestAbs);
+                        const probedDur = await probeVideoDuration(rawDestAbs);
+                        props.introClip = {
+                            ...props.introClip,
+                            videoUrl: `/${assetsDirRel}/intro_video.mp4`,
+                            videoDurationSec: probedDur,
+                        };
+                    }
+                })());
+            }
+        }
+
+        if (props.outroClip?.videoUrl) {
+            const rawUrl = props.outroClip.videoUrl.replace(/^\//, '');
+            const srcAbs = path.join(cwd, 'public', rawUrl);
+            const destAbs = path.join(assetsDirAbs, 'outro_video_prepped.mp4');
+
+            if (fs.existsSync(srcAbs)) {
+                avatarPrepTasks.push((async () => {
+                    console.log(`🎬 Prepping outro avatar: ${path.basename(srcAbs)} → outro_video_prepped.mp4`);
+                    const ok = await prepVideoToNewPath(srcAbs, destAbs);
+
+                    if (ok && fs.existsSync(destAbs)) {
+                        const probedDur = await probeVideoDuration(destAbs);
+                        console.log(`📏 Outro video probed duration: ${probedDur?.toFixed(3)}s`);
+                        if (!probedDur || probedDur < 0.5) {
+                            const rawDestAbs = path.join(assetsDirAbs, 'outro_video.mp4');
+                            fs.copyFileSync(srcAbs, rawDestAbs);
+                            const rawDur = await probeVideoDuration(rawDestAbs);
+                            props.outroClip = { ...props.outroClip, videoUrl: `/${assetsDirRel}/outro_video.mp4`, videoDurationSec: rawDur };
+                        } else {
+                            props.outroClip = {
+                                ...props.outroClip,
+                                videoUrl: `/${assetsDirRel}/outro_video_prepped.mp4`,
+                                videoDurationSec: probedDur,
+                            };
+                        }
+                    } else {
+                        const rawDestAbs = path.join(assetsDirAbs, 'outro_video.mp4');
+                        fs.copyFileSync(srcAbs, rawDestAbs);
+                        const probedDur = await probeVideoDuration(rawDestAbs);
+                        props.outroClip = {
+                            ...props.outroClip,
+                            videoUrl: `/${assetsDirRel}/outro_video.mp4`,
+                            videoDurationSec: probedDur,
+                        };
+                    }
+                })());
+            }
+        }
+
+        // Run all downloads and avatar prepping concurrently
+        // CACHE: skip assets that already exist locally (e.g. on force re-render)
+        // PURGE STALE PLACEHOLDERS: delete any companion `.is_placeholder` assets from previous failed render runs
+        console.log(`🚀 Downloading ${downloadTasks.length} assets and prepping avatars in parallel...`);
+        await Promise.all([
+            ...downloadTasks.map(async (task) => {
+                try {
+                    // Detect and delete stale placeholders from prior failures to force a fresh download
+                    const placeholderFile = `${task.destAbs}.is_placeholder`;
+                    if (fs.existsSync(placeholderFile)) {
+                        console.log(`🗑️  Detected stale placeholder for ${path.basename(task.destAbs)} — deleting to force fresh download`);
+                        try { fs.unlinkSync(task.destAbs); } catch {}
+                        try { fs.unlinkSync(placeholderFile); } catch {}
+                    }
+
+                    // ── Download cache: skip if file already exists and is valid ──
+                    if (fs.existsSync(task.destAbs)) {
+                        const existingSize = fs.statSync(task.destAbs).size;
+                        if (existingSize > 1000) {
+                            console.log(`⏭️  Cache hit: ${path.basename(task.destAbs)} (${(existingSize / 1024 / 1024).toFixed(2)} MB) — skipping download`);
+                            const relToPublic = path.relative(path.join(process.cwd(), 'public'), task.destAbs).replace(/\\/g, '/');
+                            await task.onComplete(`/${relToPublic}`);
+                            return;
+                        }
+                    }
+                    const localUrl = await downloadToLocal(task.url, task.destAbs);
+                    if (localUrl) {
+                        await task.onComplete(localUrl);
+                    }
+                } catch (e: any) {
+                    console.error(`❌ Download failed for ${task.url}: ${e.message}`);
+                }
+            }),
+            ...avatarPrepTasks
+        ]);
+
+        console.log(`⚙️ Running post-download merging and serialization...`);
+        for (const task of postProcessTasks) {
+            await task();
+        }
+
+        props.sceneVideoUrls = newUrls;
+        props.sceneVideoDurations = sceneVideoDurations;
+
+        console.log(`✅ All assets successfully downloaded and prepared!`);
     } catch (err: any) {
-        console.error(`⚠️ Asset download error:`, err.message);
+        console.error(`❌ Parallel download or prep failed:`, err.message);
     }
 
-    // ── Prep all downloaded scene .mp4 files → all-keyframe ──────────────────
-    // NOTE: Avatar files are already prepped above via prepVideoToNewPath.
-    // Here we only prep scene video files.
-    try {
-        const allFiles = fs.readdirSync(assetsDirAbs);
-        const sceneVideoFiles = allFiles.filter(f =>
-            f.endsWith('.mp4') &&
-            !f.includes('_prepped') &&
-            !f.includes('_merged') &&
-            !f.includes('avatar') &&
-            !f.includes('intro_video') &&
-            !f.includes('outro_video')
-        );
+    // ── Compute exact scene duration so we can pre-stretch videos ─────────────
+    const fps30 = 30;
+    const introF  = props.introClip  ? Math.round((props.introClip.durationSec  || 0) * fps30) : 0;
+    const outroF  = props.outroClip  ? Math.round((props.outroClip.durationSec  || 0) * fps30) : 0;
+    const contentF = (props.durationInFrames || 0) - introF - outroF;
+    const numScenes = Math.max((props.imageUrls || []).length, 1);
+    const sceneDurationSec = contentF / numScenes / fps30;
+    console.log(`📐 sceneDurationSec = ${sceneDurationSec.toFixed(3)}s (${numScenes} scenes, ${contentF} content frames)`);
 
-        if (sceneVideoFiles.length > 0) {
-            console.log(`🔧 Prepping ${sceneVideoFiles.length} scene video(s)...`);
-            for (const videoFile of sceneVideoFiles) {
-                await prepVideoForRemotion(path.join(assetsDirAbs, videoFile));
+    // ── Prep all downloaded scene videos → CFR + pre-stretch if short ─────────
+    try {
+        console.log(`🔧 Prepping downloaded scene video(s) to H.264 CFR (with stretch if needed)...`);
+        for (let i = 0; i < newUrls.length; i++) {
+            const urlOrJson = newUrls[i];
+            if (!urlOrJson) continue;
+
+            // Check for JSON payload (composite/split)
+            try {
+                const parsed = JSON.parse(urlOrJson);
+
+                if (parsed?.type === 'composite' && Array.isArray(parsed.assets)) {
+                    for (let assetIdx = 0; assetIdx < parsed.assets.length; assetIdx++) {
+                        const asset = parsed.assets[assetIdx];
+                        if (asset.kind === 'video' && asset.url) {
+                            const relPath = asset.url.replace(/^\//, '');
+                            const srcAbs = path.join(cwd, 'public', relPath);
+                            if (fs.existsSync(srcAbs) && !srcAbs.includes('_prepped')) {
+                                const destAbs = srcAbs.replace('.mp4', '_prepped.mp4');
+                                const ok = await prepVideoToNewPath(srcAbs, destAbs);
+                                if (ok && fs.existsSync(destAbs)) {
+                                    asset.url = `/${path.relative(path.join(cwd, 'public'), destAbs).replace(/\\/g, '/')}`;
+                                    try { fs.unlinkSync(srcAbs); } catch {}
+                                }
+                            }
+                        } else if (asset.kind === 'split' && Array.isArray(asset.urls)) {
+                            for (let j = 0; j < asset.urls.length; j++) {
+                                const relPath = asset.urls[j].replace(/^\//, '');
+                                const srcAbs = path.join(cwd, 'public', relPath);
+                                if (fs.existsSync(srcAbs) && !srcAbs.includes('_prepped')) {
+                                    const destAbs = srcAbs.replace('.mp4', '_prepped.mp4');
+                                    const ok = await prepVideoToNewPath(srcAbs, destAbs);
+                                    if (ok && fs.existsSync(destAbs)) {
+                                        asset.urls[j] = `/${path.relative(path.join(cwd, 'public'), destAbs).replace(/\\/g, '/')}`;
+                                        try { fs.unlinkSync(srcAbs); } catch {}
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    newUrls[i] = JSON.stringify(parsed);
+                    continue;
+                }
+
+                if (parsed?.type === 'split' && Array.isArray(parsed.urls)) {
+                    for (let j = 0; j < parsed.urls.length; j++) {
+                        const relPath = parsed.urls[j].replace(/^\//, '');
+                        const srcAbs = path.join(cwd, 'public', relPath);
+                        if (fs.existsSync(srcAbs) && !srcAbs.includes('_prepped')) {
+                            const destAbs = srcAbs.replace('.mp4', '_prepped.mp4');
+                            const ok = await prepVideoToNewPath(srcAbs, destAbs);
+                            if (ok && fs.existsSync(destAbs)) {
+                                parsed.urls[j] = `/${path.relative(path.join(cwd, 'public'), destAbs).replace(/\\/g, '/')}`;
+                                try { fs.unlinkSync(srcAbs); } catch {}
+                            }
+                        }
+                    }
+                    newUrls[i] = JSON.stringify(parsed);
+                    continue;
+                }
+            } catch {
+                // Regular scene video URL — prep regardless of whether it's already _prepped.
+                // A stale _prepped.mp4 without tpad must be re-encoded.
+                if (urlOrJson.endsWith('.mp4')) {
+                    const relPath = urlOrJson.replace(/^\//, '');
+                    const srcAbs = path.join(cwd, 'public', relPath);
+
+                    // If the URL is already _prepped, treat it as the source for re-prepping.
+                    // We'll write to _prepped2.mp4 then swap back to _prepped.mp4.
+                    if (fs.existsSync(srcAbs)) {
+                        const isAlreadyPrepped = srcAbs.includes('_prepped');
+                        const destAbs = isAlreadyPrepped
+                            ? srcAbs.replace('_prepped.mp4', '_prepped2.mp4')
+                            : srcAbs.replace('.mp4', '_prepped.mp4');
+                        const finalAbs = isAlreadyPrepped
+                            ? srcAbs  // swap back to original _prepped.mp4 path
+                            : destAbs;
+
+                        const ok = await prepVideoToNewPath(srcAbs, destAbs);
+                        if (ok && fs.existsSync(destAbs)) {
+                            if (isAlreadyPrepped) {
+                                // Swap _prepped2.mp4 → _prepped.mp4
+                                try { fs.unlinkSync(srcAbs); } catch {}
+                                try { fs.renameSync(destAbs, srcAbs); } catch {
+                                    fs.copyFileSync(destAbs, srcAbs);
+                                    try { fs.unlinkSync(destAbs); } catch {}
+                                }
+                                // URL stays the same (_prepped.mp4), just re-encoded
+                            } else {
+                                newUrls[i] = `/${path.relative(path.join(cwd, 'public'), finalAbs).replace(/\\/g, '/')}`;
+                                try { fs.unlinkSync(srcAbs); } catch {}
+                            }
+
+                            // Validate: warn if video is dangerously short after prep
+                            const checkDur = await probeVideoDuration(finalAbs);
+                            if (checkDur && checkDur < 1.0) {
+                                console.warn(`⚠️ Scene ${i} prepped video is only ${checkDur.toFixed(3)}s — likely a corrupt download. Rendering may crash.`);
+                            }
+
+                            // ── Pre-stretch: ensure video >= sceneDuration + 0.6s ──
+                            if (sceneDurationSec > 0) {
+                                const stretchedDur = await stretchSceneVideoToFit(finalAbs, sceneDurationSec);
+                                if (stretchedDur) {
+                                    props.sceneVideoDurations = props.sceneVideoDurations || [];
+                                    props.sceneVideoDurations[i] = stretchedDur;
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
+        props.sceneVideoUrls = newUrls;
     } catch (e: any) {
         console.warn(`⚠️ Scene video prep failed:`, e.message);
     }
 
     // ── RE-PROBE all durations after prep ────────────────────────────────────
     try {
-        if (props.sceneVideoDurations && Array.isArray(props.sceneVideoDurations)) {
-            for (let i = 0; i < (props.sceneVideoUrls || []).length; i++) {
-                const sceneUrl = props.sceneVideoUrls?.[i];
-                if (!sceneUrl) continue;
+        if (!props.sceneVideoDurations || !Array.isArray(props.sceneVideoDurations)) {
+            props.sceneVideoDurations = new Array((props.sceneVideoUrls || []).length).fill(undefined);
+        }
+        for (let i = 0; i < (props.sceneVideoUrls || []).length; i++) {
+            const sceneUrl = props.sceneVideoUrls?.[i];
+            if (!sceneUrl) continue;
 
-                try {
-                    const parsed = JSON.parse(sceneUrl);
+            try {
+                const parsed = JSON.parse(sceneUrl);
 
-                    if (parsed?.type === 'composite' && Array.isArray(parsed.assets)) {
-                        let assetIdx = 0;
-                        for (const asset of parsed.assets) {
-                            if (asset.kind === 'video') {
-                                const absPath = path.join(assetsDirAbs, `scene_${i}_v${assetIdx}.mp4`);
-                                if (fs.existsSync(absPath)) asset.durationSec = await probeVideoDuration(absPath);
-                            } else if (asset.kind === 'split') {
-                                if (!asset.durationsSec) asset.durationsSec = [];
-                                for (let j = 0; j < (asset.urls || []).length; j++) {
-                                    const absPath = path.join(assetsDirAbs, `scene_${i}_sp${assetIdx}_${j}.mp4`);
-                                    if (fs.existsSync(absPath)) asset.durationsSec[j] = await probeVideoDuration(absPath);
-                                }
-                                const valids = (asset.durationsSec || []).filter(Boolean);
-                                if (valids.length > 0) asset.durationSec = Math.min(...valids);
+                if (parsed?.type === 'composite' && Array.isArray(parsed.assets)) {
+                    let assetIdx = 0;
+                    for (const asset of parsed.assets) {
+                        if (asset.kind === 'video' && asset.url) {
+                            const relPath = asset.url.replace(/^\//, '');
+                            const absPath = path.join(cwd, 'public', relPath);
+                            if (fs.existsSync(absPath)) asset.durationSec = await probeVideoDuration(absPath);
+                        } else if (asset.kind === 'split' && Array.isArray(asset.urls)) {
+                            if (!asset.durationsSec) asset.durationsSec = [];
+                            for (let j = 0; j < asset.urls.length; j++) {
+                                const relPath = asset.urls[j].replace(/^\//, '');
+                                const absPath = path.join(cwd, 'public', relPath);
+                                if (fs.existsSync(absPath)) asset.durationsSec[j] = await probeVideoDuration(absPath);
                             }
-                            assetIdx++;
+                            const valids = (asset.durationsSec || []).filter(Boolean);
+                            if (valids.length > 0) asset.durationSec = Math.min(...valids);
                         }
-                        props.sceneVideoUrls[i] = JSON.stringify(parsed);
-                        const allDurs = parsed.assets.map((a: any) =>
-                            a.durationSec || (a.durationsSec ? Math.min(...(a.durationsSec || []).filter(Boolean)) : 0)
-                        ).filter(Boolean);
-                        props.sceneVideoDurations[i] = allDurs.length > 0 ? Math.min(...allDurs) : undefined;
-                        continue;
+                        assetIdx++;
                     }
+                    props.sceneVideoUrls[i] = JSON.stringify(parsed);
+                    const allDurs = parsed.assets.map((a: any) =>
+                        a.durationSec || (a.durationsSec ? Math.min(...(a.durationsSec || []).filter(Boolean)) : 0)
+                    ).filter(Boolean);
+                    props.sceneVideoDurations[i] = allDurs.length > 0 ? Math.min(...allDurs) : undefined;
+                    continue;
+                }
 
-                    if (parsed?.type === 'split' && Array.isArray(parsed.urls)) {
-                        if (!parsed.durationsSec) parsed.durationsSec = [];
-                        for (let j = 0; j < parsed.urls.length; j++) {
-                            const absPath = path.join(assetsDirAbs, `scene_${i}_split_${j}.mp4`);
-                            if (fs.existsSync(absPath)) parsed.durationsSec[j] = await probeVideoDuration(absPath);
-                        }
-                        props.sceneVideoUrls[i] = JSON.stringify(parsed);
-                        const valids = (parsed.durationsSec || []).filter(Boolean);
-                        props.sceneVideoDurations[i] = valids.length > 0 ? Math.min(...valids) : undefined;
-                        continue;
+                if (parsed?.type === 'split' && Array.isArray(parsed.urls)) {
+                    if (!parsed.durationsSec) parsed.durationsSec = [];
+                    for (let j = 0; j < parsed.urls.length; j++) {
+                        const relPath = parsed.urls[j].replace(/^\//, '');
+                        const absPath = path.join(cwd, 'public', relPath);
+                        if (fs.existsSync(absPath)) parsed.durationsSec[j] = await probeVideoDuration(absPath);
                     }
-                } catch { /* regular URL */ }
+                    props.sceneVideoUrls[i] = JSON.stringify(parsed);
+                    const valids = (parsed.durationsSec || []).filter(Boolean);
+                    props.sceneVideoDurations[i] = valids.length > 0 ? Math.min(...valids) : undefined;
+                    continue;
+                }
+            } catch { /* regular URL */ }
 
-                // Regular scene video
-                const absPath = path.join(assetsDirAbs, `scene_${i}.mp4`);
-                if (fs.existsSync(absPath)) {
+            // Regular scene video — probe, then stretch if shorter than scene
+            const relPath = sceneUrl.replace(/^\//, '');
+            const absPath = path.join(cwd, 'public', relPath);
+            if (fs.existsSync(absPath)) {
+                // stretchSceneVideoToFit probes internally and only re-encodes if needed.
+                // This handles both freshly downloaded files AND cached _prepped.mp4 hits.
+                if (sceneDurationSec > 0) {
+                    const stretchedDur = await stretchSceneVideoToFit(absPath, sceneDurationSec);
+                    props.sceneVideoDurations[i] = stretchedDur ?? await probeVideoDuration(absPath);
+                } else {
                     props.sceneVideoDurations[i] = await probeVideoDuration(absPath);
                 }
             }
@@ -896,6 +1319,43 @@ async function renderLocally(videoId: string, props: Record<string, any>) {
         console.warn(`⚠️ Re-probe step failed:`, e.message);
     }
 
+    // ── Use public/ directly as Remotion public dir ───────────────────────────
+    // IMPORTANT: Do NOT use a lean remotion-public/ dir.
+    // Remotion hashes the public dir content to key its bundle cache.
+    // If we copy assets into a fresh remotion-public/ every render, the hash
+    // changes every time → Remotion deletes and re-bundles from scratch every
+    // render (adds 60-90s). Using public/ directly keeps the cache warm.
+    // The renders/ subdirectory does NOT affect bundling — it's served as-is.
+    const effectivePublicDir = path.join(cwd, 'public');
+    console.log(`📂 Remotion public dir: public/ (stable cache, no copy needed)`);
+
+
+    // ── Verify critical assets exist in the EFFECTIVE public dir ──────────────
+    const assetsToVerify = [
+        { name: 'music', url: props.musicUrl },
+        { name: 'intro', url: props.introClip?.videoUrl },
+        { name: 'outro', url: props.outroClip?.videoUrl },
+        { name: 'narration', url: props.audioUrl },
+    ];
+
+    console.log(`🔍 Verifying assets in ${effectivePublicDir}...`);
+    for (const asset of assetsToVerify) {
+        if (asset.url && asset.url.startsWith('/')) {
+            const absPath = path.join(effectivePublicDir, asset.url.replace(/^\//, ''));
+            if (fs.existsSync(absPath)) {
+                const size = fs.statSync(absPath).size;
+                console.log(`✅ Asset ${asset.name} found: ${asset.url} (${(size / 1024 / 1024).toFixed(2)} MB)`);
+            } else {
+                console.error(`❌ MISSING ASSET: ${asset.name} → expected at ${absPath}`);
+                // If it's missing in remotion-public but exists in public, we have a sync issue
+                const originalAbsPath = path.join(cwd, 'public', asset.url.replace(/^\//, ''));
+                if (fs.existsSync(originalAbsPath)) {
+                    console.log(`💡 Note: File exists in ORIGINAL public/ but was not copied to remotion-public/`);
+                }
+            }
+        }
+    }
+
     // ── Write props and run Remotion ──────────────────────────────────────────
     const propsPath = path.join(tmpDir, `props-${videoId}.json`);
     fs.writeFileSync(propsPath, JSON.stringify(props));
@@ -903,13 +1363,15 @@ async function renderLocally(videoId: string, props: Record<string, any>) {
     const outputPath = path.join(rendersDir, `${videoId}.mp4`);
     const propsArg = propsPath.replace(/\\/g, '/');
     const outputArg = outputPath.replace(/\\/g, '/');
+    const publicDirArg = effectivePublicDir.replace(/\\/g, '/');
 
     function buildRenderCommand(): string {
         return [
             'npx remotion render MainVideo',
             `"${outputArg}"`,
             `--props="${propsArg}"`,
-            `--timeout=120000`,
+            `--public-dir="${publicDirArg}"`,
+            `--timeout=300000`,
             `--disable-web-security`,
             `--gl=angle`,
             `--concurrency=1`,
@@ -919,7 +1381,7 @@ async function renderLocally(videoId: string, props: Record<string, any>) {
 
     function executeRender(cmd: string): Promise<void> {
         return new Promise<void>((resolve, reject) => {
-            console.log(`💻 Executing: ${cmd.substring(0, 120)}...`);
+            console.log(`💻 Executing: ${cmd.substring(0, 200)}...`);
             const child = exec(cmd, { cwd }, (error) => {
                 if (error) return reject(error);
                 resolve();
@@ -951,9 +1413,16 @@ async function renderLocally(videoId: string, props: Record<string, any>) {
 
             if (!isRetryable || isLastAttempt) {
                 try { fs.unlinkSync(propsPath); } catch { }
-                try { fs.rmSync(assetsDirAbs, { recursive: true, force: true }); } catch { }
                 console.error(`❌ Local render failed for ${videoId}:`, error.message);
-                await db.update(shortVideoAssets).set({ status: 'failed' }).where(eq(shortVideoAssets.videoId, videoId));
+                // Best-effort DB update — don't let a DB timeout swallow the real render error
+                try {
+                    for (let dbAttempt = 0; dbAttempt < 3; dbAttempt++) {
+                        try {
+                            await db.update(shortVideoAssets).set({ status: 'failed' }).where(eq(shortVideoAssets.videoId, videoId));
+                            break;
+                        } catch { await new Promise(r => setTimeout(r, 3000)); }
+                    }
+                } catch { /* ignore secondary DB failure */ }
                 throw error;
             }
             console.warn(`⚠️ Retryable error on attempt ${attempt + 1}/${MAX_ATTEMPTS}: ${isImageError ? 'image loading' : 'timeout'}`);
@@ -962,18 +1431,46 @@ async function renderLocally(videoId: string, props: Record<string, any>) {
 
     // ── Success ───────────────────────────────────────────────────────────────
     try { fs.unlinkSync(propsPath); } catch { }
-    try { fs.rmSync(assetsDirAbs, { recursive: true, force: true }); } catch { }
 
     const localUrl = `/renders/${videoId}.mp4`;
     console.log(`✅ Local render complete: ${localUrl}`);
 
-    const [asset] = await db.select().from(shortVideoAssets).where(eq(shortVideoAssets.videoId, videoId));
-    if (!asset?.thumbnailUrl) await ensureVideoThumbnail(videoId);
+    // ── Retry helper: exponential back-off for transient DB / network errors ──
+    async function dbWithRetry<T>(label: string, fn: () => Promise<T>, maxAttempts = 5): Promise<T> {
+        let lastErr: any;
+        for (let i = 0; i < maxAttempts; i++) {
+            try {
+                return await fn();
+            } catch (e: any) {
+                lastErr = e;
+                const isTransient =
+                    /fetch failed|connect timeout|ECONNRESET|ETIMEDOUT|UND_ERR/i.test(e?.message || '') ||
+                    /fetch failed|connect timeout|ECONNRESET|ETIMEDOUT|UND_ERR/i.test(e?.cause?.message || '');
+                if (!isTransient || i === maxAttempts - 1) break;
+                const delay = Math.pow(2, i + 1) * 1000; // 2s, 4s, 8s, 16s …
+                console.warn(`⚠️ [${label}] DB transient error (attempt ${i + 1}/${maxAttempts}), retrying in ${delay / 1000}s: ${e?.cause?.message || e?.message}`);
+                await new Promise(r => setTimeout(r, delay));
+            }
+        }
+        throw lastErr;
+    }
 
-    await db.update(shortVideoAssets).set({
-        videoUrl: localUrl,
-        status: 'completed',
-    }).where(eq(shortVideoAssets.videoId, videoId));
+    try {
+        const [asset] = await dbWithRetry('select-asset', () =>
+            db.select().from(shortVideoAssets).where(eq(shortVideoAssets.videoId, videoId))
+        );
+        if (!asset?.thumbnailUrl) await ensureVideoThumbnail(videoId);
+    } catch (e: any) {
+        console.warn(`⚠️ Could not fetch asset for thumbnail check (non-fatal): ${e?.message}`);
+    }
+
+    await dbWithRetry('mark-completed', () =>
+        db.update(shortVideoAssets).set({
+            videoUrl: localUrl,
+            status: 'completed',
+        }).where(eq(shortVideoAssets.videoId, videoId))
+    );
+    console.log(`💾 DB updated → completed for ${videoId}`);
 }
 
 export async function ensureVideoThumbnail(videoId: string) {
