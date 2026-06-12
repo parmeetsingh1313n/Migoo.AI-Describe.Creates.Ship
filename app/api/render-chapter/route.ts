@@ -217,11 +217,11 @@ async function makeClip(imgPath: string, audioPath: string, audioStart: number, 
     hasPrev ? `-loop 1 -framerate 30 -t ${duration.toFixed(3)} -i "${prevImgPath}"` : '',
     `-loop 1 -framerate 30 -t ${duration.toFixed(3)} -i "${imgPath}"`,
     `-ss ${audioStart.toFixed(3)} -t ${duration.toFixed(3)} -i "${audioPath}"`,
-    `-c:v libx264 -preset fast -crf 18 -pix_fmt yuv420p`,
+    `-c:v libx264 -preset fast -crf 28 -tune stillimage -pix_fmt yuv420p`,
     hasPrev
       ? `-filter_complex "[1:v]format=yuva420p,fade=t=in:st=0:d=${fd.toFixed(3)}:alpha=1[fadein];[0:v][fadein]overlay=x=0:y=0,scale=1440:720:force_original_aspect_ratio=decrease,pad=1440:720:(ow-iw)/2:(oh-ih)/2,setsar=1"`
       : `-vf "scale=1440:720:force_original_aspect_ratio=decrease,pad=1440:720:(ow-iw)/2:(oh-ih)/2,setsar=1"`,
-    `-c:a aac -b:a 192k -ar 44100`,
+    `-c:a aac -b:a 128k -ar 44100`,
     `-t ${duration.toFixed(3)} -movflags +faststart`,
     `"${out}"`,
   ].filter(Boolean).join(' ');
