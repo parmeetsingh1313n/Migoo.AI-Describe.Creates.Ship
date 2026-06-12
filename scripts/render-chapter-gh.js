@@ -30,10 +30,13 @@ if (!fs.existsSync(payloadPath)) {
   console.error('❌ tmp/chapter-payload.json not found');
   process.exit(1);
 }
-const { chapterId, slides, durationsBySlideId } = JSON.parse(fs.readFileSync(payloadPath, 'utf-8'));
+const payload = JSON.parse(fs.readFileSync(payloadPath, 'utf-8'));
+const { chapterId, fetchUrl } = payload;
+let slides = payload.slides;
+let durationsBySlideId = payload.durationsBySlideId;
 
-if (!chapterId || !Array.isArray(slides) || slides.length === 0) {
-  console.error('❌ Invalid payload — missing chapterId or slides');
+if (!chapterId) {
+  console.error('❌ Invalid payload — missing chapterId');
   process.exit(1);
 }
 
@@ -226,11 +229,11 @@ async function makeClip(imgPath, audioPath, audioStart, duration, out, prevImgPa
     hasPrev ? `-loop 1 -framerate 30 -t ${duration.toFixed(3)} -i "${prevImgPath}"` : '',
     `-loop 1 -framerate 30 -t ${duration.toFixed(3)} -i "${imgPath}"`,
     `-ss ${audioStart.toFixed(3)} -t ${duration.toFixed(3)} -i "${audioPath}"`,
-    `-c:v libx264 -preset fast -crf 18 -pix_fmt yuv420p`,
+    `-c:v libx264 -preset fast -crf 28 -tune stillimage -pix_fmt yuv420p`,
     hasPrev
       ? `-filter_complex "[1:v]format=yuva420p,fade=t=in:st=0:d=${fd.toFixed(3)}:alpha=1[fadein];[0:v][fadein]overlay=x=0:y=0,scale=1440:720:force_original_aspect_ratio=decrease,pad=1440:720:(ow-iw)/2:(oh-ih)/2,setsar=1"`
       : `-vf "scale=1440:720:force_original_aspect_ratio=decrease,pad=1440:720:(ow-iw)/2:(oh-ih)/2,setsar=1"`,
-    `-c:a aac -b:a 192k -ar 44100`,
+    `-c:a aac -b:a 128k -ar 44100`,
     `-t ${duration.toFixed(3)} -movflags +faststart`,
     `"${out}"`,
   ].filter(Boolean).join(' ');
@@ -256,6 +259,26 @@ async function makeSilent(dest, durationSec) {
 
 // ── Main render pipeline ─────────────────────────────────────────────────────
 async function render() {
+  if (fetchUrl) {
+    console.log(`📡 Fetching chapter slides from Vercel: ${fetchUrl}`);
+    const res = await fetch(fetchUrl, {
+      headers: {
+        'x-appwrite-key': process.env.APPWRITE_API_KEY || ''
+      }
+    });
+    if (!res.ok) {
+      throw new Error(`Failed to fetch slides data: HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    slides = data.slides;
+    durationsBySlideId = data.durationsBySlideId;
+    console.log(`   Fetched ${slides.length} slides successfully.`);
+  }
+
+  if (!Array.isArray(slides) || slides.length === 0) {
+    throw new Error('No slides found to render');
+  }
+
   console.log(`🎬 render-chapter-gh: chapterId=${chapterId}, slides=${slides.length}`);
 
   const slideClips  = [];

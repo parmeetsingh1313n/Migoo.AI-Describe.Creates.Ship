@@ -4,7 +4,7 @@ import fs from 'fs';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { db } from '@/config/db';
-import { chapterGenerationStatus } from '@/config/schema';
+import { chapterGenerationStatus, chapterContentSlides } from '@/config/schema';
 import { eq } from 'drizzle-orm';
 
 const execAsync = promisify(exec);
@@ -35,8 +35,7 @@ function isGitHubActionsMode(): boolean {
 // ── Dispatch to GitHub Actions ───────────────────────────────────────────────
 async function dispatchToGitHub(payload: {
   chapterId: string;
-  slides: any[];
-  durationsBySlideId: Record<string, number>;
+  fetchUrl: string;
   webhookUrl: string;
 }) {
   const token = process.env.GH_PAT!;
@@ -217,11 +216,11 @@ async function makeClip(imgPath: string, audioPath: string, audioStart: number, 
     hasPrev ? `-loop 1 -framerate 30 -t ${duration.toFixed(3)} -i "${prevImgPath}"` : '',
     `-loop 1 -framerate 30 -t ${duration.toFixed(3)} -i "${imgPath}"`,
     `-ss ${audioStart.toFixed(3)} -t ${duration.toFixed(3)} -i "${audioPath}"`,
-    `-c:v libx264 -preset fast -crf 18 -pix_fmt yuv420p`,
+    `-c:v libx264 -preset fast -crf 28 -tune stillimage -pix_fmt yuv420p`,
     hasPrev
       ? `-filter_complex "[1:v]format=yuva420p,fade=t=in:st=0:d=${fd.toFixed(3)}:alpha=1[fadein];[0:v][fadein]overlay=x=0:y=0,scale=1440:720:force_original_aspect_ratio=decrease,pad=1440:720:(ow-iw)/2:(oh-ih)/2,setsar=1"`
       : `-vf "scale=1440:720:force_original_aspect_ratio=decrease,pad=1440:720:(ow-iw)/2:(oh-ih)/2,setsar=1"`,
-    `-c:a aac -b:a 192k -ar 44100`,
+    `-c:a aac -b:a 128k -ar 44100`,
     `-t ${duration.toFixed(3)} -movflags +faststart`,
     `"${out}"`,
   ].filter(Boolean).join(' ');
@@ -353,11 +352,15 @@ export async function POST(req: NextRequest) {
   // ── GitHub Actions mode ───────────────────────────────────────────────────
   if (isGitHubActionsMode()) {
     const webhookUrl = buildCallbackUrl(req);
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL ? process.env.NEXT_PUBLIC_APP_URL.replace(/\/$/, '') : `${req.nextUrl.protocol}//${req.headers.get('host')}`;
+    const fetchUrl = `${appUrl}/api/render-chapter?chapterId=${chapterId}&fetchData=true`;
+
     console.log(`🚀 Dispatching chapter render to GitHub Actions: ${chapterId}`);
     console.log(`   Callback URL: ${webhookUrl}`);
+    console.log(`   Fetch URL:    ${fetchUrl}`);
 
     try {
-      await dispatchToGitHub({ chapterId, slides, durationsBySlideId, webhookUrl });
+      await dispatchToGitHub({ chapterId, fetchUrl, webhookUrl });
 
       // Mark as rendering in DB
       try {
@@ -390,6 +393,52 @@ export async function POST(req: NextRequest) {
 export async function GET(req: NextRequest) {
   const chapterId = req.nextUrl.searchParams.get('chapterId');
   if (!chapterId) return NextResponse.json({ error: 'Missing chapterId' }, { status: 400 });
+
+  // ── Secure slide data fetch for GitHub Actions ─────────────────────────────
+  const fetchData = req.nextUrl.searchParams.get('fetchData') === 'true';
+  if (fetchData) {
+    const authHeader = req.headers.get('x-appwrite-key') || req.headers.get('Authorization')?.replace('Bearer ', '');
+    if (!authHeader || authHeader !== process.env.APPWRITE_API_KEY) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    try {
+      const dbSlides = await db
+        .select()
+        .from(chapterContentSlides)
+        .where(eq(chapterContentSlides.chapterId, chapterId))
+        .orderBy(chapterContentSlides.slideIndex);
+
+      const slides = dbSlides.map(slide => {
+        const rev = (slide.revealData as any[]) ?? [];
+        const hasFragmentData = Array.isArray(rev) && rev.length > 0 && !isNaN(Number(rev[0]));
+        return {
+          slideId: slide.slideId,
+          html: slide.html,
+          audioFileUrl: slide.audioUrl,
+          revealData: slide.revealData,
+          fragmentData: hasFragmentData ? rev.map(Number) : undefined,
+          caption: slide.captions,
+        };
+      });
+
+      const durationsBySlideId: Record<string, number> = {};
+      const fps = 30;
+      for (const slide of dbSlides) {
+        const seconds = slide.audioDuration ?? 1;
+        const frames = Math.max(1, Math.ceil(seconds * fps));
+        durationsBySlideId[slide.slideId] = frames;
+      }
+
+      return NextResponse.json({
+        chapterId,
+        slides,
+        durationsBySlideId,
+      });
+    } catch (dbErr: any) {
+      return NextResponse.json({ error: `Failed to fetch chapter data: ${dbErr.message}` }, { status: 500 });
+    }
+  }
 
   // 1. Check DB first (works for GitHub Actions rendered videos, persists on Vercel)
   try {
