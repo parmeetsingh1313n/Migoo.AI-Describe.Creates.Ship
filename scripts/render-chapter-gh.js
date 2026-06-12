@@ -34,6 +34,7 @@ const payload = JSON.parse(fs.readFileSync(payloadPath, 'utf-8'));
 const { chapterId, fetchUrl } = payload;
 let slides = payload.slides;
 let durationsBySlideId = payload.durationsBySlideId;
+let baseUrl = payload.baseUrl || '';
 
 if (!chapterId) {
   console.error('❌ Invalid payload — missing chapterId');
@@ -148,18 +149,20 @@ function buildRevealIntervals(slide, totalSec) {
 }
 
 // ── Build HTML for a specific reveal state ────────────────────────────────────
-function buildRevealHtml(html, interval) {
+function buildRevealHtml(html, interval, baseUrl) {
   let content = html
     .replace(/<!DOCTYPE[^>]*>/gi, '')
     .replace(/<\/?html[^>]*>/gi, '');
 
   const headMatch   = content.match(/<head[^>]*>([\s\S]*?)<\/head>/i);
   const headContent = headMatch ? headMatch[1] : '';
-  content = content.replace(/<head[^>]*>[\s\S]*?<\/head>/i, '');
+  content = content.replace(/<head[^>]*>[\s\S]*?<\/head>/i);
 
   const bodyMatch = content.match(/<body([^>]*)>([\s\S]*)<\/body>/i);
   const bodyAttrs = bodyMatch ? bodyMatch[1] : '';
   content         = bodyMatch ? bodyMatch[2] : content.replace(/<\/?body[^>]*>/gi, '');
+
+  const baseHref = baseUrl ? `<base href="${baseUrl.replace(/\/$/, '')}/">` : '';
 
   const revealScript = interval.isLegacy
     ? `document.querySelectorAll('[data-reveal]').forEach(function(el){
@@ -179,13 +182,102 @@ function buildRevealHtml(html, interval) {
     document.querySelectorAll('[data-background-color]').forEach(function(el){var c=el.getAttribute('data-background-color');if(c){el.style.backgroundColor=c;el.style.minHeight='720px';}});
     var fb=document.querySelector('[data-background-gradient]');if(fb){document.body.style.background=fb.getAttribute('data-background-gradient')||'';}`;
 
-  return `<!DOCTYPE html><html><head><meta charset="UTF-8">${headContent}
+  const scaleScript = `
+    (function() {
+      var VIEWPORT_W = 1440;
+      var VIEWPORT_H = 720;
+      var MIN_SCALE = 0.25;
+      var lastScale = -1;
+
+      function getWrapper() {
+        var children = document.body.children;
+        for (var i = 0; i < children.length; i++) {
+          if (children[i].tagName === 'DIV' || children[i].tagName === 'SECTION') return children[i];
+        }
+        return children[0];
+      }
+
+      function applyScale() {
+        var wrapper = getWrapper();
+        if (!wrapper) return;
+
+        wrapper.style.transform = 'none';
+        wrapper.style.width = VIEWPORT_W + 'px';
+        wrapper.style.minHeight = '0';
+        wrapper.style.height = 'auto';
+        wrapper.style.overflow = 'visible';
+        wrapper.style.position = 'relative';
+
+        void wrapper.offsetHeight;
+
+        var naturalH = wrapper.scrollHeight;
+        var naturalW = wrapper.scrollWidth;
+
+        var measureH = naturalH;
+        if (naturalH < 100) measureH = VIEWPORT_H;
+        var measureW = naturalW;
+        if (naturalW < 100) measureW = VIEWPORT_W;
+
+        var scaleY = VIEWPORT_H / Math.max(measureH, 1);
+        var scaleX = VIEWPORT_W / Math.max(measureW, 1);
+        var scale = Math.min(scaleX, scaleY);
+        
+        scale = Math.min(scale, 1.0);
+        scale = Math.max(scale, MIN_SCALE);
+
+        if (Math.abs(scale - lastScale) < 0.002) return;
+        lastScale = scale;
+
+        var scaledH = measureH * scale;
+        var offsetY = Math.max(0, (VIEWPORT_H - scaledH) / 2);
+        var scaledW = measureW * scale;
+        var offsetX = Math.max(0, (VIEWPORT_W - scaledW) / 2);
+
+        wrapper.style.transformOrigin = 'top left';
+        wrapper.style.transform = 'translate(' + offsetX + 'px, ' + offsetY + 'px) scale(' + scale + ')';
+        wrapper.style.width = VIEWPORT_W + 'px';
+        wrapper.style.height = measureH + 'px';
+        wrapper.style.overflow = 'visible';
+      }
+
+      var observer = new MutationObserver(function() {
+        lastScale = -1;
+        requestAnimationFrame(applyScale);
+      });
+
+      function init() {
+        var wrapper = getWrapper();
+        if (wrapper) {
+          observer.observe(wrapper, { childList: true, subtree: true, attributes: true });
+        }
+        applyScale();
+      }
+
+      document.addEventListener('load', function(e) {
+        if (e.target && e.target.tagName === 'IMG') {
+          lastScale = -1;
+          requestAnimationFrame(applyScale);
+        }
+      }, true);
+
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init);
+      } else {
+        init();
+      }
+
+      window.addEventListener('load', function() {
+        lastScale = -1;
+        applyScale();
+      });
+    })();
+  `;
+
+  return `<!DOCTYPE html><html><head><meta charset="UTF-8">${baseHref}${headContent}
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Outfit:wght@300;400;500;600;700;800;900&family=Poppins:wght@300;400;500;600;700;800;900&family=Space+Grotesk:wght@400;500;600;700&display=swap');
 *{box-sizing:border-box;margin:0;padding:0;}
 body{width:1440px;height:720px;overflow:hidden;background:#0f172a;}
-section{width:1440px!important;height:720px!important;max-height:720px!important;overflow:hidden!important;}
-section > div{width:100%!important;box-sizing:border-box!important;}
 [data-reveal]{opacity:0;transition:none;}[data-reveal].active{opacity:1!important;transform:none!important;}
 [data-fragment-index]{opacity:0;transition:none;}[data-fragment-index].visible{opacity:1!important;transform:none!important;filter:none!important;}
 .glassmorphism-card,.glass-card,.glass{background:rgba(255,255,255,0.07)!important;backdrop-filter:blur(16px)!important;border:1px solid rgba(255,255,255,0.13)!important;border-radius:14px!important;padding:12px 16px!important;}
@@ -195,7 +287,7 @@ img{max-width:100%;}
 </style></head>
 <body${bodyAttrs} style="margin:0;padding:0;width:1440px;height:720px;overflow:hidden;background:#0f172a;">
 ${content}
-<script>(function(){${bgScript}${revealScript}})();</script>
+<script>(function(){${bgScript}${revealScript}${scaleScript}})();</script>
 </body></html>`;
 }
 
@@ -272,7 +364,8 @@ async function render() {
     const data = await res.json();
     slides = data.slides;
     durationsBySlideId = data.durationsBySlideId;
-    console.log(`   Fetched ${slides.length} slides successfully.`);
+    baseUrl = data.baseUrl || '';
+    console.log(`   Fetched ${slides.length} slides successfully. (Base URL: ${baseUrl})`);
   }
 
   if (!Array.isArray(slides) || slides.length === 0) {
@@ -314,7 +407,7 @@ async function render() {
       // Screenshot
       const imgPath = path.join(workDir, `s${i}-state${j}.png`);
       try {
-        const revealHtml = buildRevealHtml(slide.html, iv);
+        const revealHtml = buildRevealHtml(slide.html, iv, baseUrl);
         await screenshot(revealHtml, imgPath);
         console.log(`  📸 State ${j} screenshot OK`);
       } catch (e) {
