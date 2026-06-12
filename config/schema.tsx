@@ -243,4 +243,12 @@ export const chapterGenerationStatus = pgTable("chapter_generation_status", {
     startedAt: timestamp("started_at"),
     completedAt: timestamp("completed_at"),
     updatedAt: timestamp("updated_at").defaultNow(),
+
+    // ── Video render fields (populated by GitHub Actions) ──────────────────────
+    // Status: idle | rendering:video | video:completed | video:failed
+    renderStatus: varchar("render_status", { length: 50 }).default("idle"),
+    // Appwrite Storage URL of the final rendered MP4
+    videoUrl: text("video_url"),
+    // Render error details (when renderStatus = video:failed)
+    renderError: text("render_error"),
 })

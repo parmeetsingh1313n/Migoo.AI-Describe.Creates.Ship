@@ -52,6 +52,10 @@ const nextConfig: NextConfig = {
     '@remotion/compositor-linux-arm64-musl',
     '@remotion/compositor-darwin-x64',
     '@remotion/compositor-darwin-arm64',
+    // Puppeteer and FFmpeg ship native binaries — must not be bundled by webpack
+    'puppeteer',
+    'puppeteer-core',
+    'ffmpeg-static',
   ],
 
   experimental: {
