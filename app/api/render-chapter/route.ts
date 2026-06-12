@@ -327,20 +327,22 @@ export async function POST(req: NextRequest) {
   }
 
   // ── Check DB for an in-progress GitHub Actions render ─────────────────────
-  try {
-    const [row] = await db
-      .select({ renderStatus: chapterGenerationStatus.renderStatus, videoUrl: chapterGenerationStatus.videoUrl })
-      .from(chapterGenerationStatus)
-      .where(eq(chapterGenerationStatus.chapterId, chapterId))
-      .limit(1);
+  if (isGitHubActionsMode()) {
+    try {
+      const [row] = await db
+        .select({ renderStatus: chapterGenerationStatus.renderStatus, videoUrl: chapterGenerationStatus.videoUrl })
+        .from(chapterGenerationStatus)
+        .where(eq(chapterGenerationStatus.chapterId, chapterId))
+        .limit(1);
 
-    if (row?.renderStatus === 'rendering:video') {
-      return NextResponse.json({ status: 'rendering', progress: 30 });
-    }
-    if (row?.renderStatus === 'video:completed' && row.videoUrl) {
-      return NextResponse.json({ status: 'already_complete', url: row.videoUrl });
-    }
-  } catch { /* DB might not have this chapter row yet — continue */ }
+      if (row?.renderStatus === 'rendering:video') {
+        return NextResponse.json({ status: 'rendering', progress: 30 });
+      }
+      if (row?.renderStatus === 'video:completed' && row.videoUrl) {
+        return NextResponse.json({ status: 'already_complete', url: row.videoUrl });
+      }
+    } catch { /* DB might not have this chapter row yet — continue */ }
+  }
 
   // ── Check if local file already exists ────────────────────────────────────
   const localOutputPath = path.join(process.cwd(), 'public', 'renders', `chapter-${chapterId}.mp4`);
@@ -440,7 +442,20 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  // 1. Check DB first (works for GitHub Actions rendered videos, persists on Vercel)
+  // 1. Check local file first (completed local dev renders)
+  const localOutputPath = path.join(process.cwd(), 'public', 'renders', `chapter-${chapterId}.mp4`);
+  if (fs.existsSync(localOutputPath) && fs.statSync(localOutputPath).size > 1024) {
+    renderJobs.set(chapterId, { status: 'completed', progress: 100, url: `/renders/chapter-${chapterId}.mp4` });
+    return NextResponse.json({ status: 'completed', progress: 100, url: `/renders/chapter-${chapterId}.mp4` });
+  }
+
+  // 2. Check local in-memory Map (in-progress local dev renders)
+  const job = renderJobs.get(chapterId);
+  if (job) {
+    return NextResponse.json(job);
+  }
+
+  // 3. Fall back to checking DB (works for GitHub Actions and deployed database)
   try {
     const [row] = await db
       .select({
@@ -455,22 +470,14 @@ export async function GET(req: NextRequest) {
     if (row?.renderStatus === 'video:completed' && row.videoUrl) {
       return NextResponse.json({ status: 'completed', progress: 100, url: row.videoUrl });
     }
-    if (row?.renderStatus === 'rendering:video') {
+    // Only report rendering from DB if we are running in GitHub Actions mode
+    if (isGitHubActionsMode() && row?.renderStatus === 'rendering:video') {
       return NextResponse.json({ status: 'rendering', progress: 50 });
     }
     if (row?.renderStatus === 'video:failed') {
       return NextResponse.json({ status: 'failed', error: row.renderError ?? 'Render failed' });
     }
-  } catch { /* DB error — fall through to in-memory/file check */ }
+  } catch { /* DB error — fall through */ }
 
-  // 2. Check local file (local dev renders)
-  const localOutputPath = path.join(process.cwd(), 'public', 'renders', `chapter-${chapterId}.mp4`);
-  if (fs.existsSync(localOutputPath) && fs.statSync(localOutputPath).size > 1024) {
-    renderJobs.set(chapterId, { status: 'completed', progress: 100, url: `/renders/chapter-${chapterId}.mp4` });
-    return NextResponse.json({ status: 'completed', progress: 100, url: `/renders/chapter-${chapterId}.mp4` });
-  }
-
-  // 3. Fall back to in-memory Map (local dev in-progress renders)
-  const job = renderJobs.get(chapterId);
-  return NextResponse.json(job ?? { status: 'idle', progress: 0 });
+  return NextResponse.json({ status: 'idle', progress: 0 });
 }
