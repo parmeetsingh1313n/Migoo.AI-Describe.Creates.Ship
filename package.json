@@ -52,6 +52,7 @@
     "@runwayml/sdk": "^3.16.0",
     "@supabase/supabase-js": "^2.93.3",
     "@vercel/blob": "^2.3.0",
+    "adm-zip": "^0.5.17",
     "assemblyai": "^4.22.1",
     "axios": "^1.13.4",
     "class-variance-authority": "^0.7.1",
