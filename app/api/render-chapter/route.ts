@@ -23,7 +23,8 @@ function log(id: string, msg: string) {
 }
 
 function getFFmpeg(): string {
-  const bin = require('ffmpeg-static') as string;
+  const pkg = 'ffmpeg-static';
+  const bin = require(pkg) as string;
   return fs.existsSync(bin) ? bin : path.join(process.cwd(), 'node_modules', 'ffmpeg-static', process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg');
 }
 
@@ -284,8 +285,9 @@ ${content}
 }
 
 async function screenshot(html: string, outPath: string): Promise<void> {
-  const puppeteer = await import('puppeteer');
-  const browser   = await puppeteer.default.launch({
+  const pkg = 'puppeteer';
+  const puppeteer = require(pkg);
+  const browser   = await puppeteer.launch({
     headless: true,
     args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-gpu', '--disable-dev-shm-usage', '--window-size=1440,720'],
   });
