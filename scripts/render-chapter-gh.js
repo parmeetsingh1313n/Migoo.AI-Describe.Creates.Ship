@@ -30,10 +30,13 @@ if (!fs.existsSync(payloadPath)) {
   console.error('❌ tmp/chapter-payload.json not found');
   process.exit(1);
 }
-const { chapterId, slides, durationsBySlideId } = JSON.parse(fs.readFileSync(payloadPath, 'utf-8'));
+const payload = JSON.parse(fs.readFileSync(payloadPath, 'utf-8'));
+const { chapterId, fetchUrl } = payload;
+let slides = payload.slides;
+let durationsBySlideId = payload.durationsBySlideId;
 
-if (!chapterId || !Array.isArray(slides) || slides.length === 0) {
-  console.error('❌ Invalid payload — missing chapterId or slides');
+if (!chapterId) {
+  console.error('❌ Invalid payload — missing chapterId');
   process.exit(1);
 }
 
@@ -256,6 +259,26 @@ async function makeSilent(dest, durationSec) {
 
 // ── Main render pipeline ─────────────────────────────────────────────────────
 async function render() {
+  if (fetchUrl) {
+    console.log(`📡 Fetching chapter slides from Vercel: ${fetchUrl}`);
+    const res = await fetch(fetchUrl, {
+      headers: {
+        'x-appwrite-key': process.env.APPWRITE_API_KEY || ''
+      }
+    });
+    if (!res.ok) {
+      throw new Error(`Failed to fetch slides data: HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    slides = data.slides;
+    durationsBySlideId = data.durationsBySlideId;
+    console.log(`   Fetched ${slides.length} slides successfully.`);
+  }
+
+  if (!Array.isArray(slides) || slides.length === 0) {
+    throw new Error('No slides found to render');
+  }
+
   console.log(`🎬 render-chapter-gh: chapterId=${chapterId}, slides=${slides.length}`);
 
   const slideClips  = [];
