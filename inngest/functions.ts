@@ -7,7 +7,7 @@ import { generateKlingScenesParallel } from "@/lib/leonardo-video";
 import { getMusicUrl } from "@/lib/music-urls";
 import { translateScript } from "@/lib/translate";
 import { triggerRender } from "@/lib/video-render";
-import { and, eq, or } from "drizzle-orm";
+import { and, desc, eq, or } from "drizzle-orm";
 import { inngest } from "./client";
 import { groq } from "@/config/groq";
 import { shortsLLM } from "@/lib/shorts-llm";
@@ -215,7 +215,8 @@ async function generateEnglishTTS(
             const path = require('path');
             const fs = require('fs');
             const { exec } = require('child_process');
-            let ffmpegBin = require('ffmpeg-static') as string;
+            const pkg = 'ffmpeg-static';
+            let ffmpegBin = require(pkg) as string;
             // Webpack/Next.js can bundle this to a non-existent \ROOT\... virtual path
             if (!fs.existsSync(ffmpegBin)) {
                 ffmpegBin = path.join(process.cwd(), 'node_modules', 'ffmpeg-static', process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg');
@@ -645,7 +646,8 @@ Reply with ONLY the chosen topic/title. Do NOT include any markdown code blocks,
             const webResearch = await searchWeb(chosenTopic, { deepCrawl: true });
             const webContext = webResearch.contextBlock || '';
             if (webResearch.factSheet) {
-                console.log(`📋 Fact sheet: ${webResearch.factSheet.split('\n').filter((l: string) => l.startsWith('•')).length} verified facts from ${webResearch.sources.length} sources`);
+                const factCount = webResearch.factSheet.split('\n').filter((l: string) => /^[•\-\*]/.test(l.trim())).length;
+                console.log(`📋 Fact sheet: ${factCount} verified facts from ${webResearch.sources.length} sources`);
             }
 
             const randomTopicTwist = `SPECIFIC TOPIC: The video MUST be specifically about: "${chosenTopic}". Focus entirely on this topic. Make it engaging, viral, and packed with fascinating details. Angle: ${angle}. Seed: ${seed}`;
@@ -695,14 +697,78 @@ SCRIPT REQUIREMENTS:
 1. TOTAL LENGTH: 310-350 words. Each scene MUST have 50-60 words.
 2. STRUCTURE: Use explicit keys ("scene1"..."scene6") — NOT an array.
 3. NARRATION STYLE: No meta-commentary, no "Scene 1", no "Welcome". Start the HOOK directly with a fact or bold claim. Every sentence must contain a SPECIFIC fact, date, name, or number.
-4. IMAGE PROMPTS: For 'real_entity' scenes — 30-50 word ultra-detailed photorealistic prompts (lighting, angle, texture, atmosphere, lens).
-5. VIDEO PROMPTS: For EVERY scene — 30-50 word cinematic description (camera movements, effects). NO text/titles/words/labels.
-6. THUMBNAIL PROMPT: 30-40 words, stunning, click-worthy. NO TEXT, NO WORDS.
+4. IMAGE PROMPTS (CRITICAL — this feeds directly into Nano Banana 2, a professional AI image model):
+   - For 'real_entity' scenes ONLY. Write 60-80 word ULTRA-DETAILED prompts.
+   - 🔴 SCENE-SPECIFIC RULE (NON-NEGOTIABLE): The imagePrompt MUST visually depict the SPECIFIC EVENT, MOMENT, or ACTION described in THAT scene's narration — NOT a generic establishing shot of the subject.
+     ❌ WRONG: "The Golden Temple Harmandir Sahib Ji exterior view" (generic — shows nothing from the narration)
+     ✅ CORRECT: "Maharaja Ranjit Singh Ji's craftsmen applying 750 kg of pure 24-karat gold leaf onto the upper walls of Harmandir Sahib Ji in 1830, workers on bamboo scaffolding in warm torch-lit dawn light, gleaming freshly gilded walls contrasting with white marble base, low-angle dramatic perspective, spiritual awe atmosphere" (scene-specific — shows the exact historical moment from the narration)
+   - Ask yourself: "If someone sees this image with NO audio, will they understand what THIS SCENE is about?" If yes, the prompt is correct.
+   - MANDATORY structure: [Exact subject + scene-specific action or moment from narration] + [architectural/physical textures relevant to THIS event] + [camera angle & lens] + [lighting] + [atmosphere & mood] + [color palette] + [style keywords].
+   - ALWAYS name the specific subject explicitly (temple name, person name, monument). NEVER write generic descriptions.
+   - Include: material textures (marble, gold, sandstone, brick), exact time of day lighting, weather/atmosphere, camera lens spec (24mm wide, 85mm portrait, etc.), and 3-5 style/quality tags at the end.
+   - End every image prompt with: "ultra photorealistic, 8K resolution, professional photography, no text, no watermarks, no words."
+   - For 'living_thing' or 'general' scenes: skip imagePrompt (set to empty string "").
+5. VIDEO PROMPTS (for EVERY scene): 40-60 word cinematic camera descriptions.
+   - Include: specific camera movement (slow dolly push-in, aerial crane shot, handheld follow, etc.), depth of field style, visual effects (light rays, particle dust, slow motion), and mood.
+   - CRITICAL: NO text, NO titles, NO words, NO labels, NO overlays in the video.
+6. THUMBNAIL PROMPT: 50-70 words, jaw-dropping, scroll-stopping visual. Must name the specific subject. NO TEXT, NO WORDS, NO WATERMARKS.
 7. SCENE CATEGORIZATION:
    - "real_entity": real person, monument, artifact, historical site, landmark
    - "living_thing": fictional/generic people, animals
    - "general": abstract concepts, graphics, visual effects
 8. TTS FORMATTING: No ellipses, em-dashes, en-dashes, colons, semicolons, ALL CAPS, or parenthetical asides. Short clean sentences only.
+9. 🙏 RESPECTFUL HONORIFICS (MANDATORY FOR ALL SPIRITUAL / RELIGIOUS CONTENT):
+   TRIGGER: If the video topic, title, or any scene involves — gods, deities, avatars, prophets, messengers, gurus, saints, sages, mystics, sufis, monks, pirs, fakirs, bhagats, devotional poets, revered kings with divine status, or ANY figure held sacred by any religion or culture — you MUST apply the correct honorific to their name EVERY SINGLE TIME it appears, in ALL JSON fields (narration, imagePrompt, videoPrompt, videoTitle, thumbnailPrompt).
+
+   HONORIFIC GUIDE BY TRADITION:
+
+   🔵 Sikhism:
+   - All 10 Gurus → append "Ji" always → "Guru Nanak Dev Ji", "Guru Angad Dev Ji", "Guru Amar Das Ji", "Guru Ramdas Ji", "Guru Arjan Dev Ji", "Guru Hargobind Ji", "Guru Har Rai Ji", "Guru Harkrishan Ji", "Guru Tegh Bahadur Ji", "Guru Gobind Singh Ji"
+   - Sikh saints / bhagats → "Bhagat Kabir Ji", "Bhagat Ravidas Ji", "Bhagat Namdev Ji"
+   - Guru Granth Sahib → always "Guru Granth Sahib Ji" (never bare)
+
+   🟠 Hinduism:
+   - Major deities → "Shri Ram Ji", "Shri Krishna Ji", "Shri Ganesh Ji", "Maa Durga Ji", "Shri Shiva Ji", "Shri Vishnu Ji", "Maa Lakshmi Ji", "Maa Saraswati Ji"
+   - Saints / sages → append "Ji" or "Maharaj" → "Sant Tukaram Ji", "Swami Vivekananda Ji", "Adi Shankaracharya Ji", "Ramakrishna Paramahansa Ji", "Sai Baba Ji", "Mirabai Ji", "Tulsidas Ji", "Kabir Das Ji"
+   - Avatars → always with "Bhagwan" or "Shri" prefix + "Ji" suffix → "Bhagwan Shri Ram Ji"
+
+   🟢 Islam & Sufism:
+   - Prophet Muhammad → always "Prophet Muhammad (PBUH)" or "Hazrat Muhammad (PBUH)"
+   - Islamic prophets → prefix "Hazrat" → "Hazrat Ibrahim (AS)", "Hazrat Musa (AS)", "Hazrat Isa (AS)"
+   - Sufi saints → append "Sahib" or "Rh." (Rahimullah) → "Baba Farid Sahib", "Data Ganj Bakhsh Rh.", "Rumi Rh.", "Khwaja Moinuddin Chishti Rh."
+   - Pirs / Fakirs → "Pir Sahib" prefix or "Ji" suffix as culturally appropriate
+
+   🟡 Buddhism:
+   - Gautam Buddha → "Bhagwan Gautam Buddha Ji" or "Lord Buddha"
+   - Bodhisattvas / revered monks → append "Ji" or "Bhante" → "Nagarjuna Ji", "Milarepa Ji"
+   - Dalai Lama → always "His Holiness the Dalai Lama"
+
+   🔴 Jainism:
+   - Tirthankaras → "Bhagwan Mahavir Ji", "Bhagwan Rishabdev Ji"
+   - Jain saints → "Acharya [Name] Ji"
+
+   🔵 Christianity:
+   - Jesus Christ → "Lord Jesus Christ" or "Jesus Christ Our Lord"
+   - Mary → "Virgin Mary" or "Mother Mary"
+   - Saints → always prefix "Saint" → "Saint Francis of Assisi", "Saint Teresa of Calcutta"
+   - Apostles → "Saint Peter", "Saint Paul"
+
+   🟣 Judaism:
+   - Moses → "Prophet Moses" or "Moshe Rabbeinu"
+   - Revered rabbis → "Rabbi [Name]"
+
+   🟤 Zoroastrianism:
+   - Zoroaster → "Prophet Zarathustra" or "Zarathustra Ji"
+
+   🌐 Universal Rule — ANY religion or tradition:
+   - If a figure is considered divine, a messenger of God, a saint, or universally venerated by a community → NEVER write the name alone. ALWAYS use the appropriate title/honorific prefix or suffix.
+   - When in doubt → append "Ji" as a universal respectful suffix (works across Hindi, Punjabi, Urdu contexts).
+   - This rule applies even if the honorific was NOT in the research source. ADD IT regardless.
+
+   ❌ NEVER DO THIS: "Guru Ramdas founded the city", "Kabir wrote poems", "Rumi was a poet"
+   ✅ ALWAYS DO THIS: "Guru Ramdas Ji founded the city", "Kabir Das Ji wrote poems", "Rumi Rh. was a beloved mystic"
+
+   This rule applies WITHOUT EXCEPTION to every single field in the JSON output.
 
 JSON SCHEMA (wrap in <json> tags):
 <json>
@@ -1441,6 +1507,71 @@ OUTPUT: JSON object wrapped in <json> and </json> tags.`;
             if (realEntityScenes.length > 0 && !cancelSignal.cancelled) {
                 console.log(`🚀 Submitting ${realEntityScenes.length} real_entity scenes for PARALLEL Nano Banana generation...`);
 
+                // ── PRE-GENERATION: Enrich weak image prompts via OpenRouter ─────────
+                // Run SEQUENTIALLY with a 600ms gap — all 5 free-tier models share a
+                // per-minute request window. Parallel calls instantly exhaust that window.
+                console.log(`✨ Enriching image prompts for ${realEntityScenes.length} scenes sequentially...`);
+                for (let idx = 0; idx < realEntityScenes.length; idx++) {
+                    const s = realEntityScenes[idx];
+                    const wordCount = s.prompt.split(/\s+/).length;
+                    const alreadyRich = wordCount >= 70 && /photorealistic|cinematic|8k|ultra detailed/i.test(s.prompt);
+                    if (alreadyRich) {
+                        console.log(`  ✅ Scene ${s.sceneIndex + 1}: prompt already rich (${wordCount} words), skipping enrichment`);
+                        continue;
+                    }
+
+                    try {
+                        const systemPrompt = `You are an expert AI image prompt engineer specialising in photorealistic image generation for Nano Banana 2 (Leonardo AI). Your job is to rewrite a short or vague scene description into a SINGLE, rich, detailed image generation prompt.
+
+MANDATORY STRUCTURE (all elements required):
+1. Exact subject identity: name the specific monument, person, artifact, or landmark precisely.
+2. Physical/architectural details: materials (gold leaf, white marble, sandstone), state of preservation, key visual features.
+3. Composition & camera: camera angle (wide-angle 24mm, portrait 85mm, low-angle, aerial), framing.
+4. Lighting: golden hour, overcast diffused, dramatic rim light, moonlight, torchlight — be specific.
+5. Atmosphere: morning mist, dust particles, spiritual glow, monsoon air, etc.
+6. Color palette: describe dominant colors.
+7. Style tags: end with "ultra photorealistic, 8K UHD, RAW photo, sharp focus, intricate detail, award-winning photography, no text, no watermarks, no words"
+
+OUTPUT: Return ONLY the enriched prompt text (60-90 words). No explanation, no labels, no JSON.`;
+
+                        const sceneNarration = scriptData.scenes[s.sceneIndex]?.narration || '';
+                        const userPrompt = `SCENE NARRATION (the image MUST depict THIS specific moment/event):
+"${sceneNarration}"
+
+Original image prompt (may be too generic or short):
+"${s.prompt}"
+
+Your task: Rewrite the image prompt so it VISUALLY DEPICTS the specific event, action, or moment described in the SCENE NARRATION above — not just the subject in general.
+
+RULES:
+- The image must answer: "What is happening in this exact scene?"
+- Name the specific subject (monument, person, artifact) with its exact name.
+- Describe the specific action, state, or historical moment from the narration (e.g. "workers applying gold leaf", "the attack on the temple in 1984", "the foundation stone being laid").
+- Add: camera angle, lens, lighting (time of day), atmosphere, material textures, colour palette.
+- End with: "ultra photorealistic, 8K UHD, RAW photo, sharp focus, intricate detail, award-winning photography, no text, no watermarks, no words."
+- Length: 65-90 words. Return ONLY the prompt text. No explanation, no labels.`;
+
+                        const enriched = await shortsLLM.enrich(systemPrompt, userPrompt, {
+                            temperature: 0.4,
+                            maxTokens: 300,
+                        });
+                        if (enriched && enriched.trim().split(/\s+/).length > wordCount) {
+                            console.log(`  ✨ Scene ${s.sceneIndex + 1}: prompt enriched ${wordCount}→${enriched.trim().split(/\s+/).length} words`);
+                            realEntityScenes[idx].prompt = enriched.trim();
+                        }
+                    } catch (enrichErr: any) {
+                        console.warn(`  ⚠️ Scene ${s.sceneIndex + 1}: prompt enrichment failed (${enrichErr?.message?.slice(0, 80)}), using original`);
+                    }
+
+                    // 2s cooldown between enrichment calls — free tier
+                    // shares a ~60 RPM window across the whole pipeline. By enrichment
+                    // time, script generation has already consumed several calls.
+                    // 2s spacing lets the rolling window partially replenish.
+                    if (idx < realEntityScenes.length - 1) {
+                        await new Promise(r => setTimeout(r, 2000));
+                    }
+                }
+
                 const parallelConfigs = realEntityScenes.map(s => ({
                     index: s.sceneIndex,
                     prompt: s.prompt,
@@ -1840,7 +1971,7 @@ export const generateMotionGraphic = inngest.createFunction(
         const { projectId } = event.data;
         const { motionGraphicProjects, motionGraphicMessages } = require("@/config/schema");
 
-        // Step 1: Fetch project from DB
+        // Step 1: Fetch project + latest changedSceneIndices from DB
         const project = await step.run("fetch-project", async () => {
             const [p] = await db
                 .select()
@@ -1852,12 +1983,131 @@ export const generateMotionGraphic = inngest.createFunction(
             return p;
         });
 
+        // Read changedSceneIndices from the latest assistant message.
+        // If this is a partial patch, only those scene indices need AI processing.
+        // Empty array = full regeneration (process all scenes).
+        const { changedSceneIndices, animationRequestedIndices } = await step.run("fetch-changed-indices", async () => {
+            const [latest] = await db
+                .select({ metadata: motionGraphicMessages.metadata })
+                .from(motionGraphicMessages)
+                .where(
+                    and(
+                        eq(motionGraphicMessages.projectId, projectId),
+                        eq(motionGraphicMessages.role, 'assistant')
+                    )
+                )
+                .orderBy(desc(motionGraphicMessages.createdAt))
+                .limit(1);
+
+            const meta = latest?.metadata as any;
+            if (meta?.type === 'scene_patch' && Array.isArray(meta?.changedSceneIndices)) {
+                const changed   = meta.changedSceneIndices as number[];
+                const animation = Array.isArray(meta.animationRequestedIndices) ? meta.animationRequestedIndices as number[] : [];
+                console.log(`🎯 Partial update: scenes [${changed.join(', ')}]${animation.length ? ` | Animation requested: [${animation.join(', ')}]` : ''}`);
+                return { changedSceneIndices: changed, animationRequestedIndices: animation };
+            }
+            console.log(`🔄 Full regeneration: processing all scenes`);
+            return { changedSceneIndices: [] as number[], animationRequestedIndices: [] as number[] };
+        });
+
+        const isPartialRender = changedSceneIndices.length > 0;
+
         // Step 2: Generate scene images using Leonardo AI
         await step.run("update-status-assets", () => updateMotionGraphicStatus(projectId, "generating:assets"));
 
         const imageData = await step.run("generate-scene-images", async () => {
             const scenes = (project.sceneData as any[]) || [];
             console.log(`🖼️ Generating images for ${scenes.length} scenes...`);
+
+            // ── Pre-flight: inject user-uploaded assets into relevant scenes ──────
+            // Assets stored with Groq Vision 'category' field: logo|screenshot|product|person|other.
+            // Use category directly — no keyword guessing on free-form descriptions.
+            const uploadedSceneUrls: Record<number, string> = {};
+            try {
+                const [assetsMsg] = await db
+                    .select({ metadata: motionGraphicMessages.metadata })
+                    .from(motionGraphicMessages)
+                    .where(
+                        and(
+                            eq(motionGraphicMessages.projectId, projectId),
+                            eq(motionGraphicMessages.role, "assets")
+                        )
+                    )
+                    .limit(1);
+
+                const uploadedAssets: { url: string; name: string; description: string; category?: string }[] =
+                    (assetsMsg?.metadata as any)?.assets || [];
+
+                if (uploadedAssets.length > 0) {
+                    console.log(`🖼️ Found ${uploadedAssets.length} uploaded asset(s) — injecting by Groq category`);
+
+                    const LOGO_TYPES   = new Set(['logo_reveal', 'call_to_action']);
+                    const SCREEN_TYPES = new Set(['browser_mockup', 'phone_mockup', 'bento_grid', 'image_showcase', 'split_hero', 'video_hero']);
+
+                    for (const asset of uploadedAssets) {
+                        // Category-based dispatch (Groq Vision structured output)
+                        const cat = (asset.category || '').toLowerCase();
+                        let targets: Set<string>;
+                        if (cat === 'logo') {
+                            targets = LOGO_TYPES;
+                        } else if (cat === 'screenshot' || cat === 'product' || cat === 'person') {
+                            targets = SCREEN_TYPES;
+                        } else {
+                            // 'other' or missing — fallback to description keywords
+                            const desc = (asset.description || asset.name || '').toLowerCase();
+                            const isLogo   = desc.includes('logo') || desc.includes('icon') || desc.includes('brand') || desc.includes('migoo');
+                            const isScreen = desc.includes('screenshot') || desc.includes('ui') || desc.includes('mockup') || desc.includes('app') || desc.includes('dashboard') || desc.includes('website') || desc.includes('landing') || desc.includes('platform');
+                            targets = isLogo ? LOGO_TYPES : isScreen ? SCREEN_TYPES : new Set([...LOGO_TYPES, ...SCREEN_TYPES]);
+                        }
+
+                        let injected = false;
+                        for (let i = 0; i < scenes.length; i++) {
+                            if (!targets.has(scenes[i].type)) continue;
+                            if (uploadedSceneUrls[i]) continue; // already claimed by another asset
+
+                            const currentUrl = scenes[i].imageUrl || '';
+                            // Only treat as a preserved video if it's a REMOTE http URL ending in .mp4/.webm
+                            // Stale local paths (tmp/assets_mg_...) are NOT valid preserved videos.
+                            const isRemoteVideo = (currentUrl.startsWith('http://') || currentUrl.startsWith('https://'))
+                                && (currentUrl.endsWith('.mp4') || currentUrl.endsWith('.webm') || currentUrl.includes('video-files'));
+                            if (isRemoteVideo) {
+                                uploadedSceneUrls[i] = currentUrl; // claim it with the video url
+                                injected = true;
+                                break;
+                            }
+
+                            uploadedSceneUrls[i] = asset.url;
+                            scenes[i] = { ...scenes[i], imageUrl: asset.url };
+                            console.log(`✅ Injected [${cat || '?'}] → Scene ${i + 1} (${scenes[i].type}): ${asset.url.slice(0, 60)}...`);
+                            injected = true;
+                            break;
+                        }
+                        if (!injected) {
+                            // Last resort: widen to ALL visual scene types
+                            const ALL_VISUAL = new Set([...LOGO_TYPES, ...SCREEN_TYPES]);
+                            for (let i = 0; i < scenes.length; i++) {
+                                if (!ALL_VISUAL.has(scenes[i].type)) continue;
+                                if (uploadedSceneUrls[i]) continue;
+
+                                const currentUrl = scenes[i].imageUrl || '';
+                                const isRemoteVideo = (currentUrl.startsWith('http://') || currentUrl.startsWith('https://'))
+                                    && (currentUrl.endsWith('.mp4') || currentUrl.endsWith('.webm') || currentUrl.includes('video-files'));
+                                if (isRemoteVideo) {
+                                    uploadedSceneUrls[i] = currentUrl;
+                                    break;
+                                }
+
+                                uploadedSceneUrls[i] = asset.url;
+                                scenes[i] = { ...scenes[i], imageUrl: asset.url };
+                                console.log(`✅ Injected [fallback] → Scene ${i + 1} (${scenes[i].type}): ${asset.url.slice(0, 60)}...`);
+                                break;
+                            }
+                        }
+                    }
+                }
+            } catch (assetErr: any) {
+                console.warn(`⚠️ Uploaded asset injection failed (non-fatal): ${assetErr.message}`);
+            }
 
             // ── Tier 1: Scene types that ALWAYS need an image ──────────────────
             // These are visual component scenes that look broken/empty without one.
@@ -1912,12 +2162,41 @@ export const generateMotionGraphic = inngest.createFunction(
             const imagePrompts: string[] = [];
             const sceneIndices: number[] = [];
 
+            // Only treat an imageUrl as valid if it's a remote HTTP/HTTPS URL.
+            // Stale local temp paths (e.g. 'tmp/assets_mg_.../scene_0.mp4') saved by
+            // old code are no longer valid after the assets dir is cleared and must
+            // be treated as empty so the image is regenerated correctly.
+            const isValidRemoteUrl = (url: string | undefined): boolean =>
+                !!url && (url.startsWith('http://') || url.startsWith('https://'));
+
             for (let i = 0; i < scenes.length; i++) {
                 const scene = scenes[i];
-                if (scene.imageUrl) continue; // Already has one
+
+                // ── ANIMATION-ON-DEMAND: skip Nano Banana ONLY if scene already has a valid image
+                // If no image exists, Nano Banana runs so Kling has something to animate.
+                if (animationRequestedIndices.includes(i)) {
+                    const hasExistingImage = isValidRemoteUrl(scene.imageUrl) || !!uploadedSceneUrls[i];
+                    if (hasExistingImage) {
+                        console.log(`Scene ${i + 1} (${scene.type}): has image — skip Nano Banana (animation-on-demand)`);
+                        continue;
+                    }
+                    // No image yet — fall through, Nano Banana generates one for Kling
+                }
+
+                // ── Partial render: skip scenes that weren't changed ─────────────
+                // Only generate a new image if the scene was patched OR has no valid image yet.
+                if (isPartialRender && !changedSceneIndices.includes(i) && isValidRemoteUrl(scene.imageUrl)) {
+                    console.log(`⏭️ Scene ${i + 1} (${scene.type}): unchanged — keeping existing image`);
+                    continue;
+                }
+
+                // Full render: skip only if scene already has a valid remote URL.
+                // Stale local paths (tmp/assets_mg_...) are NOT valid — they get cleared
+                // when the assets dir is wiped at render start and must be regenerated.
+                if (isValidRemoteUrl(scene.imageUrl)) continue;
 
                 const mustGenerate      = ALWAYS_IMAGE_TYPES.has(scene.type);
-                const optionalGenerate  = OPTIONAL_IMAGE_TYPES.has(scene.type) && (i % 2 === 0); // every other optional scene
+                const optionalGenerate  = OPTIONAL_IMAGE_TYPES.has(scene.type) && (i % 2 === 0);
                 const unknownTypeEvery3 = !ALWAYS_IMAGE_TYPES.has(scene.type) && !OPTIONAL_IMAGE_TYPES.has(scene.type) && (i % 3 === 0);
 
                 if (mustGenerate || optionalGenerate || unknownTypeEvery3) {
@@ -1938,7 +2217,7 @@ export const generateMotionGraphic = inngest.createFunction(
 
             if (imagePrompts.length === 0) {
                 console.log(`⏭️ No image-requiring scenes, skipping image generation`);
-                return { imageUrls: [], sceneIndices: [] };
+                return { imageUrls: [], sceneIndices: [], uploadedSceneUrls };
             }
 
             // Generate ALL images in parallel with round-robin key rotation (same as short video generator)
@@ -1975,7 +2254,7 @@ export const generateMotionGraphic = inngest.createFunction(
             }
 
             console.log(`✅ Generated ${imageUrls.filter(u => u).length}/${imagePrompts.length} images (parallel)`);
-            return { imageUrls, sceneIndices };
+            return { imageUrls, sceneIndices, uploadedSceneUrls };
         });
         // Step 2b: Kling video generation for key scenes (convert static images → animated clips)
         await step.run("update-status-kling", () => updateMotionGraphicStatus(projectId, "generating:video-clips"));
@@ -1988,16 +2267,82 @@ export const generateMotionGraphic = inngest.createFunction(
             
             for (let i = 0; i < scenes.length; i++) {
                 const scene = scenes[i];
-                // Get the image URL (either from AI-generated or from image generation step)
-                const imgIdx = imageData.sceneIndices.indexOf(i);
+
+                const imgIdx       = imageData.sceneIndices.indexOf(i);
                 const generatedUrl = imgIdx >= 0 ? imageData.imageUrls[imgIdx] : null;
-                const finalImageUrl = generatedUrl || scene.imageUrl || '';
-                
-                // Only send scenes with actual images to Kling
-                const klingEligible = ['video_hero', 'image_showcase', 'split_hero', 'logo_reveal', 'browser_mockup', 'phone_mockup'];
+                const uploadedUrl  = imageData.uploadedSceneUrls?.[i] || null;
+                const finalUrl     = uploadedUrl || generatedUrl || scene.imageUrl || '';
+
+                // ── ANIMATION-ON-DEMAND: user explicitly requested Kling for this scene ────
+                // Bypasses ALL exclusion guards (scene type, upload guard, partial render skip).
+                // Source priority: uploadedBlob > generatedImage > existingSceneUrl
+                // Nano Banana is NEVER called for this path (hard-guarded in image gen step).
+                if (animationRequestedIndices.includes(i)) {
+                    // uploadedUrl = pre-flight injected blob URL = user's real uploaded asset
+                    const uploadedBlobUrl = imageData.uploadedSceneUrls?.[i] || null;
+                    const animUrl = uploadedBlobUrl || generatedUrl || scene.imageUrl || '';
+
+                    if (!animUrl || !animUrl.startsWith('http')) {
+                        console.warn(`⚠️ Scene ${i + 1}: animation requested but no image found — upload a logo/image first`);
+                        continue;
+                    }
+                    if (animUrl.endsWith('.mp4') || animUrl.endsWith('.webm') || animUrl.includes('video-files')) {
+                        console.log(`⏭️ Scene ${i + 1}: already a video — skipping Kling`);
+                        continue;
+                    }
+
+                    const urlSource = uploadedBlobUrl ? '📎 UPLOADED BLOB (user asset)' : generatedUrl ? '🖼 generated image' : '🔗 existing scene.imageUrl';
+                    console.log(`🎬 [animation-on-demand] Scene ${i + 1} (${scene.type}) | source: ${urlSource} | → Kling`);
+                    console.log(`   URL: ${animUrl.slice(0, 100)}`);
+
+                    klingCandidates.push({
+                        index: i,
+                        imageUrl: animUrl,
+                        narration: scene.voiceoverLine || scene.headline || '',
+                        animationOnDemand: true,
+                        animationType: scene.animationType || 'cinematic_pan',
+                    } as any);
+                    continue;
+                }
+
+                // \u2500\u2500 Partial render: skip Kling for unchanged scenes \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+                if (isPartialRender && !changedSceneIndices.includes(i)) {
+                    console.log(`\u23ed\ufe0f Scene ${i + 1}: unchanged \u2014 skipping Kling`);
+                    continue;
+                }
+
+                // \u2500\u2500 Standard Kling eligibility \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+                const finalImageUrl = uploadedUrl || generatedUrl || scene.imageUrl || '';
+
+                // CUMULATIVE: skip if already a Kling video (previous render animated this)
+                if (finalImageUrl.endsWith('.mp4') || finalImageUrl.endsWith('.webm') || finalImageUrl.includes('video-files')) {
+                    console.log(`\u23ed\ufe0f Scene ${i + 1}: already a Kling video \u2014 preserving`);
+                    continue;
+                }
+
+                // AUTO-ANIMATE: logo_reveal with uploaded blob gets Kling on EVERY fresh project.
+                // The user's real logo is animated with a premium GPT-120b prompt.
+                if (uploadedUrl && scene.type === 'logo_reveal') {
+                    console.log(`\ud83c\udfac [auto-animate] Scene ${i + 1} (logo_reveal): uploaded logo \u2192 Kling`);
+                    klingCandidates.push({
+                        index: i,
+                        imageUrl: uploadedUrl,
+                        narration: scene.voiceoverLine || scene.headline || '',
+                        animationOnDemand: true,
+                        animationType: 'logo_kinetic_reveal',
+                    } as any);
+                    continue;
+                }
+
+                // All other uploaded assets stay static (screenshots, product photos)
+                if (uploadedUrl) {
+                    console.log(`\u23ed\ufe0f Scene ${i + 1} (${scene.type}): uploaded asset \u2014 keeping static`);
+                    continue;
+                }
+
+                // Standard: AI-generated images on eligible scene types
+                const klingEligible = ['video_hero', 'image_showcase', 'split_hero', 'browser_mockup', 'phone_mockup'];
                 if (finalImageUrl && finalImageUrl.startsWith('http') && klingEligible.includes(scene.type)) {
-                    // Skip if already a video URL
-                    if (finalImageUrl.endsWith('.mp4') || finalImageUrl.endsWith('.webm') || finalImageUrl.includes('video-files')) continue;
                     klingCandidates.push({
                         index: i,
                         imageUrl: finalImageUrl,
@@ -2006,38 +2351,63 @@ export const generateMotionGraphic = inngest.createFunction(
                 }
             }
 
-            // Limit to max 2 Kling generations to keep render time reasonable
-            const toProcess = klingCandidates.slice(0, 2);
+            // Animation-on-demand candidates are processed FIRST and don't count toward the cap
+            const animationCandidates = klingCandidates.filter((c: any) => c.animationOnDemand);
+            const standardCandidates  = klingCandidates.filter((c: any) => !c.animationOnDemand).slice(0, 2);
+            const toProcess = [...animationCandidates, ...standardCandidates];
+
             if (toProcess.length === 0) {
                 console.log(`⏭️ No Kling-eligible scenes, skipping video generation`);
                 return { videoUrls: {} as Record<number, string> };
             }
 
-            console.log(`🎬 Generating ${toProcess.length} Kling video clips for scenes: ${toProcess.map(c => c.index + 1).join(', ')}`);
+            console.log(`🎬 Generating ${toProcess.length} Kling video clips for scenes: ${toProcess.map((c: any) => c.index + 1).join(', ')}`);
             const videoUrls: Record<number, string> = {};
+
+            // Get an API key for GPT-120b prompt generation
+            const mgKeys = (process.env.OPENROUTER_API_KEY || '').split(',').map((k: string) => k.trim()).filter(Boolean);
+            const promptApiKey = mgKeys[0] || '';
 
             // Process Kling generations sequentially (they're long-running)
             for (const candidate of toProcess) {
                 try {
                     const { processImgToVideo } = await import('@/app/api/studio/img-to-video/route');
-                    console.log(`🎥 Kling: Scene ${candidate.index + 1} → ${candidate.imageUrl.substring(0, 60)}...`);
-                    
+                    console.log(`🎥 Kling: Scene ${(candidate as any).index + 1} → ${(candidate as any).imageUrl.substring(0, 60)}...`);
+
+                    // For animation-on-demand: generate a premium GPT-120b Kling prompt first
+                    let klingPrompt: string | undefined;
+                    if ((candidate as any).animationOnDemand && promptApiKey) {
+                        const { motionGraphicsLLM } = await import('@/lib/motion-graphics-llm');
+                        const scene = scenes[(candidate as any).index];
+                        klingPrompt = await motionGraphicsLLM.generateKlingPrompt(
+                            {
+                                type: scene.type,
+                                headline:     scene.headline,
+                                subtext:      scene.subtext,
+                                voiceoverLine: scene.voiceoverLine,
+                                animationType: (candidate as any).animationType,
+                            },
+                            promptApiKey,
+                        );
+                        console.log(`✨ GPT-120b Kling prompt: "${klingPrompt.slice(0, 80)}..."`);
+                    }
+
                     const data = await processImgToVideo({
-                        imageUrl: candidate.imageUrl,
-                        sceneNarration: candidate.narration,
-                        sceneIndex: candidate.index,
+                        imageUrl: (candidate as any).imageUrl,
+                        sceneNarration: klingPrompt || (candidate as any).narration, // premium prompt overrides narration
+                        sceneIndex: (candidate as any).index,
                         duration: 5,
-                        forceShorts: false, // Use landscape 16:9 for motion graphics
+                        forceShorts: false,
                     });
 
                     if (data.ok && data.videoUrl) {
-                        videoUrls[candidate.index] = data.videoUrl;
-                        console.log(`✅ Kling scene ${candidate.index + 1} complete: ${data.videoUrl.substring(0, 80)}...`);
+                        videoUrls[(candidate as any).index] = data.videoUrl;
+                        console.log(`✅ Kling scene ${(candidate as any).index + 1} complete: ${data.videoUrl.substring(0, 80)}...`);
                     } else {
-                        console.warn(`⚠️ Kling scene ${candidate.index + 1} returned no video: ${JSON.stringify(data).substring(0, 100)}`);
+                        console.warn(`⚠️ Kling scene ${(candidate as any).index + 1} returned no video: ${JSON.stringify(data).substring(0, 100)}`);
                     }
                 } catch (err: any) {
-                    console.warn(`⚠️ Kling scene ${candidate.index + 1} failed: ${err.message?.substring(0, 100)}`);
+                    console.warn(`⚠️ Kling scene ${(candidate as any).index + 1} failed: ${err.message?.substring(0, 100)}`);
                 }
             }
 
@@ -2165,11 +2535,36 @@ export const generateMotionGraphic = inngest.createFunction(
                 return url;
             };
 
-            const enrichedScenes = scenes.map((scene: any, i: number) => {
-                const imgIdx = imageData.sceneIndices.indexOf(i);
-                const generatedImageUrl = imgIdx >= 0 ? imageData.imageUrls[imgIdx] : null;
-                const klingVideoUrl = klingData.videoUrls[i] || null;
-                const rawUrl = klingVideoUrl || generatedImageUrl || scene.imageUrl || '';
+            // In partial render mode, start from existing remotionProps.scenes as the base.
+            // Unchanged scenes carry forward their imageUrl from the previous render.
+            // IMPORTANT: Only carry forward scenes whose imageUrl is a valid remote HTTP URL.
+            // Stale local paths (tmp/assets_mg_...) from old renders are invalid after asset
+            // dir cleanup and must be dropped so the scene is re-generated from scratch.
+            const existingRemotionScenes: any[] = isPartialRender
+                ? ((project.remotionProps as any)?.scenes || [])
+                : [];
+
+            let enrichedScenes = scenes.map((scene: any, i: number) => {
+                // Partial render: unchanged scene → carry forward existing remotionProps slot
+                // but ONLY if its imageUrl is a valid remote URL (not a stale local temp path).
+                const existingScene = existingRemotionScenes[i];
+                const existingUrlIsValid = existingScene?.imageUrl?.startsWith('http://') || existingScene?.imageUrl?.startsWith('https://');
+                if (isPartialRender && !changedSceneIndices.includes(i) && existingScene && (!existingScene.imageUrl || existingUrlIsValid)) {
+                    return existingRemotionScenes[i];
+                }
+
+                const imgIdx        = imageData.sceneIndices.indexOf(i);
+                const generatedImageUrl  = imgIdx >= 0 ? imageData.imageUrls[imgIdx] : null;
+                const uploadedImageUrl   = imageData.uploadedSceneUrls?.[i] || null;  // ← user blob, highest priority
+                const klingVideoUrl      = klingData.videoUrls[i] || null;
+                // Priority: Kling video > uploaded blob > AI-generated > LLM-set URL
+                // Kling wins because it IS the uploaded asset, just animated.
+                // If Kling didn't run for this scene, uploaded blob is shown as-is.
+                // IMPORTANT: Only accept scene.imageUrl as a fallback if it's a real remote HTTP URL.
+                // Stale local paths (tmp/assets_mg_...) from old DB state are invalid and must be ignored.
+                const sceneImageFallback = (scene.imageUrl?.startsWith('http://') || scene.imageUrl?.startsWith('https://'))
+                    ? scene.imageUrl : '';
+                const rawUrl = klingVideoUrl || uploadedImageUrl || generatedImageUrl || sceneImageFallback || '';
                 const cleanUrl = sanitizeImageUrl(rawUrl);
                 if (rawUrl && !cleanUrl) {
                     console.log(`🧹 Scene ${i + 1} (${scene.type}): imageUrl sanitized from hallucinated value`);
@@ -2192,11 +2587,33 @@ export const generateMotionGraphic = inngest.createFunction(
                 // Audio-locked: video ends exactly when the voiceover ends
                 totalDurationSec = Math.ceil(audioDurationSec);
                 console.log(`🔒 Audio-locked duration: scenes=${sceneDurationSec}s, audio=${audioDurationSec}s → video=${totalDurationSec}s`);
+
+                // ── Voice Sync: redistribute per-scene durations by word count ──────────
+                // Each scene gets screen time proportional to how many words its voiceover
+                // line contains. This prevents the voice saying scene 3's text while the
+                // viewer is already watching scene 5.
+                const wordCounts = enrichedScenes.map((s: any) => {
+                    const text = (s.voiceoverLine || s.headline || s.subtext || s.content || '').trim();
+                    return Math.max(3, text.split(/\s+/).filter(Boolean).length);
+                });
+                const totalWords = wordCounts.reduce((a: number, b: number) => a + b, 0);
+
+                enrichedScenes = enrichedScenes.map((s: any, i: number) => {
+                    const proportion  = wordCounts[i] / totalWords;
+                    const rawDuration = audioDurationSec * proportion;
+                    // Minimum 2s per scene; round to 1 decimal
+                    const newDuration = Math.max(2, Math.round(rawDuration * 10) / 10);
+                    return { ...s, durationSec: newDuration };
+                });
+
+                const newTotal = enrichedScenes.reduce((s: number, x: any) => s + x.durationSec, 0);
+                console.log(`🎙️ Voice sync: redistributed ${enrichedScenes.length} scene durations (total=${newTotal.toFixed(1)}s, audio=${audioDurationSec}s)`);
             } else {
                 // No voiceover: use scene durations
                 totalDurationSec = sceneDurationSec || (project.duration as number) || 30;
                 console.log(`📐 Scene-based duration: ${totalDurationSec}s`);
             }
+
 
             const totalFrames = totalDurationSec * fps;
             console.log(`⏱️ Final: ${totalDurationSec}s = ${totalFrames} frames`);
@@ -2257,14 +2674,31 @@ export const generateMotionGraphic = inngest.createFunction(
             } catch {}
 
             // Download scene images locally to avoid remote URL issues during render
-            const localProps = { ...remotionProps };
+            // Use JSON deep clone so mutations to scene.imageUrl (local path changes) do not affect remotionProps.
+            const localProps = JSON.parse(JSON.stringify(remotionProps));
             const assetsDirRel = `tmp/assets_mg_${projectId}`;
             const assetsDirAbs = path.join(cwd, 'public', assetsDirRel);
+
+            // On FULL regeneration: wipe old assets so stale/broken transcodes from
+            // failed previous runs can never contaminate the new render.
+            // On PARTIAL render: keep existing assets — only changed scenes are re-downloaded.
+            if (!isPartialRender && fs.existsSync(assetsDirAbs)) {
+                try {
+                    fs.rmSync(assetsDirAbs, { recursive: true, force: true });
+                    console.log(`🗑️ Cleared stale assets dir: ${assetsDirRel}`);
+                } catch (cleanErr: any) {
+                    console.warn(`⚠️ Could not clean assets dir (non-fatal): ${cleanErr.message}`);
+                }
+            }
             if (!fs.existsSync(assetsDirAbs)) fs.mkdirSync(assetsDirAbs, { recursive: true });
 
-            const toRelativeUrl = (absPath: string) => {
-                // Return relative path from public/ for Remotion's staticFile()
-                return path.relative(path.join(cwd, 'public'), absPath).replace(/\\/g, '/');
+            // Return an http://localhost:3000/ URL for the asset.
+            // Next.js ALWAYS serves public/ at :3000 while Inngest runs.
+            // This bypasses Remotion's temp bundle copy entirely — the compositor
+            // fetches from the Next.js dev server which always has the file.
+            const toLocalUrl = (absPath: string): string => {
+                const relPath = path.relative(path.join(cwd, 'public'), absPath).replace(/\\/g, '/');
+                return `http://localhost:3000/${relPath}`;
             };
 
             // Download scene images/videos to local
@@ -2304,20 +2738,19 @@ export const generateMotionGraphic = inngest.createFunction(
                                     fs.writeFileSync(srcMp4, buffer);
                                     try {
                                         const { execSync } = await import('child_process');
-                                        // require('ffmpeg-static') returns a wrong bundled path in Inngest context.
-                                        // Build the real path directly from node_modules.
                                         const isWin = process.platform === 'win32';
                                         const ffmpegBin = path.join(cwd, 'node_modules', 'ffmpeg-static', isWin ? 'ffmpeg.exe' : 'ffmpeg');
+                                        // -r 30  : force output frame rate to 30fps (matches Remotion FPS)
+                                        // -g 30  : keyframe every 30 frames so compositor can seek without gaps
+                                        // -movflags +faststart : place moov atom at start for reliable seeking
                                         execSync(
-                                            `"${ffmpegBin}" -y -i "${srcMp4}" -c:v libx264 -preset fast -crf 23 -profile:v baseline -level 3.1 -pix_fmt yuv420p -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" -an "${destMp4}"`,
+                                            `"${ffmpegBin}" -y -i "${srcMp4}" -c:v libx264 -preset fast -crf 23 -profile:v baseline -level 3.1 -pix_fmt yuv420p -r 30 -g 30 -movflags +faststart -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" -an "${destMp4}"`,
                                             { timeout: 120000, stdio: 'pipe' }
                                         );
                                         if (fs.existsSync(destMp4) && fs.statSync(destMp4).size > 1000) {
-                                            const APP_PORT = process.env.PORT || 3000;
-                                            const relPath = path.relative(path.join(cwd, 'public'), destMp4).replace(/\\/g, '/');
-                                            const httpUrl = `http://localhost:${APP_PORT}/${relPath}`;
-                                            localProps.scenes[i] = { ...scene, imageUrl: httpUrl };
-                                            console.log(`🎬 Scene ${i + 1} (${scene.type}): H.264 ready → ${httpUrl}`);
+                                            const localUrl = toLocalUrl(destMp4);
+                                            localProps.scenes[i] = { ...scene, imageUrl: localUrl };
+                                            console.log(`🎬 Scene ${i + 1} (${scene.type}): H.264 ready → ${localUrl}`);
                                         } else {
                                             console.warn(`⚠️ Scene ${i + 1}: transcoding produced empty file — clearing imageUrl`);
                                             localProps.scenes[i] = { ...scene, imageUrl: '' };
@@ -2329,16 +2762,13 @@ export const generateMotionGraphic = inngest.createFunction(
                                         try { fs.unlinkSync(srcMp4); } catch {}
                                     }
                                 } else {
-                                    // For images: serve via HTTP from Next.js (same as MP4s).
-                                    // IMPORTANT: Absolute file:/// paths FAIL in Remotion's Chromium on Windows
-                                    // when the path contains spaces or special characters.
+                                    // For images: save and use relative path.
+                                    // staticFile() in Remotion resolves relative paths correctly.
                                     const destAbs = path.join(assetsDirAbs, `scene_${i}.${ext}`);
                                     fs.writeFileSync(destAbs, buffer);
-                                    const APP_PORT = process.env.PORT || 3000;
-                                    const relPath = path.relative(path.join(cwd, 'public'), destAbs).replace(/\\/g, '/');
-                                    const httpUrl = `http://localhost:${APP_PORT}/${relPath}`;
-                                    localProps.scenes[i] = { ...scene, imageUrl: httpUrl };
-                                    console.log(`📥 Scene ${i + 1}: saved locally (${(buffer.length / 1024).toFixed(0)}KB, ${ext}) → ${httpUrl}`);
+                                    const localUrl = toLocalUrl(destAbs);
+                                    localProps.scenes[i] = { ...scene, imageUrl: localUrl };
+                                    console.log(`📥 Scene ${i + 1}: saved locally (${(buffer.length / 1024).toFixed(0)}KB, ${ext}) → ${localUrl}`);
                                 }
                             } else {
                                 console.warn(`⚠️ Failed to download scene ${i + 1} asset: HTTP ${response.status}`);
@@ -2348,18 +2778,18 @@ export const generateMotionGraphic = inngest.createFunction(
                             console.warn(`⚠️ Failed to download scene ${i + 1} asset: ${err.message}`);
                             localProps.scenes[i] = { ...scene, imageUrl: '' };
                         }
-                    } else if (scene.imageUrl && !scene.imageUrl.startsWith('http')) {
-                        // Stale relative path from a previous run — verify the file still exists on disk
-                        const relPath = scene.imageUrl.replace(/^\//, '');
+                    } else if (scene.imageUrl && !scene.imageUrl.startsWith('http') && !scene.imageUrl.startsWith('file:///')) {
+                        // Already a relative path — verify the file exists on disk
+                        const relPath = scene.imageUrl.replace(/^\//, '').replace(/^public\//, '');
                         const absPath = path.join(cwd, 'public', relPath);
                         if (!fs.existsSync(absPath)) {
                             console.warn(`⚠️ Scene ${i + 1} has stale local path (${scene.imageUrl}), file missing — clearing`);
                             localProps.scenes[i] = { ...scene, imageUrl: '' };
                         } else {
-                            const APP_PORT = process.env.PORT || 3000;
-                            const httpUrl = `http://localhost:${APP_PORT}/${relPath}`;
-                            localProps.scenes[i] = { ...scene, imageUrl: httpUrl };
-                            console.log(`✅ Scene ${i + 1} converted to HTTP asset: ${httpUrl}`);
+                            // Keep it as a relative path so Remotion can serve it port-agnostically
+                            const localUrl = toLocalUrl(absPath);
+                            localProps.scenes[i] = { ...scene, imageUrl: localUrl };
+                            console.log(`✅ Scene ${i + 1} local asset confirmed: ${localUrl}`);
                         }
                     }
                 }
@@ -2373,7 +2803,7 @@ export const generateMotionGraphic = inngest.createFunction(
                     if (response.ok) {
                         const buffer = Buffer.from(await response.arrayBuffer());
                         fs.writeFileSync(destAbs, buffer);
-                        localProps.musicUrl = toRelativeUrl(destAbs);
+                        localProps.musicUrl = toLocalUrl(destAbs);
                         console.log(`📥 Downloaded music locally`);
                     }
                 } catch (err: any) {
@@ -2390,7 +2820,7 @@ export const generateMotionGraphic = inngest.createFunction(
                         const buffer = Buffer.from(await response.arrayBuffer());
                         fs.writeFileSync(destAbs, buffer);
                         if (fs.existsSync(destAbs) && fs.statSync(destAbs).size > 100) {
-                            localProps.audioUrl = toRelativeUrl(destAbs);
+                            localProps.audioUrl = toLocalUrl(destAbs);
                             console.log(`📥 Downloaded voiceover locally (${fs.statSync(destAbs).size} bytes)`);
                         } else {
                             console.warn(`⚠️ Voiceover downloaded but file is empty or missing`);
@@ -2403,38 +2833,51 @@ export const generateMotionGraphic = inngest.createFunction(
                 }
             }
 
-            // Delete any stale props file from previous failed runs so old file:/// paths
-            // are never reused when Inngest retries the step.
+            // Delete any stale props file from previous failed runs.
             const propsPath = path.join(tmpDir, `props-mg-${projectId}.json`);
             try { if (fs.existsSync(propsPath)) fs.unlinkSync(propsPath); } catch {}
+
+            // ── Build a LEAN Remotion public dir ─────────────────────────────────
+            // Remotion ALWAYS copies --public-dir into a temp bundle folder before
+            // rendering. public/ is 5.3 GB → copy races frame-0 → scene_0.mp4 is
+            // missing → 404.  Fix: give Remotion a tiny dir (~100 MB) that contains
+            // ONLY this render's assets so the copy completes in <2 s.
+            const remotionPubDir  = path.join(cwd, 'remotion-assets-mg');
+            const remotionAssetsDest = path.join(remotionPubDir, 'tmp', `assets_mg_${projectId}`);
+            try { fs.rmSync(remotionPubDir, { recursive: true, force: true }); } catch {}
+            fs.mkdirSync(remotionAssetsDest, { recursive: true });
+
+            // Copy all downloaded files into the lean public dir.
+            const assetFiles = fs.readdirSync(assetsDirAbs);
+            for (const file of assetFiles) {
+                fs.copyFileSync(
+                    path.join(assetsDirAbs, file),
+                    path.join(remotionAssetsDest, file)
+                );
+            }
+            console.log(`📂 Lean Remotion public dir ready: ${assetFiles.length} files (${(assetFiles.reduce((s, f) => s + fs.statSync(path.join(assetsDirAbs, f)).size, 0) / 1024 / 1024).toFixed(1)} MB)`);
 
             // Write fresh props to JSON file
             fs.writeFileSync(propsPath, JSON.stringify(localProps));
 
-            const outputPath = path.join(rendersDir, `mg_${projectId}.mp4`);
-            const propsArg = propsPath.replace(/\\/g, '/');
-            const outputArg = outputPath.replace(/\\/g, '/');
+            const outputPath   = path.join(rendersDir, `mg_${projectId}.mp4`);
+            const propsArg     = propsPath.replace(/\\/g, '/');
+            const outputArg    = outputPath.replace(/\\/g, '/');
+            const publicDirArg = remotionPubDir.replace(/\\/g, '/');
 
-            // Build render command — uses MotionGraphic composition
-            // CRITICAL: --bundle-cache=false forces Remotion to create a FRESH webpack bundle
-            // that includes the newly downloaded assets (voiceover, music, images).
-            // Without this, Remotion reuses a cached bundle that doesn't contain the
-            // dynamically downloaded files.
-            // MP4 assets are served by Next.js on port 3001 (http://localhost:3001/tmp/...),
-            // NOT by Remotion's bundle server — so --port is intentionally omitted.
             const cmd = [
                 'npx remotion render MotionGraphic',
                 `"${outputArg}"`,
                 `--props="${propsArg}"`,
+                `--public-dir="${publicDirArg}"`,
                 `--timeout=120000`,
                 `--disable-web-security`,
                 `--gl=angle`,
                 `--concurrency=1`,
                 `--jpeg-quality=75`,
-                `--bundle-cache=false`,
             ].join(' ');
 
-            console.log(`🎬 Rendering motion graphic: ${cmd.substring(0, 120)}...`);
+            console.log(`🎬 Rendering motion graphic: ${cmd.substring(0, 200)}...`);
 
             // Execute render
             await new Promise<void>((resolve, reject) => {
@@ -2446,7 +2889,8 @@ export const generateMotionGraphic = inngest.createFunction(
                 child.stderr?.on('data', (data) => console.log(`[Remotion] ${data.toString().trim()}`));
             });
 
-            // Clean up temp files
+            // Clean up: lean public dir and assets
+            try { fs.rmSync(remotionPubDir, { recursive: true, force: true }); } catch {}
             try { fs.unlinkSync(propsPath); } catch {}
             try { fs.rmSync(assetsDirAbs, { recursive: true, force: true }); } catch {}
 
@@ -2457,9 +2901,9 @@ export const generateMotionGraphic = inngest.createFunction(
 
         // Step 6: Save props + video URL to DB and add system message
         const saveResult = await step.run("save-and-finalize", async () => {
-            // Update project with all generated data
             await db.update(motionGraphicProjects)
                 .set({
+                    sceneData:       remotionProps.scenes, // Preserve the generated remote image/video URLs permanently
                     remotionProps,
                     videoUrl: renderResult.videoUrl,
                     audioUrl: voiceData?.audioUrl || null,
@@ -2489,5 +2933,182 @@ export const generateMotionGraphic = inngest.createFunction(
             videoUrl: renderResult.videoUrl,
             saveResult,
         };
+    }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 🔁 RENDER-ONLY: re-run just the Remotion render step using saved props
+// Triggered by: motion-graphics/render.only
+// Skips image generation, Kling, voiceover — uses remotionProps stored in DB.
+// ─────────────────────────────────────────────────────────────────────────────
+export const renderMotionGraphicOnly = inngest.createFunction(
+    {
+        id:          "render-motion-graphic-only",
+        name:        "Render Motion Graphic (Render Step Only)",
+        triggers:    [{ event: "motion-graphics/render.only" }],
+        retries:     2,
+        concurrency: { limit: 1 },
+        onFailure:   async ({ event, error }) => {
+            const { projectId } = event.data.event.data as { projectId: string; userId: string };
+            console.error(`❌ Render-only failed for ${projectId}:`, error.message);
+            await updateMotionGraphicStatus(projectId, "failed");
+        },
+    },
+    async ({ event, step }) => {
+        const { projectId, userId } = event.data as { projectId: string; userId: string };
+
+        const { motionGraphicProjects, motionGraphicMessages } = require("@/config/schema");
+
+        // ── 1. Fetch project + saved remotionProps ─────────────────────────
+        const [project] = await db
+            .select()
+            .from(motionGraphicProjects)
+            .where(eq(motionGraphicProjects.projectId, projectId));
+
+        if (!project) throw new Error(`Project not found: ${projectId}`);
+
+        const savedProps = project.remotionProps as any;
+        if (!savedProps?.scenes?.length) {
+            throw new Error("No saved remotionProps found. Run the full pipeline first.");
+        }
+
+        await updateMotionGraphicStatus(projectId, "generating:video");
+        console.log(`🔁 Render-only for ${projectId}: ${savedProps.scenes.length} scenes`);
+
+        // ── 2. Re-run render step with saved props ─────────────────────────
+        const renderResult = await step.run("render-video-only", async () => {
+            const fs   = await import("fs");
+            const path = await import("path");
+            const { exec } = await import("child_process");
+
+            const cwd        = process.cwd();
+            const tmpDir     = path.join(cwd, "public", "tmp");
+            const rendersDir = path.join(cwd, "public", "renders");
+            if (!fs.existsSync(tmpDir))     fs.mkdirSync(tmpDir,     { recursive: true });
+            if (!fs.existsSync(rendersDir)) fs.mkdirSync(rendersDir, { recursive: true });
+
+            const assetsDirRel = `tmp/assets_mg_${projectId}`;
+            const assetsDirAbs = path.join(cwd, "public", assetsDirRel);
+            if (!fs.existsSync(assetsDirAbs)) fs.mkdirSync(assetsDirAbs, { recursive: true });
+
+            // Re-download any remote http assets that may have been cleaned up
+            const localProps = { ...savedProps };
+            if (Array.isArray(localProps.scenes)) {
+                for (let i = 0; i < localProps.scenes.length; i++) {
+                    const scene = localProps.scenes[i];
+                    if (!scene.imageUrl) continue;
+
+                    const isRemote = scene.imageUrl.startsWith("http") &&
+                        !scene.imageUrl.includes("localhost") &&
+                        !scene.imageUrl.includes("127.0.0.1");
+
+                    if (isRemote) {
+                        // Remote CDN URL — re-download to local relative path
+                        try {
+                            const resp = await fetch(scene.imageUrl);
+                            if (resp.ok) {
+                                const buffer = Buffer.from(await resp.arrayBuffer());
+                                const ct = resp.headers.get("content-type") || "";
+                                const ext = ct.includes("video") ? "mp4"
+                                    : ct.includes("png")   ? "png"
+                                    : ct.includes("webp")  ? "webp"
+                                    : "jpg";
+                                const destAbs = path.join(assetsDirAbs, `scene_${i}.${ext}`);
+                                fs.writeFileSync(destAbs, buffer);
+                                const relPath = path.relative(path.join(cwd, "public"), destAbs).replace(/\\/g, "/");
+                                localProps.scenes[i] = { ...scene, imageUrl: relPath };
+                                console.log(`📥 Re-downloaded scene ${i + 1}: ${relPath}`);
+                            }
+                        } catch (e: any) {
+                            console.warn(`⚠️ Could not re-download scene ${i + 1}: ${e.message}`);
+                            localProps.scenes[i] = { ...scene, imageUrl: "" };
+                        }
+                    } else if (!scene.imageUrl.startsWith("http")) {
+                        // Relative path — verify it still exists
+                        const absPath = path.join(cwd, "public", scene.imageUrl.replace(/^\//, ""));
+                        if (!fs.existsSync(absPath)) {
+                            console.warn(`⚠️ Scene ${i + 1} local asset missing: ${scene.imageUrl} — clearing`);
+                            localProps.scenes[i] = { ...scene, imageUrl: "" };
+                        }
+                    }
+                }
+            }
+
+            // Write props file
+            const propsPath = path.join(tmpDir, `props-mg-${projectId}.json`);
+            try { if (fs.existsSync(propsPath)) fs.unlinkSync(propsPath); } catch {}
+
+            // Build lean Remotion public dir (same fix as main render path)
+            const remotionPubDir2 = path.join(cwd, 'remotion-assets-mg');
+            const remotionAssetsDest2 = path.join(remotionPubDir2, 'tmp', `assets_mg_${projectId}`);
+            try { fs.rmSync(remotionPubDir2, { recursive: true, force: true }); } catch {}
+            fs.mkdirSync(remotionAssetsDest2, { recursive: true });
+            for (const file of fs.readdirSync(assetsDirAbs)) {
+                fs.copyFileSync(path.join(assetsDirAbs, file), path.join(remotionAssetsDest2, file));
+            }
+            console.log(`📂 [Render-only] Lean public dir ready`);
+
+            fs.writeFileSync(propsPath, JSON.stringify(localProps));
+
+            const outputPath = path.join(rendersDir, `mg_${projectId}.mp4`);
+            const propsArg   = propsPath.replace(/\\/g, "/");
+            const outputArg  = outputPath.replace(/\\/g, "/");
+            const publicDirArg = remotionPubDir2.replace(/\\/g, '/');
+
+            const cmd = [
+                "npx remotion render MotionGraphic",
+                `"${outputArg}"`,
+                `--props="${propsArg}"`,
+                `--public-dir="${publicDirArg}"`,
+                "--timeout=120000",
+                "--disable-web-security",
+                "--gl=angle",
+                "--concurrency=1",
+                "--jpeg-quality=75",
+            ].join(" ");
+
+            console.log(`🎬 [Render-only] ${cmd.substring(0, 120)}...`);
+
+            await new Promise<void>((resolve, reject) => {
+                const child = exec(cmd, { cwd }, (error) => {
+                    if (error) return reject(error);
+                    resolve();
+                });
+                child.stdout?.on("data", (d) => console.log(`[Remotion] ${d.toString().trim()}`));
+                child.stderr?.on("data", (d) => console.log(`[Remotion] ${d.toString().trim()}`));
+            });
+
+            // Clean up: lean public dir, props, and assets
+            try { fs.rmSync(remotionPubDir2, { recursive: true, force: true }); } catch {}
+            try { fs.unlinkSync(propsPath); } catch {}
+            try { fs.rmSync(assetsDirAbs, { recursive: true, force: true }); } catch {}
+
+            const localUrl = `/renders/mg_${projectId}.mp4`;
+            console.log(`✅ [Render-only] complete: ${localUrl}`);
+            return { videoUrl: localUrl };
+        });
+
+        // ── 3. Update DB ───────────────────────────────────────────────────
+        await step.run("save-render-result", async () => {
+            await db
+                .update(motionGraphicProjects)
+                .set({
+                    videoUrl:  renderResult.videoUrl,
+                    status:    "completed",
+                    updatedAt: new Date(),
+                })
+                .where(eq(motionGraphicProjects.projectId, projectId));
+
+            await db.insert(motionGraphicMessages).values({
+                projectId,
+                role:    "system",
+                content: `✅ Re-render complete! Video updated successfully.`,
+                metadata: { type: "render_complete" },
+            });
+
+            console.log(`🏁 [Render-only] finalized: ${projectId}`);
+        });
+
+        return { success: true, projectId, videoUrl: renderResult.videoUrl };
     }
 );

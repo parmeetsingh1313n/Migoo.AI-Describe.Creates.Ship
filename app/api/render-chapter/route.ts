@@ -577,3 +577,66 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json({ status: 'idle', progress: 0 });
 }
+
+// ── DELETE — delete/reset chapter render ─────────────────────────────────────
+export async function DELETE(req: NextRequest) {
+  const chapterId = req.nextUrl.searchParams.get('chapterId');
+  if (!chapterId) {
+    return NextResponse.json({ error: 'Missing chapterId' }, { status: 400 });
+  }
+
+  // 1. Reset database state
+  try {
+    await db
+      .update(chapterGenerationStatus)
+      .set({
+        renderStatus: 'idle',
+        videoUrl: null,
+        renderError: null,
+      })
+      .where(eq(chapterGenerationStatus.chapterId, chapterId));
+  } catch (dbErr: any) {
+    console.error('Failed to update DB for chapter render reset:', dbErr.message);
+  }
+
+  // 2. Remove job from local in-memory Map
+  renderJobs.delete(chapterId);
+
+  // 3. Delete file based on mode
+  if (isGitHubActionsMode()) {
+    const endpoint = (process.env.APPWRITE_ENDPOINT ?? '').replace(/\/$/, '');
+    const projectId = process.env.APPWRITE_PROJECT_ID;
+    const apiKey = process.env.APPWRITE_API_KEY;
+    const bucketId = process.env.APPWRITE_BUCKET_ID;
+
+    if (endpoint && projectId && apiKey && bucketId) {
+      try {
+        const { Client, Storage } = require('node-appwrite');
+        const client = new Client().setEndpoint(endpoint).setProject(projectId).setKey(apiKey);
+        const storage = new Storage(client);
+
+        const fileId = `chapter-${chapterId}`.replace(/[^a-zA-Z0-9._-]/g, '-').slice(0, 36);
+        console.log(`☁️ Deleting Appwrite file ${fileId} from bucket ${bucketId}`);
+        await storage.deleteFile(bucketId, fileId);
+        console.log(`✅ Appwrite file deleted: ${fileId}`);
+      } catch (err: any) {
+        console.error('Failed to delete file from Appwrite Storage:', err?.message ?? err);
+      }
+    } else {
+      console.warn('Missing Appwrite env vars for file deletion in GitHub Actions mode');
+    }
+  } else {
+    const localOutputPath = path.join(process.cwd(), 'public', 'renders', `chapter-${chapterId}.mp4`);
+    if (fs.existsSync(localOutputPath)) {
+      try {
+        fs.unlinkSync(localOutputPath);
+        console.log(`✅ Local file deleted: ${localOutputPath}`);
+      } catch (err: any) {
+        console.error('Failed to delete local MP4 file:', err.message);
+        return NextResponse.json({ error: `Failed to delete local MP4 file: ${err.message}` }, { status: 500 });
+      }
+    }
+  }
+
+  return NextResponse.json({ success: true, message: 'Chapter render deleted successfully' });
+}

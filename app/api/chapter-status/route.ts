@@ -12,6 +12,8 @@ import { apiError, apiSuccess, apiOptions } from "@/lib/api-helpers";
 import { currentUser } from "@clerk/nextjs/server";
 import { eq } from "drizzle-orm";
 import { NextRequest } from "next/server";
+import fs from 'fs';
+import path from 'path';
 
 export async function GET(req: NextRequest) {
     const user = await currentUser();
@@ -99,6 +101,15 @@ export async function GET(req: NextRequest) {
                 row.status = "idle";
                 row.slidesComplete = 0;
                 row.audioComplete = 0;
+            }
+
+            // Sync local dev render presence dynamically
+            if (row.renderStatus !== 'video:completed' || !row.videoUrl) {
+                const localOutputPath = path.join(process.cwd(), 'public', 'renders', `chapter-${row.chapterId}.mp4`);
+                if (fs.existsSync(localOutputPath)) {
+                    row.renderStatus = 'video:completed';
+                    row.videoUrl = `/renders/chapter-${row.chapterId}.mp4`;
+                }
             }
         }
 
