@@ -13,18 +13,18 @@ import { useEffect, useState } from 'react';
 
 const customAppearance = {
     variables: {
-        colorPrimary: '#6366f1',
+        colorPrimary: '#ffffff',
         colorSuccess: '#10b981',
         colorWarning: '#f59e0b',
         colorDanger: '#ef4444',
-        colorBackground: '#ffffff',
-        colorText: '#111827',
-        colorInputText: '#111827',
-        colorInputBackground: '#f9fafb',
+        colorBackground: 'transparent',
+        colorText: '#ffffff',
+        colorInputText: '#ffffff',
+        colorInputBackground: 'rgba(255, 255, 255, 0.08)',
         borderRadius: '0.75rem',
-        colorAlphaShade: '#1f2937',
+        colorAlphaShade: 'rgba(255, 255, 255, 0.1)',
         fontSize: '14px',
-        fontFamily: 'var(--font-geist-sans)',
+        fontFamily: "'Outfit', sans-serif",
     },
     elements: {
         rootBox: 'w-full',
@@ -34,8 +34,9 @@ const customAppearance = {
             height: '44px',
             padding: '0 16px',
             borderRadius: '9999px',
-            backgroundColor: 'var(--muted)',
-            color: 'var(--foreground)',
+            backgroundColor: 'rgba(255, 255, 255, 0.06)',
+            backdropFilter: 'blur(12px)',
+            color: 'rgba(255, 255, 255, 0.8)',
             fontWeight: '500',
             fontSize: '14px',
             display: 'flex',
@@ -43,25 +44,25 @@ const customAppearance = {
             justifyContent: 'center',
             gap: '12px',
             transition: 'all 200ms ease',
-            border: '1px solid var(--border)',
+            border: '1px solid rgba(255, 255, 255, 0.12)',
             '&:hover': {
-                backgroundColor: 'color-mix(in srgb, var(--muted) 90%, transparent)',
+                backgroundColor: 'rgba(255, 255, 255, 0.12)',
                 transform: 'translateY(-1px)',
-                boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
+                boxShadow: '0 4px 20px rgba(0, 0, 0, 0.2)',
             }
         },
         socialButtonsBlockButtonArrow: { display: 'none' },
-        socialButtonsBlockButtonText: { fontWeight: '500' },
-        socialButtonsProviderIcon: { width: '18px', height: '18px' },
-        dividerLine: { backgroundColor: 'var(--border)' },
+        socialButtonsBlockButtonText: { fontWeight: '500', color: 'rgba(255,255,255,0.8)' },
+        socialButtonsProviderIcon: { width: '20px', height: '20px' },
+        dividerLine: { backgroundColor: 'rgba(255, 255, 255, 0.12)' },
         dividerText: {
-            color: 'var(--muted-foreground)',
-            backgroundColor: 'var(--background)',
+            color: 'rgba(255, 255, 255, 0.5)',
+            backgroundColor: 'transparent',
             padding: '0 12px',
             fontSize: '13px'
         },
         formFieldLabel: {
-            color: 'var(--foreground)',
+            color: 'rgba(255, 255, 255, 0.7)',
             fontWeight: '500',
             fontSize: '14px',
             marginBottom: '6px'
@@ -70,29 +71,60 @@ const customAppearance = {
             height: '44px',
             padding: '0 20px',
             borderRadius: '9999px',
-            backgroundColor: 'var(--muted)',
-            border: '1px solid var(--border)',
-            color: 'var(--foreground)',
+            backgroundColor: 'rgba(255, 255, 255, 0.06)',
+            backdropFilter: 'blur(8px)',
+            border: '1px solid rgba(255, 255, 255, 0.12)',
+            color: '#ffffff',
             fontSize: '14px',
             transition: 'all 200ms ease',
             '&:focus': {
-                borderColor: 'var(--primary)',
-                boxShadow: '0 0 0 3px rgba(99, 102, 241, 0.1)',
+                borderColor: 'rgba(255, 255, 255, 0.3)',
+                boxShadow: '0 0 0 3px rgba(255, 255, 255, 0.08)',
                 outline: 'none',
             }
         },
         formButtonPrimary: {
-            display: 'none', // Hide Clerk's default button
+            display: 'none',
         },
         footer: { display: 'none' },
         footerActionLink: {
-            color: 'var(--primary)',
+            color: 'rgba(255, 255, 255, 0.7)',
             fontWeight: '500',
-            '&:hover': { textDecoration: 'underline' }
+            '&:hover': { textDecoration: 'underline', color: '#ffffff' }
         },
         identityPreviewEditButton: {
-            color: 'var(--primary)',
-            '&:hover': { color: 'color-mix(in srgb, var(--primary) 80%, transparent)' }
+            color: 'rgba(255, 255, 255, 0.7)',
+            '&:hover': { color: '#ffffff' }
+        },
+        identityPreview: {
+            backgroundColor: 'rgba(255, 255, 255, 0.06)',
+            borderRadius: '9999px',
+            border: '1px solid rgba(255, 255, 255, 0.12)',
+        },
+        identityPreviewText: {
+            color: 'rgba(255, 255, 255, 0.8)',
+        },
+        formFieldAction: {
+            color: 'rgba(255, 255, 255, 0.5)',
+            '&:hover': { color: '#ffffff' }
+        },
+        formFieldSuccessText: { color: '#10b981' },
+        formFieldErrorText: { color: '#f87171' },
+        otpCodeFieldInput: {
+            backgroundColor: 'rgba(255, 255, 255, 0.06)',
+            border: '1px solid rgba(255, 255, 255, 0.12)',
+            color: '#ffffff',
+            borderRadius: '0.75rem',
+        },
+        alternativeMethodsBlockButton: {
+            color: 'rgba(255, 255, 255, 0.7)',
+            border: '1px solid rgba(255, 255, 255, 0.12)',
+            borderRadius: '9999px',
+            backgroundColor: 'rgba(255, 255, 255, 0.04)',
+            '&:hover': {
+                backgroundColor: 'rgba(255, 255, 255, 0.08)',
+                color: '#ffffff',
+            }
         },
         userButtonBox: {
             display: 'flex',
@@ -102,15 +134,53 @@ const customAppearance = {
         },
         userButtonOuterIdentifier: {
             fontSize: '13px',
-            color: 'var(--muted-foreground)'
+            color: 'rgba(255, 255, 255, 0.6)'
+        },
+        userButtonPopoverCard: {
+            backgroundColor: '#ffffff !important',
+            color: '#171717 !important',
+            border: '1px solid #f0f0f0 !important',
+            boxShadow: '0 10px 30px rgba(0, 0, 0, 0.15) !important',
+            borderRadius: '16px !important',
+            overflow: 'hidden !important',
+        },
+        userButtonPopoverMain: {
+            backgroundColor: '#ffffff !important',
+            color: '#171717 !important',
+        },
+        userButtonPopoverActions: {
+            backgroundColor: '#ffffff !important',
+        },
+        userButtonPopoverActionButton: {
+            color: '#171717 !important',
+            '&:hover': {
+                backgroundColor: '#f5f5f5 !important',
+            }
+        },
+        userButtonPopoverActionButtonText: {
+            color: '#171717 !important',
+            fontWeight: '500 !important',
+        },
+        userButtonPopoverActionButtonIcon: {
+            color: '#737373 !important',
+        },
+        userPreviewMainIdentifier: {
+            color: '#171717 !important',
+            fontWeight: '600 !important',
+        },
+        userPreviewSecondaryIdentifier: {
+            color: '#737373 !important',
+        },
+        userButtonPopoverFooter: {
+            display: 'none !important',
         },
         navbar: {
-            backgroundColor: 'rgba(var(--background), 0.8)',
+            backgroundColor: 'rgba(0, 0, 0, 0.4)',
             backdropFilter: 'blur(12px)',
-            borderBottom: '1px solid var(--border)'
+            borderBottom: '1px solid rgba(255, 255, 255, 0.1)'
         },
         navbarButton: {
-            '&:hover': { backgroundColor: 'var(--muted)' }
+            '&:hover': { backgroundColor: 'rgba(255, 255, 255, 0.08)' }
         },
     },
 };
@@ -144,83 +214,37 @@ export function CustomSignIn() {
     useEffect(() => {
         if (!mounted) return;
 
-        // Function to replace Clerk's button with our DrawOutlineButton
         const replaceClerkButton = () => {
             const clerkButton = document.querySelector('.cl-formButtonPrimary') as HTMLButtonElement;
             const formElement = clerkButton?.closest('form');
 
             if (clerkButton && formElement && !document.getElementById('custom-signin-button')) {
-                // Hide the original button
                 clerkButton.style.display = 'none';
 
-                // Create container for our custom button
                 const buttonContainer = document.createElement('div');
                 buttonContainer.id = 'custom-signin-button';
                 buttonContainer.className = 'mt-4';
-
-                // Insert after the form's last child
                 formElement.appendChild(buttonContainer);
 
-                // We'll trigger the hidden Clerk button when our button is clicked
-                const handleCustomClick = () => {
-                    clerkButton.click();
-                };
+                const handleCustomClick = () => { clerkButton.click(); };
 
-                // Create our custom button element matching DrawOutlineButton.tsx
                 const customButton = document.createElement('button');
                 customButton.type = 'button';
-                customButton.className = 'group relative px-6 py-3 font-medium text-slate-900 transition-colors duration-[400ms] hover:text-indigo-600 w-full bg-transparent rounded-lg cursor-pointer';
+                customButton.className = 'w-full py-3 px-6 rounded-full text-white font-medium text-sm transition-all duration-300 hover:scale-[1.02] active:scale-95 cursor-pointer font-[Outfit]';
+                customButton.style.cssText = 'background: rgba(255,255,255,0.09); backdrop-filter: blur(50px) saturate(180%); -webkit-backdrop-filter: blur(50px) saturate(180%); border: 1px solid rgba(255,255,255,0.25); box-shadow: inset 0 1px 1px rgba(255,255,255,0.22), 0 4px 24px rgba(0,0,0,0.3);';
                 customButton.onclick = handleCustomClick;
-
-                // Button text
-                const textSpan = document.createElement('span');
-                textSpan.className = 'relative z-10';
-                textSpan.textContent = 'Continue';
-                customButton.appendChild(textSpan);
-
-                // TOP border
-                const topSpan = document.createElement('span');
-                topSpan.className = 'absolute left-0 top-0 h-[2px] w-0 bg-indigo-600 transition-all duration-100 group-hover:w-full';
-                customButton.appendChild(topSpan);
-
-                // RIGHT border
-                const rightSpan = document.createElement('span');
-                rightSpan.className = 'absolute right-0 top-0 h-0 w-[2px] bg-indigo-600 transition-all delay-100 duration-100 group-hover:h-full';
-                customButton.appendChild(rightSpan);
-
-                // BOTTOM border
-                const bottomSpan = document.createElement('span');
-                bottomSpan.className = 'absolute bottom-0 right-0 h-[2px] w-0 bg-indigo-600 transition-all delay-200 duration-100 group-hover:w-full';
-                customButton.appendChild(bottomSpan);
-
-                // LEFT border
-                const leftSpan = document.createElement('span');
-                leftSpan.className = 'absolute bottom-0 left-0 h-0 w-[2px] bg-indigo-600 transition-all delay-300 duration-100 group-hover:h-full';
-                customButton.appendChild(leftSpan);
+                customButton.textContent = 'Continue';
 
                 buttonContainer.appendChild(customButton);
             }
         };
 
-        // Try multiple times with delays to ensure Clerk has rendered
         const attempts = [100, 300, 500, 1000];
-        attempts.forEach(delay => {
-            setTimeout(replaceClerkButton, delay);
-        });
+        attempts.forEach(delay => { setTimeout(replaceClerkButton, delay); });
 
-        // Also observe DOM changes
-        const observer = new MutationObserver(() => {
-            replaceClerkButton();
-        });
-
-        observer.observe(document.body, {
-            childList: true,
-            subtree: true,
-        });
-
-        return () => {
-            observer.disconnect();
-        };
+        const observer = new MutationObserver(() => { replaceClerkButton(); });
+        observer.observe(document.body, { childList: true, subtree: true });
+        return () => { observer.disconnect(); };
     }, [mounted]);
 
     if (!mounted) return null;
@@ -229,14 +253,13 @@ export function CustomSignIn() {
         <div className="w-full">
             <div className="flex flex-col items-center mb-8">
                 <div className="relative">
-                    <div className="absolute inset-0 bg-linear-to-r from-primary via-secondary to-accent blur-xl opacity-20 animate-pulse-slow" />
-                    <Image src={'/logo-transparent.png'} alt='logo' width={100} height={100} />
+                    <Image src={'/logo-transparent.png'} alt='logo' width={80} height={80} />
                 </div>
 
-                <h1 className="text-2xl font-semibold text-center text-foreground mb-2">
+                <h1 className="text-2xl font-semibold text-center text-white mb-2 font-['Outfit']">
                     Welcome Back
                 </h1>
-                <p className="text-sm text-muted-foreground text-center mb-6">
+                <p className="text-sm text-white/50 text-center mb-6 font-['Outfit']">
                     Sign in to your account
                 </p>
             </div>
@@ -262,83 +285,37 @@ export function CustomSignUp() {
     useEffect(() => {
         if (!mounted) return;
 
-        // Function to replace Clerk's button with our DrawOutlineButton
         const replaceClerkButton = () => {
             const clerkButton = document.querySelector('.cl-formButtonPrimary') as HTMLButtonElement;
             const formElement = clerkButton?.closest('form');
 
             if (clerkButton && formElement && !document.getElementById('custom-signup-button')) {
-                // Hide the original button
                 clerkButton.style.display = 'none';
 
-                // Create container for our custom button
                 const buttonContainer = document.createElement('div');
                 buttonContainer.id = 'custom-signup-button';
                 buttonContainer.className = 'mt-4';
-
-                // Insert after the form's last child
                 formElement.appendChild(buttonContainer);
 
-                // We'll trigger the hidden Clerk button when our button is clicked
-                const handleCustomClick = () => {
-                    clerkButton.click();
-                };
+                const handleCustomClick = () => { clerkButton.click(); };
 
-                // Create our custom button element matching DrawOutlineButton.tsx
                 const customButton = document.createElement('button');
                 customButton.type = 'button';
-                customButton.className = 'group relative px-6 py-3 font-medium text-slate-900 transition-colors duration-[400ms] hover:text-indigo-600 w-full bg-transparent rounded-lg cursor-pointer';
+                customButton.className = 'w-full py-3 px-6 rounded-full text-white font-medium text-sm transition-all duration-300 hover:scale-[1.02] active:scale-95 cursor-pointer font-[Outfit]';
+                customButton.style.cssText = 'background: rgba(255,255,255,0.09); backdrop-filter: blur(50px) saturate(180%); -webkit-backdrop-filter: blur(50px) saturate(180%); border: 1px solid rgba(255,255,255,0.25); box-shadow: inset 0 1px 1px rgba(255,255,255,0.22), 0 4px 24px rgba(0,0,0,0.3);';
                 customButton.onclick = handleCustomClick;
-
-                // Button text
-                const textSpan = document.createElement('span');
-                textSpan.className = 'relative z-10';
-                textSpan.textContent = 'Continue';
-                customButton.appendChild(textSpan);
-
-                // TOP border
-                const topSpan = document.createElement('span');
-                topSpan.className = 'absolute left-0 top-0 h-[2px] w-0 bg-indigo-600 transition-all duration-100 group-hover:w-full';
-                customButton.appendChild(topSpan);
-
-                // RIGHT border
-                const rightSpan = document.createElement('span');
-                rightSpan.className = 'absolute right-0 top-0 h-0 w-[2px] bg-indigo-600 transition-all delay-100 duration-100 group-hover:h-full';
-                customButton.appendChild(rightSpan);
-
-                // BOTTOM border
-                const bottomSpan = document.createElement('span');
-                bottomSpan.className = 'absolute bottom-0 right-0 h-[2px] w-0 bg-indigo-600 transition-all delay-200 duration-100 group-hover:w-full';
-                customButton.appendChild(bottomSpan);
-
-                // LEFT border
-                const leftSpan = document.createElement('span');
-                leftSpan.className = 'absolute bottom-0 left-0 h-0 w-[2px] bg-indigo-600 transition-all delay-300 duration-100 group-hover:h-full';
-                customButton.appendChild(leftSpan);
+                customButton.textContent = 'Continue';
 
                 buttonContainer.appendChild(customButton);
             }
         };
 
-        // Try multiple times with delays to ensure Clerk has rendered
         const attempts = [100, 300, 500, 1000];
-        attempts.forEach(delay => {
-            setTimeout(replaceClerkButton, delay);
-        });
+        attempts.forEach(delay => { setTimeout(replaceClerkButton, delay); });
 
-        // Also observe DOM changes
-        const observer = new MutationObserver(() => {
-            replaceClerkButton();
-        });
-
-        observer.observe(document.body, {
-            childList: true,
-            subtree: true,
-        });
-
-        return () => {
-            observer.disconnect();
-        };
+        const observer = new MutationObserver(() => { replaceClerkButton(); });
+        observer.observe(document.body, { childList: true, subtree: true });
+        return () => { observer.disconnect(); };
     }, [mounted]);
 
     if (!mounted) return null;
@@ -347,14 +324,13 @@ export function CustomSignUp() {
         <div className="w-full">
             <div className="flex flex-col items-center mb-3">
                 <div className="relative mb-3">
-                    <div className="absolute inset-0 bg-linear-to-r from-primary via-secondary to-accent blur-xl opacity-20 animate-pulse-slow" />
                     <Image src={'/logo-transparent.png'} alt='logo' width={70} height={70} />
                 </div>
 
-                <h1 className="text-lg font-semibold text-center text-foreground mb-1">
+                <h1 className="text-lg font-semibold text-center text-white mb-1 font-['Outfit']">
                     Create Account
                 </h1>
-                <p className="text-xs text-muted-foreground text-center mb-2">
+                <p className="text-xs text-white/50 text-center mb-2 font-['Outfit']">
                     Join us and start creating amazing courses
                 </p>
             </div>

@@ -1,6 +1,6 @@
 "use client"
 import { useParams, useRouter } from 'next/navigation'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
     ArrowLeft,
     BookOpen,
@@ -18,7 +18,7 @@ import {
 import Link from 'next/link'
 import { toast } from 'sonner'
 import jsPDF from 'jspdf'
-import html2canvas from 'html2canvas-pro'
+import { toPng } from 'html-to-image'
 import { UserButton } from '@clerk/nextjs'
 import { NoteDesignBg, getDesignConfig, getDesignPageBg, type NoteDesignKey, type DesignConfig } from './NoteDesigns'
 
@@ -532,14 +532,82 @@ export default function NoteViewerPage() {
     const noteRef = useRef<HTMLDivElement>(null)
     const [pageCount, setPageCount] = useState(1)
     const measureRef = useRef<HTMLDivElement>(null)
-    const PAGE_HEIGHT = 1050
+    const [coverImageUrl, setCoverImageUrl] = useState<string | null>(null)
+    const [coverImageLoading, setCoverImageLoading] = useState(false)
+    const coverImageFetched = useRef(false)
     const [pageAssignments, setPageAssignments] = useState<number[][]>([[]])
+    const [squeezedBlocks, setSqueezedBlocks] = useState<Map<number, number>>(new Map())
+
+    // Available content height per page (A4 = 1123px at 96dpi)
+    // Page 0: 1123 - 40 top - 24 bottom - 46 footer ≈ 1013
+    // Pages 1+: 1123 - 85 top - 24 bottom - 46 footer ≈ 968
+    const PAGE_H_FIRST = 1013
+    const PAGE_H_REST = 968
+
+    // Each "block" is: title | section | image | ai-image | summary
+    type Block = { type: 'title' } | { type: 'section'; idx: number; section: any } | { type: 'image'; asset: any; assetIdx: number } | { type: 'ai-image'; imageUrl: string; prompt: string } | { type: 'summary' }
+
+    // ── Build content blocks for pagination ──
+    const contentBlocks = useMemo(() => {
+        const data = project?.generatedData as any
+        const assets = (project?.uploadedAssets || []) as any[]
+        const allSections = data ? (data.mainNotes || data.sections || []) : []
+        const imageAssets = assets.filter((a: any) => a.type?.startsWith('image/'))
+        const imgPos = data?.imagePosition ?? 2
+
+        const blocks: Block[] = []
+        blocks.push({ type: 'title' })
+
+        // AI-generated page images
+        const pageImages: Array<{ pageIndex: number; imageUrl: string; prompt: string }> = data?.pageImages || []
+        // Build a map: sectionIdx → ai-images for that page
+        const SECTIONS_PER_PAGE = 4
+        const aiImagesBySectionIdx = new Map<number, Array<{ imageUrl: string; prompt: string }>>()
+        pageImages.forEach((pi) => {
+            const sectionIdx = Math.min((pi.pageIndex + 1) * SECTIONS_PER_PAGE - 1, allSections.length - 1)
+            if (!aiImagesBySectionIdx.has(sectionIdx)) aiImagesBySectionIdx.set(sectionIdx, [])
+            aiImagesBySectionIdx.get(sectionIdx)!.push({ imageUrl: pi.imageUrl, prompt: pi.prompt || '' })
+        })
+
+        allSections.forEach((section: any, i: number) => {
+            blocks.push({ type: 'section', idx: i, section })
+            // Insert user-uploaded images at imgPos
+            if (i === imgPos) {
+                imageAssets.forEach((asset: any, ai: number) => {
+                    blocks.push({ type: 'image', asset, assetIdx: ai })
+                })
+            }
+            // Insert AI-generated images after this section
+            if (aiImagesBySectionIdx.has(i)) {
+                aiImagesBySectionIdx.get(i)!.forEach((aiImg) => {
+                    blocks.push({ type: 'ai-image', imageUrl: aiImg.imageUrl, prompt: aiImg.prompt })
+                })
+            }
+        })
+        // If uploaded images weren't placed (imgPos >= sections length), add at end
+        if (imgPos >= allSections.length) {
+            imageAssets.forEach((asset: any, ai: number) => {
+                blocks.push({ type: 'image', asset, assetIdx: ai })
+            })
+        }
+        if (data?.summary) blocks.push({ type: 'summary' })
+
+        return blocks
+    }, [project])
 
     const fetchProject = useCallback(async () => {
         try {
             const res = await fetch(`/api/notes/${noteId}`)
             const data = await res.json()
-            if (data.success) setProject(data.project)
+            if (data.success) {
+                setProject(data.project)
+                // Set initial cover image if it exists in DB
+                const genData = data.project?.generatedData as any
+                if (genData?.coverImageUrl) {
+                    setCoverImageUrl(genData.coverImageUrl)
+                    coverImageFetched.current = true
+                }
+            }
         } catch {
             toast.error('Failed to load note')
         } finally {
@@ -551,6 +619,33 @@ export default function NoteViewerPage() {
         fetchProject()
     }, [fetchProject])
 
+    // Generate cover image using Nano Banana 2 once notes data is ready (only if missing)
+    useEffect(() => {
+        if (!project?.generatedData || coverImageFetched.current) return
+
+        const genData = project.generatedData as any
+        if (genData?.coverImageUrl) {
+            setCoverImageUrl(genData.coverImageUrl)
+            coverImageFetched.current = true
+            return
+        }
+
+        coverImageFetched.current = true
+        const title = project.generatedData?.title || project.title
+        if (!title) return
+
+        setCoverImageLoading(true)
+        fetch(`/api/notes/${noteId}/cover-image`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title }),
+        })
+            .then(r => r.json())
+            .then(d => { if (d.imageUrl) setCoverImageUrl(d.imageUrl) })
+            .catch(e => console.warn('Cover image generation failed:', e))
+            .finally(() => setCoverImageLoading(false))
+    }, [project?.generatedData, noteId])
+
     // Measure content blocks and assign to pages
     useEffect(() => {
         setTimeout(() => {
@@ -558,26 +653,68 @@ export default function NoteViewerPage() {
             const items = measureRef.current.querySelectorAll('[data-block]')
             if (!items.length) return
 
+            // 1. Group indices exactly like the renderer does
+            const isImg = (idx: number) => {
+                const b = contentBlocks[idx]
+                return b && (b.type === 'image' || b.type === 'ai-image')
+            }
+            const groups: number[][] = []
+            let gi = 0
+            while (gi < contentBlocks.length) {
+                if (isImg(gi) && gi + 1 < contentBlocks.length && isImg(gi + 1)) {
+                    groups.push([gi, gi + 1])
+                    gi += 2
+                } else {
+                    groups.push([gi])
+                    gi += 1
+                }
+            }
+
             const pages: number[][] = [[]]
             let currentPage = 0
             let currentH = 0
+            const newSqueezed = new Map<number, number>()
 
-            items.forEach((el, i) => {
-                const h = (el as HTMLElement).offsetHeight + 24
-                if (currentH + h > PAGE_HEIGHT && pages[currentPage].length > 0) {
-                    currentPage++
-                    pages.push([i])
-                    currentH = h
+            groups.forEach((grp) => {
+                let h = 0
+                const isSingleImg = grp.length === 1 && isImg(grp[0])
+
+                if (grp.length === 2) {
+                    // Magic Layout height
+                    h = 380 + 24 
                 } else {
-                    pages[currentPage].push(i)
+                    const el = items[grp[0]] as HTMLElement
+                    h = (el?.offsetHeight || 0) + 24
+                }
+
+                const maxH = currentPage === 0 ? PAGE_H_FIRST : PAGE_H_REST
+                
+                // Adaptive Squeezing: If single image doesn't fit but space > 200px
+                if (currentH + h > maxH && pages[currentPage].length > 0) {
+                    const spaceLeft = maxH - currentH
+                    if (isSingleImg && spaceLeft > 200) {
+                        const targetH = spaceLeft - 10 // Safety margin
+                        newSqueezed.set(grp[0], targetH - 24) // Subtract block margin
+                        pages[currentPage].push(...grp)
+                        currentH = maxH // Fill the rest of the page
+                    } else {
+                        currentPage++
+                        pages.push([...grp])
+                        currentH = h
+                    }
+                } else {
+                    pages[currentPage].push(...grp)
                     currentH += h
                 }
             })
 
-            setPageAssignments(pages)
-            setPageCount(pages.length)
-        }, 300)
-    }, [project?.generatedData])
+            setSqueezedBlocks(newSqueezed)
+            // Filter out any pages that ended up with zero blocks
+            const validPages = pages.filter(p => p.length > 0)
+            setPageAssignments(validPages.length > 0 ? validPages : [[]])
+            setPageCount(validPages.length || 1)
+        }, 400)
+    }, [project?.generatedData, contentBlocks.length])
 
     const handleRegenerate = async () => {
         setRegenerating(true)
@@ -598,40 +735,45 @@ export default function NoteViewerPage() {
     }
 
     const handleExportPDF = async () => {
-        if (!noteRef.current) return
         setExporting(true)
-        toast.info('📄 Generating multi-page PDF...')
+        toast.info('📄 Generating PDF — please wait…')
         try {
-            const canvas = await html2canvas(noteRef.current, {
-                scale: 2,
-                useCORS: true,
-                backgroundColor: getDesignPageBg(project?.pageDesign),
-                logging: false,
-            })
+            const pageEls = Array.from(document.querySelectorAll('[data-export-page]')) as HTMLElement[]
+            if (!pageEls.length) {
+                toast.error('No pages found to export')
+                setExporting(false)
+                return
+            }
 
-            const imgWidth = 210 // A4 width in mm
-            const pageHeight = 297 // A4 height in mm
-            const imgHeight = (canvas.height * imgWidth) / canvas.width
+            const bgColor = getDesignPageBg(project?.pageDesign) || '#ffffff'
             const pdf = new jsPDF('p', 'mm', 'a4')
 
-            let heightLeft = imgHeight
-            let position = 0
-            const imgData = canvas.toDataURL('image/jpeg', 0.95)
+            for (let i = 0; i < pageEls.length; i++) {
+                const el = pageEls[i]
+                const w = el.offsetWidth
+                const h = el.offsetHeight
 
-            // First page
-            pdf.addImage(imgData, 'JPEG', 0, position, imgWidth, imgHeight)
-            heightLeft -= pageHeight
+                // html-to-image uses the browser's own rendering via SVG foreignObject
+                // — far more reliable than html2canvas which re-implements CSS in JS.
+                // We render at 2x for crisp output.
+                const dataUrl = await toPng(el, {
+                    width: w,
+                    height: h,
+                    pixelRatio: 2,
+                    backgroundColor: bgColor,
+                    cacheBust: true,
+                    style: {
+                        boxShadow: 'none',
+                        borderRadius: '0',
+                    },
+                })
 
-            // Additional pages
-            while (heightLeft > 0) {
-                position -= pageHeight
-                pdf.addPage()
-                pdf.addImage(imgData, 'JPEG', 0, position, imgWidth, imgHeight)
-                heightLeft -= pageHeight
+                if (i > 0) pdf.addPage()
+                pdf.addImage(dataUrl, 'PNG', 0, 0, 210, 297)
             }
 
             pdf.save(`${project?.title || 'notes'}.pdf`)
-            toast.success(`✅ Exported as PDF (${pdf.getNumberOfPages()} pages)`)
+            toast.success(`✅ Exported as PDF (${pageEls.length} pages)`)
         } catch (err) {
             toast.error('PDF export failed')
             console.error(err)
@@ -716,64 +858,93 @@ export default function NoteViewerPage() {
     const designKey = (project.pageDesign || 'botanical') as NoteDesignKey
     const designPageBg = getDesignPageBg(designKey)
 
-    // ── Build content blocks for pagination ──
-    const allSections = data ? (data.mainNotes || data.sections || []) : []
-    const imageAssets = assets.filter((a: any) => a.type?.startsWith('image/'))
-    const imgPos = data?.imagePosition ?? 2
-
-    // Each "block" is: title | section | image | ai-image | summary
-    type Block = { type: 'title' } | { type: 'section'; idx: number; section: any } | { type: 'image'; asset: any; assetIdx: number } | { type: 'ai-image'; imageUrl: string; prompt: string } | { type: 'summary' }
-    const contentBlocks: Block[] = []
-    contentBlocks.push({ type: 'title' })
-
-    // AI-generated page images
-    const pageImages: Array<{ pageIndex: number; imageUrl: string; prompt: string }> = data?.pageImages || []
-    // Build a map: sectionIdx → ai-images for that page
-    const SECTIONS_PER_PAGE = 4
-    const aiImagesBySectionIdx = new Map<number, Array<{ imageUrl: string; prompt: string }>>()
-    pageImages.forEach((pi) => {
-        // Place AI image after the last section of that page
-        const sectionIdx = Math.min((pi.pageIndex + 1) * SECTIONS_PER_PAGE - 1, allSections.length - 1)
-        if (!aiImagesBySectionIdx.has(sectionIdx)) aiImagesBySectionIdx.set(sectionIdx, [])
-        aiImagesBySectionIdx.get(sectionIdx)!.push({ imageUrl: pi.imageUrl, prompt: pi.prompt || '' })
-    })
-
-    allSections.forEach((section: any, i: number) => {
-        contentBlocks.push({ type: 'section', idx: i, section })
-        // Insert user-uploaded images at imgPos
-        if (i === imgPos) {
-            imageAssets.forEach((asset: any, ai: number) => {
-                contentBlocks.push({ type: 'image', asset, assetIdx: ai })
-            })
-        }
-        // Insert AI-generated images after this section
-        if (aiImagesBySectionIdx.has(i)) {
-            aiImagesBySectionIdx.get(i)!.forEach((aiImg) => {
-                contentBlocks.push({ type: 'ai-image', imageUrl: aiImg.imageUrl, prompt: aiImg.prompt })
-            })
-        }
-    })
-    // If uploaded images weren't placed (imgPos >= sections length), add at end
-    if (imgPos >= allSections.length) {
-        imageAssets.forEach((asset: any, ai: number) => {
-            contentBlocks.push({ type: 'image', asset, assetIdx: ai })
-        })
-    }
-    if (data?.summary) contentBlocks.push({ type: 'summary' })
 
 
 
     // ── Render a single content block ──
-    const renderBlock = (block: Block) => {
+    const renderBlock = (block: Block, blockIdx?: number) => {
+        const squeezedH = (blockIdx !== undefined) ? squeezedBlocks.get(blockIdx) : undefined
         if (block.type === 'title') {
+            const titleText = data?.title || project.title
+            const hex = designConfig.hex
+            const clipId = 'title-blob-clip'
+
             return (
-                <div className="text-center mb-8 pt-4">
-                    <h1 className={`text-4xl font-black ${colors.text} tracking-tight leading-tight`} style={{ fontFamily: 'Georgia, serif' }}>
-                        {data?.title || project.title}
-                    </h1>
-                    <p className={`text-right mt-3 text-sm ${colors.muted}`}>
-                        {new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}
-                    </p>
+                <div className="mb-8 pt-2" style={{ display: 'flex', alignItems: 'center', gap: '60px', paddingRight: '60px' }}>
+                    {/* Left: title + date */}
+                    <div style={{ flex: 1 }}>
+                        <h1 className={`text-4xl font-black ${colors.text} tracking-tight leading-tight`} style={{ fontFamily: 'Georgia, serif' }}>
+                            {titleText}
+                        </h1>
+                        <p className={`mt-3 text-sm ${colors.muted}`}>
+                            {new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}
+                        </p>
+                    </div>
+
+                    {/* Right: Nano Banana 2 cover image in organic blob shape */}
+                    <div style={{ flexShrink: 0, position: 'relative', width: '148px', height: '148px' }}>
+                        {/* SVG clip-path definition */}
+                        <svg width="0" height="0" style={{ position: 'absolute' }}>
+                            <defs>
+                                <clipPath id={clipId} clipPathUnits="objectBoundingBox">
+                                    <path d="M0.72,0.05 C0.92,0.1 1.0,0.3 0.95,0.52 C0.9,0.73 0.78,0.95 0.56,0.98 C0.34,1.0 0.1,0.9 0.04,0.7 C-0.02,0.5 0.06,0.22 0.22,0.1 C0.38,-0.02 0.52,0.0 0.72,0.05 Z" />
+                                </clipPath>
+                            </defs>
+                        </svg>
+
+                        {/* Decorative ring */}
+                        <div style={{
+                            position: 'absolute', inset: '-6px',
+                            borderRadius: '44% 56% 62% 38% / 45% 40% 60% 55%',
+                            border: `3px solid ${hex.accentBorder}`,
+                            opacity: 0.6,
+                        }} />
+
+                        {/* Image or loading skeleton */}
+                        {coverImageLoading && !coverImageUrl ? (
+                            <div style={{
+                                width: '148px', height: '148px',
+                                clipPath: `url(#${clipId})`,
+                                background: `linear-gradient(135deg, ${hex.accentLight}, ${hex.accentBorder})`,
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                animation: 'pulse 2s infinite',
+                            }}>
+                                <div style={{ width: '32px', height: '32px', border: `3px solid ${hex.accent}`, borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
+                            </div>
+                        ) : coverImageUrl ? (
+                            <img
+                                src={coverImageUrl}
+                                alt=""
+                                aria-hidden="true"
+                                crossOrigin="anonymous"
+                                style={{
+                                    width: '148px', height: '148px',
+                                    objectFit: 'cover',
+                                    clipPath: `url(#${clipId})`,
+                                    display: 'block',
+                                }}
+                            />
+                        ) : (
+                            /* Fallback decorative placeholder (accent gradient) */
+                            <div style={{
+                                width: '148px', height: '148px',
+                                clipPath: `url(#${clipId})`,
+                                background: `linear-gradient(135deg, ${hex.accentLight} 0%, ${hex.accentBorder} 100%)`,
+                            }} />
+                        )}
+
+                        {/* Small accent circles */}
+                        <div style={{
+                            position: 'absolute', bottom: '6px', left: '-10px',
+                            width: '22px', height: '22px', borderRadius: '50%',
+                            background: hex.accent, opacity: 0.25,
+                        }} />
+                        <div style={{
+                            position: 'absolute', top: '10px', right: '-8px',
+                            width: '14px', height: '14px', borderRadius: '50%',
+                            background: hex.circle, opacity: 0.35,
+                        }} />
+                    </div>
                 </div>
             )
         }
@@ -992,111 +1163,124 @@ export default function NoteViewerPage() {
                     section.bullets?.map((b: string) => ({ label: b.split(':')[0] || b, detail: b.split(':').slice(1).join(':').trim() })) ||
                     []
 
-                // Color palette cycling green → teal → sky → blue (matches the reference image)
+                // Premium, soft color palette (Nature-inspired, refined)
                 const bubblePalettes = [
-                    { bg: 'linear-gradient(145deg, #7ec84a 0%, #5aaa28 100%)', shadow: 'rgba(94,170,40,0.35)' },
-                    { bg: 'linear-gradient(145deg, #3ec9a7 0%, #22a880 100%)', shadow: 'rgba(34,168,128,0.35)' },
-                    { bg: 'linear-gradient(145deg, #35b8d4 0%, #1a96b8 100%)', shadow: 'rgba(26,150,184,0.35)' },
-                    { bg: 'linear-gradient(145deg, #3a87d4 0%, #2066b8 100%)', shadow: 'rgba(32,102,184,0.35)' },
+                    { bg: 'linear-gradient(135deg, #a8e063 0%, #56ab2f 100%)', shadow: 'rgba(86,171,47,0.2)' },   // Soft Green
+                    { bg: 'linear-gradient(135deg, #43e97b 0%, #38f9d7 100%)', shadow: 'rgba(56,249,215,0.2)' },  // Mint/Teal
+                    { bg: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', shadow: 'rgba(118,75,162,0.2)' },  // Indigo/Purple
+                    { bg: 'linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)', shadow: 'rgba(0,242,254,0.2)' },  // Sky Blue
+                    { bg: 'linear-gradient(135deg, #f6d365 0%, #fda085 100%)', shadow: 'rgba(253,160,133,0.2)' }, // Sunset
                 ]
-                const letters = ['A','B','C','D','E','F','G','H']
+                const letters = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']
 
                 return (
-                    <div className="pb-4">
-                        <h2 className={`text-base font-bold ${colors.text} mb-4 flex items-center gap-2`} style={{ fontFamily: 'Georgia, serif' }}>
-                            <span className={`w-6 h-6 rounded-full ${colors.circleBg} flex items-center justify-center text-[10px] font-black text-white shadow shrink-0`}>{i + 1}</span>
+                    <div className="pb-6">
+                        <h2 className={`text-base font-bold ${colors.text} mb-6 flex items-center gap-2`} style={{ fontFamily: 'Georgia, serif' }}>
+                            <span className={`w-7 h-7 rounded-full ${colors.circleBg} flex items-center justify-center text-[11px] font-black text-white shadow-md shrink-0`}>{i + 1}</span>
                             {section.heading || section.title}
                         </h2>
 
-                        {/* Horizontal row of bubbles */}
-                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0', overflowX: 'auto', paddingBottom: '6px' }}>
-                            {steps.slice(0, 8).map((step: any, j: number) => {
+                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0', padding: '0 10px' }}>
+                            {steps.slice(0, 5).map((step: any, j: number) => {
                                 const palette = bubblePalettes[j % bubblePalettes.length]
                                 const letter = letters[j] || String(j + 1)
                                 const IconComp = resolveCardIcon(step.icon, step.label)
                                 return (
-                                    <div key={j} style={{ display: 'flex', alignItems: 'center', flex: 1, minWidth: 0 }}>
-                                        {/* Bubble + label column */}
+                                    <React.Fragment key={j}>
                                         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1, minWidth: 0 }}>
-                                            {/* Circle bubble */}
+                                            {/* Step Circle */}
                                             <div style={{
                                                 position: 'relative',
-                                                width: '110px',
-                                                height: '110px',
+                                                width: '100px',
+                                                height: '100px',
                                                 borderRadius: '50%',
                                                 background: palette.bg,
-                                                boxShadow: `0 8px 24px ${palette.shadow}, 0 2px 8px rgba(0,0,0,0.12)`,
-                                                flexShrink: 0,
+                                                boxShadow: `0 12px 28px ${palette.shadow}, 0 4px 10px rgba(0,0,0,0.08)`,
                                                 display: 'flex',
                                                 alignItems: 'center',
                                                 justifyContent: 'center',
+                                                zIndex: 2,
+                                                transition: 'transform 0.3s ease',
                                             }}>
-                                                {/* Letter badge — top-left */}
+                                                {/* Top Badge (A, B, C...) */}
                                                 <div style={{
                                                     position: 'absolute',
-                                                    top: '8px',
-                                                    left: '10px',
-                                                    width: '22px',
-                                                    height: '22px',
+                                                    top: '-8px',
+                                                    right: '-2px',
+                                                    width: '28px',
+                                                    height: '28px',
                                                     borderRadius: '50%',
-                                                    background: 'rgba(255,255,255,0.30)',
+                                                    background: '#fff',
+                                                    boxShadow: '0 4px 10px rgba(0,0,0,0.1)',
                                                     display: 'flex',
                                                     alignItems: 'center',
                                                     justifyContent: 'center',
-                                                    fontSize: '10px',
+                                                    fontSize: '11px',
                                                     fontWeight: 900,
-                                                    color: '#fff',
-                                                    letterSpacing: '0.02em',
+                                                    color: hex.text,
+                                                    border: `2px solid ${hex.accentBorder}`,
+                                                    zIndex: 3,
                                                 }}>{letter}</div>
 
-                                                {/* Icon — centered-right area */}
-                                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', marginLeft: '14px' }}>
-                                                    <IconComp style={{ fontSize: '26px', color: 'rgba(255,255,255,0.92)' }} />
+                                                {/* Main Icon */}
+                                                <div style={{
+                                                    background: 'rgba(255,255,255,0.15)',
+                                                    padding: '12px',
+                                                    borderRadius: '50%',
+                                                    backdropFilter: 'blur(4px)',
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    justifyContent: 'center',
+                                                }}>
+                                                    <IconComp style={{ fontSize: '28px', color: '#fff' }} />
                                                 </div>
 
-                                                {/* Subtle inner shadow on bottom half */}
+                                                {/* Glossy Overlay */}
                                                 <div style={{
                                                     position: 'absolute',
-                                                    bottom: 0,
-                                                    left: 0,
-                                                    right: 0,
-                                                    height: '55%',
-                                                    borderRadius: '0 0 50% 50%',
-                                                    background: 'rgba(0,0,0,0.12)',
-                                                    pointerEvents: 'none',
+                                                    inset: '4px',
+                                                    borderRadius: '50%',
+                                                    background: 'linear-gradient(135deg, rgba(255,255,255,0.2) 0%, rgba(255,255,255,0) 50%)',
+                                                    pointerEvents: 'none'
                                                 }} />
-
-                                                {/* Arrow pointer on right edge */}
-                                                {j < steps.slice(0, 8).length - 1 && (
-                                                    <div style={{
-                                                        position: 'absolute',
-                                                        right: '-10px',
-                                                        top: '50%',
-                                                        transform: 'translateY(-50%)',
-                                                        width: 0,
-                                                        height: 0,
-                                                        borderTop: '10px solid transparent',
-                                                        borderBottom: '10px solid transparent',
-                                                        borderLeft: `10px solid ${palette.bg.includes('7ec') ? '#5aaa28' : palette.bg.includes('3ec') ? '#22a880' : palette.bg.includes('35b') ? '#1a96b8' : '#2066b8'}`,
-                                                        zIndex: 2,
-                                                    }} />
-                                                )}
                                             </div>
 
-                                            {/* Text below bubble */}
-                                            <div style={{ textAlign: 'center', marginTop: '10px', padding: '0 4px', maxWidth: '120px' }}>
-                                                <p style={{ fontSize: '11px', fontWeight: 800, color: hex.text, lineHeight: 1.2, marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{step.label}</p>
+                                            {/* Label & Description */}
+                                            <div style={{ textAlign: 'center', marginTop: '16px', padding: '0 8px' }}>
+                                                <h3 style={{
+                                                    fontSize: '11px',
+                                                    fontWeight: 800,
+                                                    color: hex.text,
+                                                    lineHeight: 1.3,
+                                                    marginBottom: '4px',
+                                                    textTransform: 'uppercase',
+                                                    letterSpacing: '0.05em'
+                                                }}>{step.label}</h3>
                                                 {step.detail && (
-                                                    <p style={{ fontSize: '9.5px', color: hex.muted, lineHeight: 1.4 }}>{step.detail}</p>
+                                                    <p style={{
+                                                        fontSize: '10px',
+                                                        color: hex.muted,
+                                                        lineHeight: 1.4,
+                                                        fontWeight: 500,
+                                                        opacity: 0.8
+                                                    }}>{step.detail}</p>
                                                 )}
                                             </div>
                                         </div>
 
-                                        {/* Horizontal connector line between bubbles (hidden on last) */}
-                                        {j < steps.slice(0, 8).length - 1 && (
-                                            <div style={{ width: '18px', height: '2px', background: `linear-gradient(90deg, ${hex.line}, ${hex.accentBorder})`, flexShrink: 0, marginTop: '-40px', opacity: 0.5 }} />
+                                        {/* Connector Line (between items) */}
+                                        {j < steps.slice(0, 5).length - 1 && (
+                                            <div style={{
+                                                flex: 0.4,
+                                                background: `linear-gradient(90deg, ${hex.accentBorder} 0%, ${hex.line} 50%, ${hex.accentBorder} 100%)`,
+                                                marginTop: '50px',
+                                                position: 'relative',
+                                                opacity: 0.4,
+                                                borderTop: `2px dashed ${hex.line}`,
+                                                height: '0'
+                                            }} />
                                         )}
-                                    </div>
+                                    </React.Fragment>
                                 )
                             })}
                         </div>
@@ -1320,51 +1504,327 @@ export default function NoteViewerPage() {
             )
         }
 
-        if (block.type === 'image') {
+        if (block.type === 'image' || block.type === 'ai-image') {
             const h = designConfig.hex
-            const pat = (block.assetIdx ?? 0) % 3
-            const src = block.asset?.url
-            const caption = block.asset?.name || `Figure ${(block.assetIdx ?? 0) + 1}`
-            if (!src) return null
-            if (pat === 0) return (
-                <figure style={{ background: '#fff', padding: '8px 8px 26px', boxShadow: `0 6px 20px rgba(0,0,0,0.10), 0 0 0 1px ${h.accentBorder}`, borderRadius: '3px', position: 'relative', zIndex: 3, margin: '6px 0' }}>
-                    <img src={src} alt={caption} crossOrigin="anonymous" style={{ width: '100%', height: '230px', objectFit: 'contain', display: 'block' }} />
-                    <figcaption style={{ textAlign: 'center', fontSize: '10px', color: h.muted, marginTop: '6px', fontStyle: 'italic' }}>{caption}</figcaption>
-                </figure>
-            )
-            if (pat === 1) return (
-                <figure style={{ background: '#fff', borderRadius: '10px', overflow: 'hidden', boxShadow: `0 2px 12px rgba(0,0,0,0.08)`, borderTop: `3px solid ${h.accent}`, position: 'relative', zIndex: 3, margin: '6px 0' }}>
-                    <img src={src} alt={caption} crossOrigin="anonymous" style={{ width: '100%', height: '230px', objectFit: 'contain', display: 'block', background: '#fafafa' }} />
-                    <figcaption style={{ fontSize: '10px', color: h.muted, padding: '5px 10px', background: h.accentLight, fontStyle: 'italic' }}>{caption}</figcaption>
-                </figure>
-            )
-            return (
-                <figure style={{ background: `linear-gradient(135deg, ${h.accentLight}, ${h.accentLighter})`, borderRadius: '14px', padding: '6px', border: `1px solid ${h.accentBorder}`, position: 'relative', zIndex: 3, margin: '6px 0' }}>
-                    <img src={src} alt={caption} crossOrigin="anonymous" style={{ width: '100%', height: '220px', objectFit: 'contain', display: 'block', borderRadius: '10px', background: '#fff' }} />
-                    <figcaption style={{ textAlign: 'center', fontSize: '10px', color: h.muted, marginTop: '3px', fontStyle: 'italic', paddingBottom: '3px' }}>{caption}</figcaption>
-                </figure>
-            )
-        }
+            const isAi = block.type === 'ai-image'
+            const src = isAi ? block.imageUrl : block.asset?.url
+            const caption = isAi ? (block.prompt?.slice(0, 60) || 'AI Illustration') : (block.asset?.name || 'Illustration')
 
-        if (block.type === 'ai-image') {
-            const h = designConfig.hex
-            const pat = (block.prompt?.length ?? 0) % 3
-            const src = block.imageUrl
-            const alt = block.prompt ? block.prompt.slice(0, 80) : 'AI Illustration'
+            // Increased variety — now 5 unique styles
+            const pat = isAi
+                ? (block.prompt?.length ?? 0) % 5
+                : (block.assetIdx ?? 0) % 5
+
             if (!src) return null
-            if (pat === 0) return (
-                <figure style={{ background: 'transparent', padding: '8px', boxShadow: `0 6px 20px rgba(0,0,0,0.10), 0 0 0 1px ${h.accentBorder}`, borderRadius: '3px', position: 'relative', zIndex: 3, margin: '6px auto', maxWidth: '75%' }}>
-                    <img src={src} alt={alt} crossOrigin="anonymous" style={{ width: '100%', height: 'auto', maxHeight: '300px', objectFit: 'contain', display: 'block', border: `2px solid ${h.accentBorder}`, borderRadius: '6px', padding: '3px' }} />
-                </figure>
-            )
-            if (pat === 1) return (
-                <figure style={{ background: 'transparent', borderRadius: '10px', overflow: 'hidden', boxShadow: `0 2px 12px rgba(0,0,0,0.08)`, borderTop: `3px solid ${h.accent}`, position: 'relative', zIndex: 3, margin: '6px auto', maxWidth: '75%' }}>
-                    <img src={src} alt={alt} crossOrigin="anonymous" style={{ width: '100%', height: 'auto', maxHeight: '300px', objectFit: 'contain', display: 'block' }} />
-                </figure>
-            )
+
+            const imgMaxH = squeezedH ? `${squeezedH}px` : '350px'
+            const imgFixedH = squeezedH ? `${squeezedH - 40}px` : (isAi ? 'auto' : '260px')
+
+            // STYLE 0: Organic "Blob" Frame (No Animation)
+            if (pat === 0) {
+                const clipId = `blob-clip-${Math.random().toString(36).slice(2, 7)}`
+                return (
+                    <figure style={{ position: 'relative', margin: '28px auto', width: '85%', textAlign: 'center' }}>
+                        <svg width="0" height="0" style={{ position: 'absolute' }}>
+                            <defs>
+                                <clipPath id={clipId} clipPathUnits="objectBoundingBox">
+                                    <path d="M0.75,0.1 C0.9,0.2 1,0.45 0.95,0.7 C0.9,0.9 0.7,0.98 0.45,0.95 C0.2,0.92 0,0.75 0.05,0.45 C0.1,0.15 0.35,0 0.6,0.02 C0.7,0.03 0.7,0.07 0.75,0.1 Z" />
+                                </clipPath>
+                            </defs>
+                        </svg>
+
+                        {/* Outer Ring (Static) */}
+                        <div style={{
+                            position: 'absolute', inset: '-10px',
+                            borderRadius: '50% 40% 60% 50% / 45% 55% 45% 55%',
+                            border: `2px solid ${h.accent}`,
+                            opacity: 0.3,
+                            zIndex: 1
+                        }} />
+
+                        {/* Main Image Container */}
+                        <div style={{
+                            position: 'relative',
+                            background: '#fff',
+                            padding: '6px',
+                            clipPath: `url(#${clipId})`,
+                            boxShadow: `0 12px 30px ${h.shadow}`,
+                            zIndex: 2
+                        }}>
+                            <img src={src} alt={caption} crossOrigin="anonymous" style={{
+                                width: '100%',
+                                height: imgFixedH,
+                                maxHeight: imgMaxH,
+                                objectFit: 'cover',
+                                display: 'block'
+                            }} />
+                        </div>
+
+                        <figcaption style={{
+                            marginTop: '15px',
+                            fontSize: '10px',
+                            fontWeight: 700,
+                            color: h.muted,
+                            letterSpacing: '0.06em',
+                            textTransform: 'uppercase'
+                        }}>— {caption} —</figcaption>
+                    </figure>
+                )
+            }
+
+            // STYLE 1: "Polaroid" with Tape and Drop Shadow
+            if (pat === 1) {
+                return (
+                    <figure style={{
+                        margin: '30px auto',
+                        width: '80%',
+                        background: '#fff',
+                        padding: '12px 12px 42px',
+                        boxShadow: '0 25px 60px rgba(0,0,0,0.18)',
+                        border: '1px solid rgba(0,0,0,0.06)',
+                        transform: 'rotate(-1.5deg)',
+                        position: 'relative',
+                        zIndex: 3
+                    }}>
+                        {/* Washi Tape Accent */}
+                        <div style={{
+                            position: 'absolute',
+                            top: '-16px',
+                            left: '50%',
+                            transform: 'translateX(-50%) rotate(3deg)',
+                            width: '85px',
+                            height: '26px',
+                            background: h.accentLight,
+                            opacity: 0.75,
+                            border: `1.5px dashed ${h.accent}`,
+                            zIndex: 10
+                        }} />
+
+                        <div style={{ overflow: 'hidden', borderRadius: '1px', border: '1px solid rgba(0,0,0,0.04)' }}>
+                            <img src={src} alt={caption} crossOrigin="anonymous" style={{
+                                width: '100%',
+                                height: imgFixedH,
+                                maxHeight: imgMaxH,
+                                objectFit: 'contain',
+                                display: 'block',
+                                background: '#fafafa'
+                            }} />
+                        </div>
+
+                        <figcaption style={{
+                            position: 'absolute',
+                            bottom: '12px',
+                            left: '10px',
+                            right: '10px',
+                            textAlign: 'center',
+                            fontSize: '13px',
+                            color: '#444',
+                            fontFamily: '"Comic Sans MS", cursive, sans-serif',
+                            opacity: 0.7
+                        }}>{caption}</figcaption>
+                    </figure>
+                )
+            }
+
+            // STYLE 2: Tech/Modern with Glowing Double Border
+            if (pat === 2) {
+                return (
+                    <figure style={{
+                        margin: '35px auto',
+                        width: '88%',
+                        position: 'relative',
+                        padding: '12px',
+                        zIndex: 3
+                    }}>
+                        {/* Background "Ghost" frame */}
+                        <div style={{
+                            position: 'absolute',
+                            inset: '0',
+                            background: `linear-gradient(135deg, ${h.accentLight} 0%, transparent 100%)`,
+                            borderRadius: '24px',
+                            transform: 'scale(1.04) rotate(1deg)',
+                            opacity: 0.25,
+                            zIndex: 1
+                        }} />
+
+                        {/* Main Frame */}
+                        <div style={{
+                            position: 'relative',
+                            background: '#fff',
+                            borderRadius: '18px',
+                            padding: '5px',
+                            border: `2px solid ${h.accentBorder}`,
+                            boxShadow: `0 12px 45px ${h.shadow}`,
+                            zIndex: 2,
+                            overflow: 'hidden'
+                        }}>
+                            <img src={src} alt={caption} crossOrigin="anonymous" style={{
+                                width: '100%',
+                                height: imgFixedH,
+                                maxHeight: imgMaxH,
+                                objectFit: 'cover',
+                                display: 'block',
+                                borderRadius: '14px'
+                            }} />
+
+                            {/* Glassmorphism Badge */}
+                            <div style={{
+                                position: 'absolute',
+                                bottom: '12px',
+                                right: '12px',
+                                background: 'rgba(255,255,255,0.75)',
+                                backdropFilter: 'blur(10px)',
+                                padding: '5px 12px',
+                                borderRadius: '10px',
+                                border: '1px solid rgba(255,255,255,0.4)',
+                                fontSize: '10px',
+                                fontWeight: 900,
+                                color: h.accent,
+                                textTransform: 'uppercase',
+                                letterSpacing: '0.04em'
+                            }}>Visual Context</div>
+                        </div>
+
+                        {/* Accent Geometric Line */}
+                        <div style={{
+                            position: 'absolute',
+                            top: '-8px',
+                            left: '-8px',
+                            width: '45px',
+                            height: '45px',
+                            borderTop: `5px solid ${h.accent}`,
+                            borderLeft: `5px solid ${h.accent}`,
+                            zIndex: 3
+                        }} />
+                    </figure>
+                )
+            }
+
+            // STYLE 3: "Notebook Sketch" with Textured Paper
+            if (pat === 3) {
+                return (
+                    <figure style={{
+                        margin: '30px auto',
+                        width: '85%',
+                        background: '#fdfbf7', // Paper color
+                        padding: '16px',
+                        border: '1px solid #d8d3c9',
+                        boxShadow: '2px 4px 12px rgba(0,0,0,0.08)',
+                        position: 'relative',
+                        zIndex: 3,
+                        backgroundImage: 'radial-gradient(#d1d1d1 1px, transparent 0)',
+                        backgroundSize: '16px 16px' // Dot grid
+                    }}>
+                        {/* "Hand-drawn" dashed border */}
+                        <div style={{
+                            position: 'absolute',
+                            inset: '6px',
+                            border: '1.5px dashed #aaa',
+                            borderRadius: '4px',
+                            pointerEvents: 'none'
+                        }} />
+
+                        <div style={{
+                            position: 'relative',
+                            zIndex: 2,
+                            borderRadius: '4px',
+                            overflow: 'hidden',
+                            border: '1px solid #eee'
+                        }}>
+                            <img src={src} alt={caption} crossOrigin="anonymous" style={{
+                                width: '100%',
+                                height: 'auto',
+                                maxHeight: imgMaxH,
+                                objectFit: 'contain',
+                                display: 'block',
+                                filter: 'contrast(1.05) saturate(0.9)' // Slightly artistic filter
+                            }} />
+                        </div>
+
+                        <figcaption style={{
+                            marginTop: '12px',
+                            fontSize: '11px',
+                            color: '#666',
+                            fontStyle: 'italic',
+                            textAlign: 'right',
+                            paddingRight: '10px'
+                        }}>Illustration: {caption}</figcaption>
+                    </figure>
+                )
+            }
+
+            // STYLE 4: "Circular Lens" with Concentric Rings
+            const clipId = `circle-clip-${Math.random().toString(36).slice(2, 7)}`
             return (
-                <figure style={{ background: `linear-gradient(135deg, ${h.accentLight}, ${h.accentLighter})`, borderRadius: '14px', padding: '6px', border: `1px solid ${h.accentBorder}`, position: 'relative', zIndex: 3, margin: '6px auto', maxWidth: '75%' }}>
-                    <img src={src} alt={alt} crossOrigin="anonymous" style={{ width: '100%', height: 'auto', maxHeight: '300px', objectFit: 'contain', display: 'block', borderRadius: '10px', border: `2px solid ${h.accentBorder}`, padding: '3px' }} />
+                <figure style={{ position: 'relative', margin: '40px auto', width: '280px', height: '280px', textAlign: 'center' }}>
+                    <svg width="0" height="0" style={{ position: 'absolute' }}>
+                        <defs>
+                            <clipPath id={clipId} clipPathUnits="objectBoundingBox">
+                                <circle cx="0.5" cy="0.5" r="0.48" />
+                            </clipPath>
+                        </defs>
+                    </svg>
+
+                    {/* Concentric Decorative Rings */}
+                    <div style={{
+                        position: 'absolute', inset: '-15px',
+                        borderRadius: '50%',
+                        border: `1px dashed ${h.accentBorder}`,
+                        opacity: 0.4,
+                    }} />
+                    <div style={{
+                        position: 'absolute', inset: '-8px',
+                        borderRadius: '50%',
+                        border: `2px solid ${h.accent}`,
+                        opacity: 0.2,
+                    }} />
+
+                    {/* Circular Image Container */}
+                    <div style={{
+                        position: 'relative',
+                        width: '100%',
+                        height: '100%',
+                        background: '#fff',
+                        clipPath: `url(#${clipId})`,
+                        boxShadow: `0 15px 40px ${h.shadow}`,
+                        zIndex: 2,
+                        border: `4px solid #fff`
+                    }}>
+                        <img src={src} alt={caption} crossOrigin="anonymous" style={{
+                            width: '100%',
+                            height: '100%',
+                            objectFit: 'cover',
+                            display: 'block'
+                        }} />
+                    </div>
+
+                    {/* Vertical Badge Accent */}
+                    <div style={{
+                        position: 'absolute',
+                        top: '20px',
+                        left: '-20px',
+                        background: h.circle,
+                        color: '#fff',
+                        fontSize: '9px',
+                        fontWeight: 900,
+                        padding: '6px 4px',
+                        borderRadius: '4px',
+                        writingMode: 'vertical-rl',
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.1em',
+                        zIndex: 3
+                    }}>INFOGRAPHIC</div>
+
+                    <figcaption style={{
+                        position: 'absolute',
+                        bottom: '-35px',
+                        left: '0',
+                        right: '0',
+                        fontSize: '10px',
+                        fontWeight: 800,
+                        color: h.text,
+                        opacity: 0.6
+                    }}>{caption}</figcaption>
                 </figure>
             )
         }
@@ -1423,26 +1883,16 @@ export default function NoteViewerPage() {
                 </div>
             </div>
 
-            {/* Hidden div for PDF export */}
-            <div style={{ position: 'absolute', left: '-9999px', top: 0 }}>
-                <div ref={noteRef} style={{ width: '210mm', backgroundColor: designPageBg }}>
-                    <NoteDesignBg design={designKey} />
-                    <div className="relative" style={{ zIndex: 1, padding: '40px 48px 60px' }}>
-                        <div className="space-y-6">
-                            {contentBlocks.map((block, i) => (
-                                <div key={`export-${i}`}>{renderBlock(block)}</div>
-                            ))}
-                        </div>
-                    </div>
-                </div>
-            </div>
+
+            {/* (Old hidden export div removed — PDF now captures visible pages directly) */}
+
 
             {/* Hidden measurement div — measures each block */}
             <div style={{ position: 'absolute', left: '-9999px', top: 0, width: '700px' }}>
                 <div ref={measureRef} style={{ padding: '40px 48px 60px' }}>
                     {contentBlocks.map((block, i) => (
                         <div key={`measure-${i}`} data-block={i} style={{ marginBottom: '24px' }}>
-                            {renderBlock(block)}
+                            {renderBlock(block, i)}
                         </div>
                     ))}
                 </div>
@@ -1453,6 +1903,7 @@ export default function NoteViewerPage() {
                 {pageAssignments.map((blockIndices, pageIdx) => (
                     <div
                         key={pageIdx}
+                        data-export-page={pageIdx}
                         className="relative flex flex-col"
                         style={{
                             width: '210mm',
@@ -1486,33 +1937,130 @@ export default function NoteViewerPage() {
 
                         {/* Page content — only this page's blocks */}
                         <div className="relative flex-1 space-y-4" style={{ zIndex: 2, padding: `${pageIdx === 0 ? 40 : 85}px 48px 24px` }}>
-                            {(() => {
-                                const isImg = (b: any) => b?.type === 'image' || b?.type === 'ai-image'
-                                const groups: number[][] = []
-                                let gi = 0
-                                while (gi < blockIndices.length) {
-                                    const idx = blockIndices[gi]
-                                    const nIdx = gi + 1 < blockIndices.length ? blockIndices[gi + 1] : null
-                                    if (isImg(contentBlocks[idx]) && nIdx !== null && isImg(contentBlocks[nIdx])) {
-                                        groups.push([idx, nIdx])
-                                        gi += 2
-                                    } else {
-                                        groups.push([idx])
-                                        gi += 1
-                                    }
-                                }
-                                return groups.map((grp, gIdx) => {
-                                    if (grp.length === 2) {
+                                    {(() => {
+                                        const isImg = (b: any) => b && (b.type === 'image' || b.type === 'ai-image')
+                                        const groups: number[][] = []
+                                        let gi = 0
+                                        
+                                        // Build groups: pairs of images or single blocks
+                                        while (gi < blockIndices.length) {
+                                            const idx = blockIndices[gi]
+                                            const nextIdx = gi + 1 < blockIndices.length ? blockIndices[gi + 1] : null
+                                            
+                                            const currentBlock = contentBlocks[idx]
+                                            const nextBlock = nextIdx !== null ? contentBlocks[nextIdx] : null
+
+                                            if (isImg(currentBlock) && isImg(nextBlock)) {
+                                                console.log(`🖼️ [Grouping] Found image pair at page ${pageIdx}: ${idx}, ${nextIdx}`)
+                                                groups.push([idx, nextIdx!])
+                                                gi += 2
+                                            } else {
+                                                groups.push([idx])
+                                                gi += 1
+                                            }
+                                        }
+
+                                        return groups.map((grp, gIdx) => {
+                                            if (grp.length === 2) {
+                                                const h = designConfig.hex
+                                                const block1 = contentBlocks[grp[0]]
+                                                const block2 = contentBlocks[grp[1]]
+
+                                                const src1 = block1.type === 'ai-image' ? (block1 as any).imageUrl : (block1 as any).asset?.url
+                                                const src2 = block2.type === 'ai-image' ? (block2 as any).imageUrl : (block2 as any).asset?.url
+
+                                                if (!src1 || !src2) {
+                                                    return (
+                                                        <div key={`pg${pageIdx}-grp${gIdx}`} style={{ display: 'flex', gap: '10px' }}>
+                                                            <div style={{ flex: 1 }}>{renderBlock(block1)}</div>
+                                                            <div style={{ flex: 1 }}>{renderBlock(block2)}</div>
+                                                        </div>
+                                                    )
+                                                }
+
                                         return (
-                                            <div key={`pg${pageIdx}-grp${gIdx}`} style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
-                                                <div style={{ flex: 1, minWidth: 0 }}>{renderBlock(contentBlocks[grp[0]])}</div>
-                                                <div style={{ flex: 1, minWidth: 0 }}>{renderBlock(contentBlocks[grp[1]])}</div>
+                                            <div key={`pg${pageIdx}-grp${gIdx}`} style={{
+                                                position: 'relative',
+                                                margin: '40px 0 60px',
+                                                height: '380px',
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                justifyContent: 'center',
+                                                zIndex: 5
+                                            }}>
+                                                {/* Connecting decorative line */}
+                                                <div style={{
+                                                    position: 'absolute',
+                                                    top: '50%', left: '10%', right: '10%',
+                                                    height: '2px',
+                                                    background: `linear-gradient(90deg, transparent, ${h.accentBorder}, transparent)`,
+                                                    transform: 'rotate(-10deg)',
+                                                    opacity: 0.2
+                                                }} />
+
+                                                {/* First Image (Top-Left Offset) */}
+                                                <div style={{
+                                                    position: 'absolute',
+                                                    top: '0',
+                                                    left: '10px',
+                                                    width: '300px',
+                                                    zIndex: 6,
+                                                    transform: 'rotate(-2.5deg)',
+                                                }}>
+                                                    <div style={{
+                                                        background: '#fff',
+                                                        padding: '10px',
+                                                        borderRadius: '16px',
+                                                        boxShadow: '0 20px 50px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.05)',
+                                                        borderBottom: `6px solid ${h.accent}`
+                                                    }}>
+                                                        <img src={src1} crossOrigin="anonymous" style={{ width: '100%', height: '240px', objectFit: 'cover', borderRadius: '10px', display: 'block' }} />
+                                                    </div>
+                                                </div>
+
+                                                {/* Second Image (Bottom-Right Offset) */}
+                                                <div style={{
+                                                    position: 'absolute',
+                                                    bottom: '0',
+                                                    right: '10px',
+                                                    width: '300px',
+                                                    zIndex: 7,
+                                                    transform: 'rotate(2deg)',
+                                                }}>
+                                                    <div style={{
+                                                        background: '#fff',
+                                                        padding: '10px',
+                                                        borderRadius: '16px',
+                                                        boxShadow: '0 25px 60px rgba(0,0,0,0.16), 0 0 0 1px rgba(0,0,0,0.05)',
+                                                        borderTop: `6px solid ${h.accentBorder}`
+                                                    }}>
+                                                        <img src={src2} crossOrigin="anonymous" style={{ width: '100%', height: '240px', objectFit: 'cover', borderRadius: '10px', display: 'block' }} />
+                                                    </div>
+
+                                                    {/* Comparative View Badge — Matches Screenshot */}
+                                                    <div style={{
+                                                        position: 'absolute',
+                                                        top: '-15px',
+                                                        right: '-10px',
+                                                        background: h.accent,
+                                                        color: '#fff',
+                                                        fontSize: '10px',
+                                                        fontWeight: 900,
+                                                        padding: '6px 14px',
+                                                        borderRadius: '30px',
+                                                        boxShadow: '0 8px 20px rgba(0,0,0,0.25)',
+                                                        textTransform: 'uppercase',
+                                                        letterSpacing: '0.06em',
+                                                        zIndex: 10,
+                                                        border: '2px solid #fff'
+                                                    }}>COMPARATIVE VIEW</div>
+                                                </div>
                                             </div>
                                         )
                                     }
                                     return (
                                         <div key={`pg${pageIdx}-grp${gIdx}`}>
-                                            {contentBlocks[grp[0]] && renderBlock(contentBlocks[grp[0]])}
+                                            {contentBlocks[grp[0]] && renderBlock(contentBlocks[grp[0]], grp[0])}
                                         </div>
                                     )
                                 })

@@ -9,6 +9,9 @@ import { translateScript } from "@/lib/translate";
 import { triggerRender } from "@/lib/video-render";
 import { and, eq, or } from "drizzle-orm";
 import { inngest } from "./client";
+import { groq } from "@/config/groq";
+import { shortsLLM } from "@/lib/shorts-llm";
+import { searchWeb } from "@/lib/web-search";
 
 // ─── Lightweight MP4 duration prober (works on serverless, no ffprobe) ────────
 // Fetches up to 2 MB of the file and walks MP4 box headers looking for
@@ -313,61 +316,106 @@ function chunkText(text: string, maxLen = 2200): string[] {
     return chunks;
 }
 
+/** Read all available Sarvam API keys from env (SARVAM_API_KEY, SARVAM_API_KEY_2, ...) */
+function getSarvamKeys(): string[] {
+    const keys: string[] = [];
+    if (process.env.SARVAM_API_KEY) keys.push(process.env.SARVAM_API_KEY);
+    for (let i = 2; i <= 10; i++) {
+        const k = process.env[`SARVAM_API_KEY_${i}`];
+        if (k) keys.push(k);
+    }
+    return keys;
+}
+
+/**
+ * Call Sarvam TTS with full key rotation.
+ * - 402 (quota exhausted): immediately rotates to next key.
+ * - 502/503/504/timeout: retries same key up to `transientRetries` times.
+ * - Other errors: rotates to next key.
+ * Tries every available key before throwing.
+ */
 async function callSarvamTTS(
     text: string,
     speaker: string,
     language: string,
     pace: number = 1.05,
     temperature: number = 0.6,
-    retries = 3
+    transientRetries = 2
 ): Promise<Buffer> {
+    const keys = getSarvamKeys();
+    if (keys.length === 0) throw new Error('No SARVAM_API_KEY found in environment variables');
+
     let lastErr: Error | null = null;
-    let delay = 2000;
 
-    for (let i = 0; i <= retries; i++) {
-        try {
-            if (i > 0) {
-                console.log(`🔄 TTS retry ${i}/${retries}, waiting ${delay}ms...`);
-                await new Promise(r => setTimeout(r, delay));
-                delay = Math.min(delay * 2, 10000);
+    for (let ki = 0; ki < keys.length; ki++) {
+        const apiKey = keys[ki];
+        const keyLabel = ki === 0 ? 'primary' : `key_${ki + 1}`;
+        let delay = 2000;
+
+        for (let attempt = 0; attempt <= transientRetries; attempt++) {
+            try {
+                if (attempt > 0) {
+                    console.log(`🔄 TTS [${keyLabel}] retry ${attempt}/${transientRetries}, waiting ${delay}ms...`);
+                    await new Promise(r => setTimeout(r, delay));
+                    delay = Math.min(delay * 2, 10000);
+                }
+
+                const res = await fetch('https://api.sarvam.ai/text-to-speech', {
+                    method: 'POST',
+                    headers: {
+                        'api-subscription-key': apiKey,
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        text,
+                        target_language_code: language,
+                        speaker,
+                        pace,
+                        speech_sample_rate: 22050,
+                        enable_preprocessing: true,
+                        model: 'bulbul:v3',
+                        temperature,
+                        output_audio_codec: 'wav',
+                    }),
+                    signal: AbortSignal.timeout(30000),
+                });
+
+                if (!res.ok) {
+                    const body = await res.text();
+                    const err = new Error(`Sarvam TTS ${res.status}: ${body}`);
+                    // 402 = quota exhausted → rotate to next key immediately
+                    if (res.status === 402 || res.status === 429) {
+                        console.warn(`⚠️ Sarvam TTS [${keyLabel}] quota exhausted (${res.status}) — rotating to next key...`);
+                        lastErr = err;
+                        break; // exit attempt loop → try next key
+                    }
+                    throw err;
+                }
+
+                const data = await res.json();
+                if (!data.audios?.[0]) throw new Error('No audio in Sarvam response');
+
+                if (ki > 0) console.log(`✅ Sarvam TTS succeeded with [${keyLabel}] after key rotation.`);
+                return Buffer.from(data.audios[0], 'base64');
+
+            } catch (e: any) {
+                lastErr = e;
+                const isQuota = /402|429|insufficient_quota|No credits/i.test(e.message);
+                if (isQuota) {
+                    console.warn(`⚠️ Sarvam TTS [${keyLabel}] quota error — rotating to next key...`);
+                    break; // exit attempt loop → try next key
+                }
+                const isTransient = /502|503|504|timeout|ECONNRESET/i.test(e.message);
+                if (!isTransient || attempt === transientRetries) {
+                    console.warn(`⚠️ Sarvam TTS [${keyLabel}] non-retryable error — rotating key: ${e.message}`);
+                    break; // rotate key
+                }
+                console.warn(`⚠️ Sarvam TTS [${keyLabel}] attempt ${attempt + 1} failed (transient): ${e.message}`);
             }
-
-            const res = await fetch('https://api.sarvam.ai/text-to-speech', {
-                method: 'POST',
-                headers: {
-                    'api-subscription-key': process.env.SARVAM_API_KEY!,
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    text,
-                    target_language_code: language,
-                    speaker,
-                    pace: pace,
-                    speech_sample_rate: 22050,
-                    enable_preprocessing: true,
-                    model: "bulbul:v3",
-                    temperature: temperature,
-                    output_audio_codec: "wav",
-                }),
-                signal: AbortSignal.timeout(30000),
-            });
-
-            if (!res.ok) {
-                throw new Error(`Sarvam TTS ${res.status}: ${await res.text()}`);
-            }
-
-            const data = await res.json();
-            if (!data.audios?.[0]) throw new Error('No audio in Sarvam response');
-
-            return Buffer.from(data.audios[0], 'base64');
-        } catch (e: any) {
-            lastErr = e;
-            const retryable = /502|503|504|timeout|ECONNRESET/i.test(e.message);
-            if (!retryable || i === retries) throw e;
-            console.warn(`⚠️ TTS attempt ${i + 1} failed: ${e.message}`);
         }
     }
-    throw lastErr!;
+
+    throw lastErr ?? new Error('Sarvam TTS: all keys exhausted');
 }
 
 function mergeWavBuffers(buffers: Buffer[]): Buffer {
@@ -478,6 +526,69 @@ export const generateShortVideo = inngest.createFunction(
             return series;
         });
 
+        // Step 1.5: Discover a unique topic with RAG (Tavily + Wikipedia) to avoid duplicates and generic/limited knowledge
+        const chosenTopic = await step.run("discover-unique-topic", async () => {
+            if (customTopic) {
+                console.log(`🎯 Custom topic provided by user: "${customTopic}"`);
+                return customTopic;
+            }
+            if (studioPayload?.scriptData?.videoTitle) {
+                console.log(`🎬 Studio mode: using pre-edited script title: "${studioPayload.scriptData.videoTitle}"`);
+                return studioPayload.scriptData.videoTitle;
+            }
+
+            console.log(`🔍 AI discovering unique topic for series niche: "${seriesData.niche}", title: "${seriesData.title}"`);
+
+            // Fetch already generated video titles in this series
+            const existingVideos = await db
+                .select({ title: shortVideoAssets.videoTitle })
+                .from(shortVideoAssets)
+                .where(eq(shortVideoAssets.seriesId, seriesId));
+            const coveredTitles = existingVideos
+                .map(v => v.title)
+                .filter(Boolean)
+                .slice(0, 25);
+
+            // Fetch live web research around the series theme/niche (FAST mode — no deep crawl, just snippets for topic picking)
+            const searchQuery = `${seriesData.title} ${seriesData.niche} unique lesser known facts history mysteries`;
+            const research = await searchWeb(searchQuery, { deepCrawl: false });
+            const researchContext = research.contextBlock || '';
+
+            const alreadyCoveredText = coveredTitles.length > 0
+                ? `\nHere are the video topics already covered in this series (NEVER repeat these or talk about these exact things):\n${coveredTitles.map(t => `- ${t}`).join('\n')}`
+                : '';
+
+            const systemPrompt = `You are a viral content strategist for short-form videos. Your job is to choose ONE highly unique, engaging, and specific video topic/title.`;
+            const userPrompt = `Series Title/Theme: "${seriesData.title}"
+Niche: "${seriesData.niche}"
+${alreadyCoveredText}
+
+${researchContext ? `REAL-TIME WEB RESEARCH context:\n${researchContext}\n` : ''}
+
+Task:
+Pick ONE highly specific, fascinating, and unique video topic or title that:
+1. Directly fits the series theme "${seriesData.title}" and niche "${seriesData.niche}".
+2. Has NOT been covered in the list of already covered topics above.
+3. Offers unique/bizarre/surprising facts or stories grounded in the real-time web research provided.
+4. Avoids generic overviews (like "overview of Golden Temple") and instead picks a highly specific aspect (e.g., "The mysterious foundation stone laid by a Muslim Sufi saint", "The legendary missing treasures of Amritsar").
+5. Reads like an engaging, click-worthy YouTube Shorts title.
+
+Reply with ONLY the chosen topic/title. Do NOT include any markdown code blocks, quotes, punctuation at the end, or explanation. Max 12 words.`;
+
+            try {
+                const result = await shortsLLM.text(systemPrompt, userPrompt, {
+                    temperature: 0.9,
+                    maxTokens: 50,
+                });
+                const picked = result?.trim().replace(/^["']|["']$/g, '') || '';
+                console.log(`🎯 AI chose unique topic: "${picked}"`);
+                return picked || seriesData.title;
+            } catch (err: any) {
+                console.warn('⚠️ Unique topic discovery failed, falling back to series title:', err.message);
+                return seriesData.title;
+            }
+        });
+
         // Determine voice, language & caption style: use studioPayload if provided, otherwise series defaults
         const selectedVoice = studioPayload?.voice ?? seriesData.voice;
         const selectedLanguage = studioPayload?.language ?? seriesData.language;
@@ -528,93 +639,136 @@ export const generateShortVideo = inngest.createFunction(
                 "a debunking of a popular myth with surprising evidence",
             ];
             const angle = contentAngles[seed % contentAngles.length];
-            const randomTopicTwist = customTopic
-                ? `SPECIFIC TOPIC (USER REQUEST): The user wants this video to be specifically about: "${customTopic}". Focus entirely on this topic. Make it engaging, viral, and packed with fascinating details. Seed: ${seed}`
-                : `UNIQUE ANGLE: Frame this video as ${angle}. Seed: ${seed}`;
+            
+            // ── DEEP-CRAWL RAG: full web research + page extraction + fact distillation ─────
+            console.log(`🌐 Deep-Crawl RAG research on: "${chosenTopic}"...`);
+            const webResearch = await searchWeb(chosenTopic, { deepCrawl: true });
+            const webContext = webResearch.contextBlock || '';
+            if (webResearch.factSheet) {
+                console.log(`📋 Fact sheet: ${webResearch.factSheet.split('\n').filter((l: string) => l.startsWith('•')).length} verified facts from ${webResearch.sources.length} sources`);
+            }
+
+            const randomTopicTwist = `SPECIFIC TOPIC: The video MUST be specifically about: "${chosenTopic}". Focus entirely on this topic. Make it engaging, viral, and packed with fascinating details. Angle: ${angle}. Seed: ${seed}`;
             // ─────────────────────────────────────────────────────────
 
-            const systemPrompt = `You are a world-class viral storyteller. Write a ${durationLabel} script.
+            const systemPrompt = `You are a world-class documentary narrator and viral storyteller. Write a ${durationLabel} short-form video script.
 
 🚨 SUPER CRITICAL RULES:
 1. Output ONLY a valid JSON object.
 2. Your JSON MUST be wrapped exactly in <json> and </json> tags.
 3. NEVER output markdown code blocks (like \`\`\`json).
-4. Write ONLY in ENGLISH. Use clear, concise English that translates well to other languages.
+4. Write ONLY in ENGLISH. Clear, concise English that translates well to other languages.
 
-🧠 SCENE PLANNING (DO THIS MENTALLY BEFORE WRITING):
-Before writing ANY narration, plan 6 DISTINCT subtopics that directly relate to the video title. Each MUST cover a DIFFERENT aspect:
-- scene1: A specific shocking event, fact, or question (the hook)
-- scene2: Origin story, founding, or historical background with specific dates and names
-- scene3: A specific conflict, battle, war, controversy, or dramatic turning point
-- scene4: A specific person, innovation, discovery, or lesser-known fact with real details
-- scene5: Modern impact, recent events, or current relevance with specific data
-- scene6: Powerful emotional conclusion tying all scenes together
-NEVER waste a scene on generic tourism, food, or culture UNLESS the title specifically asks about those topics.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📖 STEP 1 — IDENTIFY CENTRAL NARRATIVE THREAD (MANDATORY BEFORE WRITING)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Before writing ANY narration, read the VERIFIED RESEARCH FACTS block carefully. Find the CENTRAL NARRATIVE — a single overarching story arc (e.g. "rise, betrayal, and rebirth", "a city built on blood that became a symbol of peace", "the secret that changed everything"). EVERY scene must be a CHAPTER of this central story.
 
-🔴 TOPIC ADHERENCE (CRITICAL):
-- Every scene MUST directly relate to the video TITLE. If the title says "turbulent history", do NOT write about food or tourism.
-- Ask yourself: "Does this scene deliver on the PROMISE of the title?" If not, REWRITE it.
+Plan 6 scenes as story chapters — each must DIRECTLY follow from the previous:
+- scene1 (HOOK): A jaw-dropping fact, bold claim, or provocative question that OPENS the central story.
+- scene2 (ORIGIN): How/when/why it all began — specific dates, founders, causes.
+- scene3 (CONFLICT/TURNING POINT): The pivotal crisis, war, tragedy, or discovery that changed the story.
+- scene4 (DEPTH): A specific person, secret, lesser-known detail, or hidden consequence that deepens the story.
+- scene5 (CONSEQUENCE/MODERN): How the events of scenes 1-4 echo today — real data, current impact.
+- scene6 (EMOTIONAL CLOSE): A resonant conclusion tying ALL scenes together. End with one unforgettable sentence.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🔗 STEP 2 — NARRATIVE BRIDGING (NON-NEGOTIABLE)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Each scene narration MUST end with a 1-sentence BRIDGE that naturally leads into the NEXT scene topic. The viewer must feel a seamless flow — NOT a jarring topic switch.
+Examples of good bridges:
+  • scene1→2: "But to understand HOW this happened, we need to go back to [year]..."
+  • scene2→3: "What started as [peaceful thing] was about to face its greatest test."
+  • scene3→4: "And one man changed everything — but history almost forgot his name."
+  • scene4→5: "That decision still echoes today in ways most people never realize."
+  • scene5→6: "Which brings us to the question that defines this entire story:"
+Do NOT begin the next scene by repeating the bridge topic — it already carries over.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🔴 TOPIC ADHERENCE (CRITICAL)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+- Every scene MUST directly relate to the video TITLE AND the CENTRAL NARRATIVE.
+- Never drift into generic tourism, food, or culture unless the title specifically demands it.
+- Ask yourself before every sentence: "Does this advance the central story?"
 
 SCRIPT REQUIREMENTS:
-1. TOTAL LENGTH: 310-350 words of narration. Each scene MUST have 50-60 words.
-2. STRUCTURE: You MUST use explicit keys ("scene1", "scene2"..."scene6") instead of an array.
-3. LANGUAGE & NATIVE FLOW: Write ENTIRELY in ENGLISH. Natural, native-sounding phrasing.
-4. NARRATION STYLE: No meta-commentary, no "Scene 1", no "Welcome". Start directly with the hook. Each scene MUST have 50-60 words (4-5 rich sentences) packed with SPECIFIC facts, real dates, real names, real numbers.
-   SCENE STRUCTURE (MANDATORY):
-   - scene1 (HOOK): Jaw-dropping fact, bold claim, or provocative question. NO greetings.
-   - scene2-scene5 (BODY): Escalating intensity. Each scene = COMPLETELY DIFFERENT subtopic. Never repeat or rephrase.
-   - scene6 (CONCLUSION): Powerful, emotionally resonant. Ties key points from scenes 1-5. Memorable closing line. 50-60 words.
-5. IMAGE PROMPTS: For 'real_entity' scenes — 30-50 word ultra-detailed photorealistic prompts (lighting, angle, texture, atmosphere, lens, DSLR style).
-6. VIDEO PROMPTS: For EVERY scene — 30-50 word cinematic description (camera movements, effects). NO text/titles/words/labels in video.
-7. THUMBNAIL PROMPT: 30-40 words, stunning, click-worthy. NO TEXT, NO WORDS, NO LETTERS.
-8. SCENE CATEGORIZATION:
+1. TOTAL LENGTH: 310-350 words. Each scene MUST have 50-60 words.
+2. STRUCTURE: Use explicit keys ("scene1"..."scene6") — NOT an array.
+3. NARRATION STYLE: No meta-commentary, no "Scene 1", no "Welcome". Start the HOOK directly with a fact or bold claim. Every sentence must contain a SPECIFIC fact, date, name, or number.
+4. IMAGE PROMPTS: For 'real_entity' scenes — 30-50 word ultra-detailed photorealistic prompts (lighting, angle, texture, atmosphere, lens).
+5. VIDEO PROMPTS: For EVERY scene — 30-50 word cinematic description (camera movements, effects). NO text/titles/words/labels.
+6. THUMBNAIL PROMPT: 30-40 words, stunning, click-worthy. NO TEXT, NO WORDS.
+7. SCENE CATEGORIZATION:
    - "real_entity": real person, monument, artifact, historical site, landmark
    - "living_thing": fictional/generic people, animals
    - "general": abstract concepts, graphics, visual effects
-9. TTS FORMATTING: No ellipses, em-dashes, en-dashes, colons, semicolons, ALL CAPS, parenthetical asides, or elongated words. Clean short sentences only.
+8. TTS FORMATTING: No ellipses, em-dashes, en-dashes, colons, semicolons, ALL CAPS, or parenthetical asides. Short clean sentences only.
 
-JSON SCHEMA:
-Do NOT use a "scenes" array. Use exact keys (scene1, scene2, etc.). Return exactly this wrapped in <json> tags:
-
+JSON SCHEMA (wrap in <json> tags):
 <json>
 {
   "videoTitle": "compelling viral title",
-  "thumbnailPrompt": "A stunning, click-worthy visual prompt...",
+  "thumbnailPrompt": "A stunning, click-worthy visual...",
   "totalScenes": ${sceneCount},
-  "totalWordCount": 250,
+  "totalWordCount": 330,
   "scene1": {
-    "narration": "Gripping hook with a specific shocking fact...",
+    "narration": "Hook sentence with shocking fact... [4-5 sentences] ...Bridge to scene2.",
     "imagePrompt": "Ultra-detailed photorealistic description...",
-    "videoPrompt": "Cinematic camera movement description — NO TEXT...",
+    "videoPrompt": "Cinematic camera movement — NO TEXT...",
     "sceneCategory": "real_entity",
     "duration": 15,
-    "wordCount": 45
+    "wordCount": 55
   },
-  "scene2": { "narration": "DIFFERENT subtopic from scene1...", ... },
+  "scene2": { "narration": "Origin story... [bridge to scene3].", ... },
   "scene3": { ... },
   "scene4": { ... },
   "scene5": { ... },
-  "scene6": { ... }
+  "scene6": { "narration": "Emotional close that echoes scenes 1-5. One unforgettable final sentence.", ... }
 }
 </json>
 
 🔴 ANTI-REPETITION (ABSOLUTELY CRITICAL):
 - NEVER repeat the same idea, phrase, or sentence across scenes.
-- BANNED phrases (NEVER use): "this place is known for its rich history", "attracts tourists from around the world", "a unique and fascinating destination", "a memorable experience", "rich history and culture", "rich history, culture and traditional cuisine"
-- Each scene MUST contain at least 3 SPECIFIC facts (dates, names, numbers) not in any other scene.
-- Generic summarizing like "this place is beautiful and attracts tourists" is STRICTLY FORBIDDEN.
+- BANNED phrases: "rich history", "attracts tourists", "unique and fascinating", "memorable experience", "let us explore", "in conclusion".
+- Each scene MUST contain at least 3 SPECIFIC facts (dates, names, numbers) not used in any other scene.
 
 🚨 CRITICAL: Finish all ${sceneCount} scenes. Output ONLY <json>{...}</json>.`;
 
-            const userPrompt = `Topic: "${seriesData.title}"
+            const userPrompt = `Topic: "${chosenTopic}"
 Language: ENGLISH
 ${randomTopicTwist}
 
-IMPORTANT: Before writing, plan 6 DISTINCT subtopics for the 6 scenes. Each subtopic must cover a DIFFERENT angle directly related to the title. Do NOT repeat information across scenes. Every sentence must contain a SPECIFIC fact, date, name, or number.
+${webContext ? `\n${webContext}\n` : ''}
 
-You MUST provide 310-350 total words across all 6 scenes. Each scene MUST have 50-60 words. Concise but information-dense.
-You MUST use explicit keys (scene1, scene2, etc.). Do NOT use an array for scenes.
-Do NOT use "content framing" (like "Let's explore", "Scene 1"). Write pure narration only.
+══════════════════════════════════════════════
+SINGLE-TOPIC DEEP DIVE — THE CARDINAL RULE:
+══════════════════════════════════════════════
+ALL 6 scenes are about THE SAME topic: "${chosenTopic}"
+Think of this as a 6-chapter mini-documentary. Do NOT jump to different subjects.
+Instead, PEEL DEEPER into this ONE topic with each scene — like an onion:
+
+  scene1 → HOOK: The single most shocking/surprising fact about this topic.
+  scene2 → ORIGIN: When did this begin? Who started it? Why? (exact dates, names)
+  scene3 → CRISIS: The darkest or most dramatic event this topic has ever faced.
+  scene4 → HIDDEN LAYER: A secret, forgotten person, or little-known detail that changes everything.
+  scene5 → MODERN ECHO: How this topic STILL shapes the world or people's lives today.
+  scene6 → EMOTIONAL TRUTH: The human meaning behind it all. End with one unforgettable sentence.
+
+BRIDGE RULE (MANDATORY):
+Each scene must begin by directly referencing the previous scene's ending idea, creating a seamless narrative bridge. Scene 1 must end with a hook that Scene 2 resolves. Think of it as one continuous story, not 6 separate segments.
+Every scene narration MUST end with a 1-sentence bridge leading naturally into the next layer.
+  scene1→2: "But to understand how this happened, we must go back to [year/event]."
+  scene2→3: "That foundation was about to face its most devastating test."
+  scene3→4: "Buried in that chaos was a secret almost no one remembers."
+  scene4→5: "And that forgotten truth still ripples through the world today."
+  scene5→6: "Which brings us to the question this entire story has been building toward:"
+Do NOT start the next scene by repeating the bridge — the listener already heard it.
+
+WRITING RULES:
+- 310-350 total words. Each scene: 50-60 words (including the bridge sentence).
+- Every sentence must use a SPECIFIC fact, date, name, or number from the VERIFIED RESEARCH block above.
+- Use explicit keys (scene1, scene2 … scene6). Do NOT use an array.
+- No framing phrases ("Let's explore", "Scene 1", "Welcome"). Pure narration only.
 
 OUTPUT: JSON object wrapped in <json> and </json> tags.`;
 
@@ -624,7 +778,7 @@ OUTPUT: JSON object wrapped in <json> and </json> tags.`;
             let bestWordCount = 0;
 
             for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-                console.log(`🔄 Script generation attempt ${attempt}/${MAX_ATTEMPTS} (Groq llama-3.3-70b-versatile)...`);
+                console.log(`🔄 Script generation attempt ${attempt}/${MAX_ATTEMPTS} (OpenRouter gpt-oss-120b:free)...`);
 
                 try {
                     const _sceneSchema = {
@@ -640,9 +794,9 @@ OUTPUT: JSON object wrapped in <json> and </json> tags.`;
                         },
                         required: ['narration', 'imagePrompt', 'videoPrompt', 'sceneCategory'],
                     };
-                    const result = await aiFallback.json(systemPrompt, userPrompt, {
+                    const result = await shortsLLM.json(systemPrompt, userPrompt, {
                         temperature: attempt === 1 ? 0.7 : (attempt === 2 ? 0.8 : 0.85),
-                        maxOutputTokens: 8192,
+                        maxTokens: 8192,
                     });
 
                     // ── Map explicit keys back to scenes array ────────────────
@@ -706,7 +860,7 @@ OUTPUT: JSON object wrapped in <json> and </json> tags.`;
                 bestResult.totalWordCount = bestWordCount;
             }
 
-            console.log(`✅ Script finalized (Groq llama-3.3-70b-versatile): "${bestResult.videoTitle}" | ${bestResult.scenes?.length} scenes | ${bestWordCount} words ≈ ${Math.round(bestWordCount / WORDS_PER_SEC)}s`);
+            console.log(`✅ Script finalized (OpenRouter gpt-oss-120b:free): "${bestResult.videoTitle}" | ${bestResult.scenes?.length} scenes | ${bestWordCount} words ≈ ${Math.round(bestWordCount / WORDS_PER_SEC)}s`);
 
             // ── Translate to target language if not English ─────────────────
             if (selectedLanguage && !selectedLanguage.startsWith('en') && bestResult.scenes?.length > 0) {
@@ -1364,13 +1518,20 @@ OUTPUT: JSON object wrapped in <json> and </json> tags.`;
             const sceneThumbnailUrls: string[] = new Array(totalScenes).fill("");
             const sceneVideoDurations: number[] = new Array(totalScenes).fill(5);
 
-            // Force-stop check before starting parallel generation
-            const [currentStatus] = await db.select({ status: shortVideoSeries.status })
-                .from(shortVideoSeries)
-                .where(eq(shortVideoSeries.seriesId, seriesId));
-            if (!currentStatus || currentStatus.status === "completed" || currentStatus.status === "cancelled") {
-                console.log(`🛑 Force stop detected before video generation! Aborting.`);
-                return { sceneVideoUrls, sceneThumbnailUrls, sceneVideoDurations };
+            // Force-stop check: only abort if the user explicitly cancelled
+            // (status === "cancelled"). Do NOT abort on "completed" — that just
+            // means a previous run finished. Also never abort on DB errors.
+            try {
+                const [currentStatus] = await db.select({ status: shortVideoSeries.status })
+                    .from(shortVideoSeries)
+                    .where(eq(shortVideoSeries.seriesId, seriesId));
+                if (currentStatus?.status === "cancelled") {
+                    console.log(`🛑 Explicit cancellation detected — aborting scene video generation.`);
+                    return { sceneVideoUrls, sceneThumbnailUrls, sceneVideoDurations };
+                }
+            } catch (dbErr: any) {
+                // DB transient error — log and continue, never abort the pipeline
+                console.warn(`⚠️ Force-stop check DB query failed (continuing anyway): ${dbErr?.message}`);
             }
 
             // Build scene configs for parallel generation
@@ -1389,15 +1550,16 @@ OUTPUT: JSON object wrapped in <json> and </json> tags.`;
                 let videoPrompt = scene.videoPrompt || scene.imagePrompt || scene.narration || "";
 
                 // Categorize what might be in the scene to apply the right motion type
+                const promptForCategorization = (scene.videoPrompt || scene.imagePrompt || "").toLowerCase();
                 const pLower = videoPrompt.toLowerCase();
                 let motionSuffix = "";
-                if (/\b(person|woman|man|girl|boy|people|face)\b/.test(pLower)) {
+                if (/\b(person|woman|man|girl|boy|people|face)\b/.test(promptForCategorization || pLower)) {
                     motionSuffix = " The person breathes naturally with subtle chest rise and fall. Eyes blink softly. Head tilts slightly. Hair strands drift gently. Fingers twitch.";
-                } else if (/\b(animal|dog|cat|bird|horse|fish|tiger)\b/.test(pLower)) {
+                } else if (promptForCategorization && /\b(animal|dog|cat|bird|horse|fish|tiger|lion|bear|wolf|rabbit|deer|monkey|fox|elephant|snake)\b/.test(promptForCategorization)) {
                     motionSuffix = " The animal breathes with visible ribcage expansion. Ears flick. Fur ripples in breeze. Eyes track sideways.";
-                } else if (/\b(water|ocean|sea|river|lake|rain|wave)\b/.test(pLower)) {
+                } else if (/\b(water|ocean|sea|river|lake|rain|wave)\b/.test(promptForCategorization || pLower)) {
                     motionSuffix = " Water surface ripples expand outward. Reflections shimmer and distort. Foam edges creep forward. Light dances across the water.";
-                } else if (/\b(tree|plant|flower|grass|leaf|forest)\b/.test(pLower)) {
+                } else if (/\b(tree|plant|flower|grass|leaf|forest)\b/.test(promptForCategorization || pLower)) {
                     motionSuffix = " Leaves rustle and turn. Branches bob gently up and down in breeze. Grass blades bend in rolling wave patterns.";
                 } else {
                     motionSuffix = " Ambient dust particles drift through visible light beams. Subtle atmospheric shimmer across all surfaces. Light rays sweep slowly. Shadows crawl.";

@@ -1,0 +1,98 @@
+[2026-05-25T08:10:15.709Z] 🚀 Render started. Slides: 7, Frames: 95818
+[2026-05-25T08:10:15.722Z] 📁 Output: A:\React Projects\9. AI Video Course Generator\ai-video-course-generator\public\renders\chapter-intro-to-react.mp4
+[2026-05-25T08:10:15.723Z] 🎵 Downloading 7 audio files...
+[2026-05-25T08:10:15.732Z]   slide[0] audio → file:///A:/React%20Projects/9.%20AI%20Video%20Course%20Generator/ai-video-course-generator/public/tmp/chapter-audio/intro-to-react/slide-0.mp3
+[2026-05-25T08:10:15.734Z]   slide[1] audio → file:///A:/React%20Projects/9.%20AI%20Video%20Course%20Generator/ai-video-course-generator/public/tmp/chapter-audio/intro-to-react/slide-1.mp3
+[2026-05-25T08:10:15.735Z]   slide[2] audio → file:///A:/React%20Projects/9.%20AI%20Video%20Course%20Generator/ai-video-course-generator/public/tmp/chapter-audio/intro-to-react/slide-2.mp3
+[2026-05-25T08:10:15.737Z]   slide[3] audio → file:///A:/React%20Projects/9.%20AI%20Video%20Course%20Generator/ai-video-course-generator/public/tmp/chapter-audio/intro-to-react/slide-3.mp3
+[2026-05-25T08:10:15.739Z]   slide[4] audio → file:///A:/React%20Projects/9.%20AI%20Video%20Course%20Generator/ai-video-course-generator/public/tmp/chapter-audio/intro-to-react/slide-4.mp3
+[2026-05-25T08:10:15.740Z]   slide[5] audio → file:///A:/React%20Projects/9.%20AI%20Video%20Course%20Generator/ai-video-course-generator/public/tmp/chapter-audio/intro-to-react/slide-5.mp3
+[2026-05-25T08:10:15.742Z]   slide[6] audio → file:///A:/React%20Projects/9.%20AI%20Video%20Course%20Generator/ai-video-course-generator/public/tmp/chapter-audio/intro-to-react/slide-6.mp3
+[2026-05-25T08:10:15.745Z] ✅ Audio downloads complete
+[2026-05-25T08:10:15.748Z] 📦 Creating Remotion bundle (first time takes ~60s, then cached)...
+[2026-05-25T08:10:21.121Z] ✅ Bundle ready: C:\Users\HP\AppData\Local\Temp\remotion-webpack-bundle-bZYPP3
+[2026-05-25T08:10:21.122Z] 🎞️ Selecting composition 'CourseVideo'...
+[2026-05-25T08:10:23.054Z] ✅ Composition found: CourseVideo (95818 frames)
+[2026-05-25T08:10:23.055Z] 🎬 Starting renderMedia → A:\React Projects\9. AI Video Course Generator\ai-video-course-generator\public\renders\chapter-intro-to-react.mp4
+[2026-05-25T08:10:29.281Z] ❌ Render FAILED: Error while downloading file:///A:/React%20Projects/9.%20AI%20Video%20Course%20Generator/ai-video-course-generator/public/tmp/chapter-audio/intro-to-react/slide-0.mp3: Error: Can only download URLs starting with http:// or https://, got "file:///A:/React%20Projects/9.%20AI%20Video%20Course%20Generator/ai-video-course-generator/public/tmp/chapter-audio/intro-to-react/slide-0.mp3"
+    at getClient (file:///A:/React%20Projects/9.%20AI%20Video%20Course%20Generator/ai-video-course-generator/node_modules/@remotion/renderer/dist/esm/index.mjs:470:9)
+    at file:///A:/React%20Projects/9.%20AI%20Video%20Course%20Generator/ai-video-course-generator/node_modules/@remotion/renderer/dist/esm/index.mjs:474:20
+    at new Promise (<anonymous>)
+    at readFileWithoutRedirect (file:///A:/React%20Projects/9.%20AI%20Video%20Course%20Generator/ai-video-course-generator/node_modules/@remotion/renderer/dist/esm/index.mjs:473:10)
+    at readFile (file:///A:/React%20Projects/9.%20AI%20Video%20Course%20Generator/ai-video-course-generator/node_modules/@remotion/renderer/dist/esm/index.mjs:492:39)
+    at file:///A:/React%20Projects/9.%20AI%20Video%20Course%20Generator/ai-video-course-generator/node_modules/@remotion/renderer/dist/esm/index.mjs:595:5
+    at new Promise (<anonymous>)
+    at downloadFileWithoutRetries (file:///A:/React%20Projects/9.%20AI%20Video%20Course%20Generator/ai-video-course-generator/node_modules/@remotion/renderer/dist/esm/index.mjs:554:10)
+    at downloadFile (file:///A:/React%20Projects/9.%20AI%20Video%20Course%20Generator/ai-video-course-generator/node_modules/@remotion/renderer/dist/esm/index.mjs:660:23)
+    at downloadAsset (file:///A:/React%20Projects/9.%20AI%20Video%20Course%20Generator/ai-video-course-generator/node_modules/@remotion/renderer/dist/esm/index.mjs:14716:24)
+    at downloadAndMapAssetsToFileUrl (file:///A:/React%20Projects/9.%20AI%20Video%20Course%20Generator/ai-video-course-generator/node_modules/@remotion/renderer/dist/esm/index.mjs:14813:24)
+    at renderFrameWithOptionToReject (file:///A:/React%20Projects/9.%20AI%20Video%20Course%20Generator/ai-video-course-generator/node_modules/@remotion/renderer/dist/esm/index.mjs:18739:5)
+[2026-05-25T08:10:29.298Z] Stack: Error: Error while downloading file:///A:/React%20Projects/9.%20AI%20Video%20Course%20Generator/ai-video-course-generator/public/tmp/chapter-audio/intro-to-react/slide-0.mp3: Error: Can only download URLs starting with http:// or https://, got "file:///A:/React%20Projects/9.%20AI%20Video%20Course%20Generator/ai-video-course-generator/public/tmp/chapter-audio/intro-to-react/slide-0.mp3"
+    at getClient (file:///A:/React%20Projects/9.%20AI%20Video%20Course%20Generator/ai-video-course-generator/no
+[2026-05-25T08:14:04.830Z] 🚀 Render started. Slides: 7, Frames: 95818
+[2026-05-25T08:14:04.837Z] 📁 Output: A:\React Projects\9. AI Video Course Generator\ai-video-course-generator\public\renders\chapter-intro-to-react.mp4
+[2026-05-25T08:14:04.839Z] 🎵 Downloading 7 audio files...
+[2026-05-25T08:14:18.470Z]   slide[0] audio → http://localhost:3000/tmp/chapter-audio/intro-to-react/slide-0.mp3
+[2026-05-25T08:14:24.364Z]   slide[6] audio → http://localhost:3000/tmp/chapter-audio/intro-to-react/slide-6.mp3
+[2026-05-25T08:14:26.220Z]   slide[2] audio → http://localhost:3000/tmp/chapter-audio/intro-to-react/slide-2.mp3
+[2026-05-25T08:14:29.561Z]   slide[1] audio → http://localhost:3000/tmp/chapter-audio/intro-to-react/slide-1.mp3
+[2026-05-25T08:14:29.771Z]   slide[4] audio → http://localhost:3000/tmp/chapter-audio/intro-to-react/slide-4.mp3
+[2026-05-25T08:14:30.300Z]   slide[5] audio → http://localhost:3000/tmp/chapter-audio/intro-to-react/slide-5.mp3
+[2026-05-25T08:18:51.312Z]   slide[3] audio → http://localhost:3000/tmp/chapter-audio/intro-to-react/slide-3.mp3
+[2026-05-25T08:18:51.324Z] ✅ Audio downloads complete
+[2026-05-25T08:18:51.326Z] 📦 Creating Remotion bundle (first time takes ~60s, then cached)...
+[2026-05-25T08:18:58.043Z] ✅ Bundle ready: C:\Users\HP\AppData\Local\Temp\remotion-webpack-bundle-KNU4b2
+[2026-05-25T08:18:58.045Z] 🎞️ Selecting composition 'CourseVideo'...
+[2026-05-25T08:19:00.417Z] ✅ Composition found: CourseVideo (95818 frames)
+[2026-05-25T08:19:00.419Z] 🎬 Starting renderMedia → A:\React Projects\9. AI Video Course Generator\ai-video-course-generator\public\renders\chapter-intro-to-react.mp4
+[2026-05-25T08:32:09.988Z] 🚀 Render started. Slides: 7, Frames: 95818
+[2026-05-25T08:32:10.056Z] 📁 Output: A:\React Projects\9. AI Video Course Generator\ai-video-course-generator\public\renders\chapter-intro-to-react.mp4
+[2026-05-25T08:32:10.065Z] 🎵 Downloading 7 audio files...
+[2026-05-25T08:32:10.147Z]   slide[0] audio → http://localhost:3000/tmp/chapter-audio/intro-to-react/slide-0.mp3
+[2026-05-25T08:32:10.274Z]   slide[1] audio → http://localhost:3000/tmp/chapter-audio/intro-to-react/slide-1.mp3
+[2026-05-25T08:32:10.302Z]   slide[2] audio → http://localhost:3000/tmp/chapter-audio/intro-to-react/slide-2.mp3
+[2026-05-25T08:32:10.308Z]   slide[3] audio → http://localhost:3000/tmp/chapter-audio/intro-to-react/slide-3.mp3
+[2026-05-25T08:32:10.341Z]   slide[4] audio → http://localhost:3000/tmp/chapter-audio/intro-to-react/slide-4.mp3
+[2026-05-25T08:32:10.354Z]   slide[5] audio → http://localhost:3000/tmp/chapter-audio/intro-to-react/slide-5.mp3
+[2026-05-25T08:32:10.362Z]   slide[6] audio → http://localhost:3000/tmp/chapter-audio/intro-to-react/slide-6.mp3
+[2026-05-25T08:32:10.366Z] ✅ Audio downloads complete
+[2026-05-25T08:32:10.373Z] 📦 Creating Remotion bundle (first time takes ~60s, then cached)...
+[2026-05-25T08:33:14.677Z] ✅ Bundle ready: C:\Users\HP\AppData\Local\Temp\remotion-webpack-bundle-wp71PH
+[2026-05-25T08:33:14.680Z] 🎞️ Selecting composition 'CourseVideo'...
+[2026-05-25T08:33:19.802Z] ✅ Composition found: CourseVideo (95818 frames)
+[2026-05-25T08:33:19.805Z] 🎬 Starting renderMedia → A:\React Projects\9. AI Video Course Generator\ai-video-course-generator\public\renders\chapter-intro-to-react.mp4
+[2026-05-25T08:33:19.811Z] 📊 Total: 95818 frames = 3194s (53.2 min) @ 30fps
+[2026-05-25T08:33:19.816Z] ⏳ Chromium is booting... (may take 30-60s before first frame)
+[2026-05-25T08:33:20.605Z]   ↳ 0% | rendered:0 encoded:0 | elapsed:1s | ETA:?s
+[2026-05-25T08:33:20.610Z] 🚦 Chromium ready! Rendering 95818 frames...
+[2026-05-25T08:57:03.614Z] 🚀 Started. 7 slides, FFmpeg+Puppeteer mode
+[2026-05-25T08:57:03.618Z] 📽 Slide 1/7 — 339.7s
+[2026-05-25T08:57:06.841Z]   🎵 Audio ready
+[2026-05-25T08:57:06.843Z]   🎞 9 reveal state(s)
+[2026-05-25T08:58:15.382Z]   ✅ Slide 1 done
+[2026-05-25T08:58:15.386Z] 📽 Slide 2/7 — 558.4s
+[2026-05-25T08:58:19.758Z]   🎵 Audio ready
+[2026-05-25T08:58:19.762Z]   🎞 7 reveal state(s)
+[2026-05-25T08:59:40.044Z]   ✅ Slide 2 done
+[2026-05-25T08:59:40.046Z] 📽 Slide 3/7 — 462.3s
+[2026-05-25T08:59:43.719Z]   🎵 Audio ready
+[2026-05-25T08:59:43.721Z]   🎞 12 reveal state(s)
+[2026-05-25T09:01:13.033Z]   ✅ Slide 3 done
+[2026-05-25T09:01:13.034Z] 📽 Slide 4/7 — 454.7s
+[2026-05-25T09:01:16.882Z]   🎵 Audio ready
+[2026-05-25T09:01:16.888Z]   🎞 12 reveal state(s)
+[2026-05-25T09:02:42.912Z]   ✅ Slide 4 done
+[2026-05-25T09:02:42.914Z] 📽 Slide 5/7 — 517.8s
+[2026-05-25T09:02:47.647Z]   🎵 Audio ready
+[2026-05-25T09:02:47.650Z]   🎞 7 reveal state(s)
+[2026-05-25T09:04:22.045Z]   ✅ Slide 5 done
+[2026-05-25T09:04:22.046Z] 📽 Slide 6/7 — 498.4s
+[2026-05-25T09:04:26.717Z]   🎵 Audio ready
+[2026-05-25T09:04:26.719Z]   🎞 7 reveal state(s)
+[2026-05-25T09:05:54.230Z]   ✅ Slide 6 done
+[2026-05-25T09:05:54.232Z] 📽 Slide 7/7 — 362.6s
+[2026-05-25T09:05:57.602Z]   🎵 Audio ready
+[2026-05-25T09:05:57.604Z]   🎞 8 reveal state(s)
+[2026-05-25T09:07:05.077Z]   ✅ Slide 7 done
+[2026-05-25T09:07:05.078Z] 🔗 Concatenating 7 slides...
+[2026-05-25T09:07:10.478Z] 🏁 DONE! 127.0 MB → A:\React Projects\9. AI Video Course Generator\ai-video-course-generator\public\renders\chapter-intro-to-react.mp4

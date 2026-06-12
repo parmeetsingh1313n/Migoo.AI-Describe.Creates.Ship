@@ -36,6 +36,28 @@ const nextConfig: NextConfig = {
   images: {
     unoptimized: true,
   },
+
+  // ── Keep all Remotion packages out of webpack's bundle ─────────────────────
+  // @remotion/renderer and @remotion/bundler load platform-specific native
+  // compositor binaries at runtime. Webpack can't resolve the Linux paths on
+  // Windows (and vice-versa), causing "Module not found" build errors.
+  // Marking them as serverExternalPackages lets Node.js require() them directly.
+  serverExternalPackages: [
+    '@remotion/renderer',
+    '@remotion/bundler',
+    '@remotion/compositor-win32-x64-msvc',
+    '@remotion/compositor-linux-x64-gnu',
+    '@remotion/compositor-linux-x64-musl',
+    '@remotion/compositor-linux-arm64-gnu',
+    '@remotion/compositor-linux-arm64-musl',
+    '@remotion/compositor-darwin-x64',
+    '@remotion/compositor-darwin-arm64',
+    // Puppeteer and FFmpeg ship native binaries — must not be bundled by webpack
+    'puppeteer',
+    'puppeteer-core',
+    'ffmpeg-static',
+  ],
+
   experimental: {
     optimizeCss: true,
     serverActions: {

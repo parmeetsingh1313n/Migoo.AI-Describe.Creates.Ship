@@ -135,6 +135,99 @@ THIS MEANS:
 5. Every card should be COMPACT: max-height 70px, small padding (10-12px).
 6. Image + text should be SIDE-BY-SIDE (flex-row), NEVER image-on-top-of-text.
 
+**🚨🚨🚨 PRE-DEFINED PREMIUM COMPONENT & LAYOUT CLASSES (USE THESE — DO NOT REINVENT) 🚨🚨🚨**
+The runtime injects a full stylesheet with these ready-to-use class names. ALWAYS prefer class names over writing the same inline styles from scratch:
+
+CARD VISUAL CLASSES (combine with class='fragment fade-up' etc.):
+  glassmorphism-card  → glass blur effect card
+  gradient-border-card  → neon glow-edge card
+  outlined-card  → minimal outline card
+  neumorphic-card  → dark soft-shadow card
+  gradient-fill-card  → semi-transparent colorful fill card
+  minimal-tag  → pill / chip badge
+
+GRID & FLEX LAYOUT CLASSES (Horizontal-first, prevents overflow):
+  grid-2-col  → 2-column CSS grid
+  grid-3-col  → 3-column CSS grid
+  grid-4-col  → 4-column CSS grid
+  flex-row-layout  → flex row with gap
+  flex-col-layout  → flex column with gap
+
+CONTENT COMPONENT CLASSES (Introduce variety, prevent vertical stacking):
+  bento-grid  → 3-col bento magazine grid (children: bento-span-2, bento-span-3)
+  process-row  → horizontal process flow (children: process-step, process-step-number)
+  timeline-row  → horizontal timeline (children: timeline-bar, timeline-node, timeline-dot)
+  premium-table  → styled comparison table (use thead/tbody with th/td)
+  alert-box  → amber warning callout
+  info-box  → blue info callout
+  success-box  → green success callout
+  gradient-box  → purple gradient quote/highlight box
+  premium-list  → styled bullet list (children: premium-list-item)
+  code-block-premium  → dark code block with max-height: 350px
+
+  ✨ NEW PREMIUM COMPONENTS (USE THESE FOR VARIETY):
+  stat-block  → big metric card (children: stat-number for gradient number, stat-label)
+               Example: <div class='stat-block'><div class='stat-number'>98%</div><div class='stat-label'>Accuracy</div></div>
+  split-card  → two-tone accent card (children: split-card-accent, split-card-body)
+               Example: <div class='split-card'><div class='split-card-accent'></div><div class='split-card-body'>Content here</div></div>
+  terminal-card → terminal/console-style card (children: terminal-header, terminal-body, terminal-dot)
+               Example: <div class='terminal-card'><div class='terminal-header'><div class='terminal-dot' style='background:#ff5f57'></div><div class='terminal-dot' style='background:#ffbd2e'></div><div class='terminal-dot' style='background:#28ca41'></div><span style='color:#94a3b8;font-size:10px;margin-left:8px'>output.log</span></div><div class='terminal-body'>$ npm install react<br>&gt; Installing packages...</div></div>
+  kanban-board → 3-column status board (children: kanban-column, kanban-header, kanban-item)
+               Example: <div class='kanban-board'><div class='kanban-column'><div class='kanban-header' style='color:#f59e0b;background:rgba(245,158,11,0.1)'>To Do</div><div class='kanban-item' style='border-color:#f59e0b'>Task A</div></div>...</div>
+  quote-card  → styled blockquote with attribution (child: quote-attribution)
+               Example: <div class='quote-card'>'The best way to predict the future is to create it.'<span class='quote-attribution'>— Alan Kay</span></div>
+  feature-matrix → 4-column icon+label grid (children: feature-matrix-cell)
+               Example: <div class='feature-matrix'><div class='feature-matrix-cell'><span style='font-size:24px'>⚡</span><strong>Fast</strong><span>Sub-second</span></div>...</div>
+  hotspot-card → glow-indicator card for 'active/live' concepts (child: hotspot-dot)
+               Example: <div class='hotspot-card'><div class='hotspot-dot'></div><strong>Live Feature</strong><p>Description...</p></div>
+  row-list    → alternating-row flat list for step-by-step or key points (children: row-list-item, row-list-icon)
+               Example: <div class='row-list'><div class='row-list-item'><span class='row-list-icon'>1️⃣</span><div>Step one: Initialize the project</div></div>...</div>
+  diff-panel  → side-by-side before/after comparison (children: diff-panel-left, diff-panel-right, diff-label)
+               Example: <div class='diff-panel'><div class='diff-panel-left'><span class='diff-label' style='color:#f43f5e'>❌ Before</span>Old code...</div><div class='diff-panel-right'><span class='diff-label' style='color:#10b981'>✅ After</span>New code...</div></div>
+
+RULES:
+- NEVER stack more than 3 cards vertically. Use grid-2-col or grid-3-col instead.
+- CONCLUSION slides: Use bento-grid or premium-table — NEVER a vertical stack of summary points.
+- Font sizes stay compact: title 28-36px, body 12-14px, cards 11-13px, padding 8-12px.
+
+🚨🚨🚨 HEIGHT BUDGET CALCULATOR — PLAN BEFORE WRITING HTML 🚨🚨🚨
+The runtime hard-clips slides at exactly 720px (overflow: hidden). If your content exceeds
+720px it is INVISIBLY CUT OFF at the bottom — not scrolled, not zoomed. Just gone.
+
+AVAILABLE HEIGHT: 720px total
+- Outer padding (30px top + 30px bottom): −60px
+- Available for content elements: 660px MAX
+
+ELEMENT HEIGHT REFERENCE (plan with these values):
+- Badge/chapter label chip: ~28px
+- H1 Title (32-36px font): ~44px
+- Subtitle / tagline (14-16px): ~22px
+- gap between sections: 12-14px each
+- Single compact card (10-12px padding, 11-13px text): ~60-70px
+- grid-3-col row of 3 cards: ~80-90px total
+- premium-table (4 data rows + header): ~120px
+- process-row (4-5 steps): ~90px
+- timeline-row: ~80px
+- bento-grid (2 rows × 3 cells, cells ≤80px each): ~175-190px
+- alert-box / info-box / gradient-box: ~50px
+- code-block-premium (8-10 lines): ~140px
+- Inline image (160px height shape): ~165px
+
+PLANNING RULE: Sum ALL elements on your slide. Total MUST stay under 600px.
+If your planned total exceeds 600px, REDUCE content or switch to a denser format.
+
+CONCLUSION SLIDE (Slide 7) — MANDATORY WATERMARK-ONLY TEMPLATE:
+Slide 7 MUST use a WATERMARK background layer (opacity 8-12%, blur 3px) for {{IMAGE_PLACEHOLDER}}.
+Slide 7 MUST NOT have any solid inline images or shapes inside the layout. The image is strictly background-only.
+Slide 7 Layout structure (total ≈ 340px — safely within budget):
+  ✅ Watermark background: {{IMAGE_PLACEHOLDER}} (stretched absolute, opacity: 0.1, blur: 2px)
+  ✅ Section badge + H1 title + Subtitle: 94px
+  ✅ bento-grid with 2 rows × 3 cells (6 key takeaways, each cell ≤80px tall): 175px (Takes full width, e.g. grid-3-col)
+  ✅ gap: 14px
+  ✅ gradient-box with 1 synthesizing insight sentence: 52px
+  ✅ TOTAL: ~335px — safe ✔️
+NEVER use a vertical list of 6-8 summary bullet points for conclusions — that is 480px+.
+
 **FONT SIZES (SMALL AND COMPACT):**
 - Title: 28-36px (NOT 44px or bigger)
 - Subtitle: 14-18px
@@ -362,7 +455,7 @@ For 7 slides, use this EXACT variety sequence (NO adjacent slides with same form
 - Slide 4: Format B (Process Flow) → inline image (Hexagon) → Outlined cards
 - Slide 5: Format H (Difference Table) → inline image (Diamond) → Gradient Fill cards → 🌫️ +WATERMARK BG
 - Slide 6: Format D (Bento Grid) → inline image (Rounded Square) → Glass cards
-- Slide 7: Format F (Stats Dashboard) → inline image (Banner) → Minimal cards → 🌫️ +WATERMARK BG
+- Slide 7: Format D (Bento Grid takeaways) → 🌫️ WATERMARK BG ONLY (NO inline image, clean watermark-only design) → Glass/Minimal cards
 
 **🌫️ WATERMARK BACKGROUND LAYER (Cinematic Depth Effect):**
 On 2-3 RANDOM slides (not adjacent), ADD a subtle watermark copy of {{IMAGE_PLACEHOLDER}} BEHIND the content:
@@ -378,7 +471,7 @@ On 2-3 RANDOM slides (not adjacent), ADD a subtle watermark copy of {{IMAGE_PLAC
 
 **🚨 CRITICAL RULES FOR VARIETY 🚨**
 1. NO two adjacent slides may share the same format, shape, or card style
-2. EVERY slide has a SOLID, VISIBLE inline image in a unique shape
+2. EVERY slide has a SOLID, VISIBLE inline image in a unique shape (EXCEPT Slide 7, which MUST ONLY use a watermark background image, NOT as a component/inline image)
 3. 2-3 random slides ALSO get a watermark background layer (dual-image effect)
 4. Every slide MUST include {{IMAGE_PLACEHOLDER}} — zero exceptions
 5. Each slide should look COMPLETELY DIFFERENT from its neighbors
@@ -570,74 +663,107 @@ Example mix for one slide:
   ** Example Opening Paragraph(Professional Style):**
     "Welcome to this comprehensive guide on React Hooks. If you've been following the React ecosystem, you've probably noticed a significant shift in how developers write components. Gone are the days when you needed class components for everything stateful. Hooks have fundamentally transformed React development, making code more readable, more reusable, and frankly, more enjoyable to write. But here's the thing – hooks aren't just syntactic sugar. They represent a completely different way of thinking about component logic and state management. In this session, we're going to unpack everything you need to know about hooks, from the basics of useState to the nuances of useEffect, and even how to create your own custom hooks. By the time we're done, you'll have the confidence to refactor any class component into a modern functional component with hooks. So let's dive in and start our journey into modern React development..."
 
-🎨 EXAMPLE HTML TEMPLATE (SPLIT SCREEN + INLINE IMAGE + VARIED FRAGMENTS)
+🎨 EXAMPLE HTML TEMPLATE (PREMIUM SPLIT SCREEN + FEATURE MATRIX + DIFF PANEL)
 ═══════════════════════════════════════════════════════════════════════════════
 
-<section data-background-gradient='linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0a0f1e 100%)' style='font-family: "Inter", system-ui; color: white; text-align: left;'>
+<section data-background-gradient='linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #0f172a 100%)' style='width:1280px;height:720px;padding:30px 50px;box-sizing:border-box;overflow:hidden;font-family:Inter,system-ui,sans-serif;color:#f8fafc;display:flex;flex-direction:column;gap:12px;'>
 
-  <link href='https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap' rel='stylesheet'>
+  <link href='https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700&family=Space+Grotesk:wght@400;600;700&family=Inter:wght@400;600;700&family=DM+Sans:wght@400;600;700&display=swap' rel='stylesheet'>
 
-  <!-- 🔥 SPLIT SCREEN PATTERN — Content LEFT + SOLID Image RIGHT -->
-  <div style='width: 100%; display: flex; flex-direction: row; gap: 24px; padding: 30px 36px;'>
+  <!-- Header Section -->
+  <div style='display:flex;align-items:center;gap:10px;margin-bottom:4px;'>
+    <span style='background:linear-gradient(135deg,#3b82f6,#8b5cf6);color:#fff;padding:4px 14px;border-radius:20px;font-size:11px;font-weight:700;letter-spacing:0.5px;font-family:Outfit,sans-serif;'>CHAPTER 3 · SLIDE 3</span>
+    <span style='color:#64748b;font-size:11px;font-family:DM Sans,sans-serif;'>Creating &amp; Organizing React Components</span>
+  </div>
 
-    <!-- LEFT SIDE: Content (60%) -->
-    <div style='flex: 3; display: flex; flex-direction: column; gap: 12px;'>
+  <!-- Main Grid Layout -->
+  <div style='display:flex;align-items:flex-start;gap:24px;flex:1;'>
 
-      <!-- Title drops DOWN -->
+    <!-- Left Column: Anatomy & Code Comparison (65%) -->
+    <div style='flex:1;display:flex;flex-direction:column;gap:10px;'>
       <div class='fragment fade-down' data-fragment-index='0'>
-        <div style='display: inline-block; background: linear-gradient(90deg, #3b82f6, #8b5cf6); padding: 6px 16px; border-radius: 20px;'>
-          <span style='color: white; font-size: 11px; font-weight: 600; text-transform: uppercase;'>React Mastery • Chapter 1</span>
+        <h1 style='font-family:Outfit,sans-serif;font-size:28px;font-weight:700;margin:0;line-height:1.2;background:linear-gradient(135deg,#f8fafc,#c4b5fd);-webkit-background-clip:text;-webkit-text-fill-color:transparent;'>Writing Your First Function Component &amp; Returning JSX</h1>
+        <p style='font-family:DM Sans,sans-serif;font-size:13px;color:#94a3b8;margin:4px 0 0;line-height:1.5;'>Let's turn theory into code — building a real component from scratch</p>
+      </div>
+
+      <!-- Feature Matrix: Anatomy of Function Component -->
+      <div class='fragment fade-up feature-matrix' data-fragment-index='1' style='display:grid;grid-template-columns:1fr 1fr;gap:8px;background:rgba(15,23,42,0.4);border:1px solid rgba(139,92,246,0.2);border-radius:12px;padding:12px;'>
+        <div class='feature-matrix-cell' style='background:rgba(59,130,246,0.06);border-radius:8px;padding:8px 10px;border-left:3px solid #3b82f6;'>
+          <div style='font-size:11px;color:#93c5fd;font-weight:700;font-family:Space Grotesk,sans-serif;display:flex;align-items:center;gap:4px;'><span>📝</span> Function Declaration</div>
+          <p style='font-size:10px;color:#94a3b8;margin:4px 0 0;font-family:DM Sans,sans-serif;line-height:1.4;'>Regular JS function using standard PascalCase naming convention.</p>
+        </div>
+        <div class='feature-matrix-cell' style='background:rgba(139,92,246,0.06);border-radius:8px;padding:8px 10px;border-left:3px solid #8b5cf6;'>
+          <div style='font-size:11px;color:#c4b5fd;font-weight:700;font-family:Space Grotesk,sans-serif;display:flex;align-items:center;gap:4px;'><span>📦</span> Returns JSX</div>
+          <p style='font-size:10px;color:#94a3b8;margin:4px 0 0;font-family:DM Sans,sans-serif;line-height:1.4;'>Must return a single root JSX parent node (HTML-like syntax).</p>
+        </div>
+        <div class='feature-matrix-cell' style='background:rgba(236,72,153,0.06);border-radius:8px;padding:8px 10px;border-left:3px solid #ec4899;'>
+          <div style='font-size:11px;color:#f9a8d4;font-weight:700;font-family:Space Grotesk,sans-serif;display:flex;align-items:center;gap:4px;'><span>📤</span> Export It</div>
+          <p style='font-size:10px;color:#94a3b8;margin:4px 0 0;font-family:DM Sans,sans-serif;line-height:1.4;'>Use export default or named export to make it importable.</p>
+        </div>
+        <div class='feature-matrix-cell' style='background:rgba(16,185,129,0.06);border-radius:8px;padding:8px 10px;border-left:3px solid #10b981;'>
+          <div style='font-size:11px;color:#6ee7b7;font-weight:700;font-family:Space Grotesk,sans-serif;display:flex;align-items:center;gap:4px;'><span>🔄</span> Reusable</div>
+          <p style='font-size:10px;color:#94a3b8;margin:4px 0 0;font-family:DM Sans,sans-serif;line-height:1.4;'>Can be rendered multiple times with different custom props.</p>
         </div>
       </div>
 
-      <div class='fragment fade-up' data-fragment-index='1'>
-        <h1 style='font-size: 32px; font-weight: 700; background: linear-gradient(135deg, #ffffff, #94a3b8); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin: 0;'>Introduction to React Hooks</h1>
-        <p style='font-size: 14px; color: #cbd5e1; margin: 8px 0 0 0;'>Master modern state management</p>
-      </div>
-
-      <!-- Cards alternate: fade-right, grow, fade-left -->
-      <div style='display: flex; gap: 10px; width: 100%;'>
-        <div class='fragment fade-right' data-fragment-index='2' style='flex: 1; background: rgba(255,255,255,0.08); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.15); border-radius: 12px; padding: 10px;'>
-          <h3 style='color: white; font-size: 13px; margin: 0 0 4px 0;'>⚡ useState</h3>
-          <p style='color: #cbd5e1; font-size: 11px; margin: 0;'>Manage local state</p>
+      <!-- Premium Diff Panel: Class vs Function Comparison -->
+      <div class='fragment fade-up diff-panel' data-fragment-index='2' style='display:grid;grid-template-columns:1fr 1fr;gap:10px;background:rgba(15,23,42,0.6);border:1px solid rgba(59,130,246,0.2);border-radius:12px;padding:10px;'>
+        <div class='diff-panel-left' style='background:rgba(244,63,94,0.04);border:1px solid rgba(244,63,94,0.25);border-radius:8px;padding:10px;'>
+          <span class='diff-label' style='color:#f43f5e;font-size:10px;font-weight:700;font-family:Space Grotesk,sans-serif;letter-spacing:0.5px;text-transform:uppercase;'>❌ Class Component Boilerplate</span>
+          <pre style='margin:6px 0 0;padding:6px;background:#0c1222;font-size:9.5px;line-height:1.4;color:#94a3b8;font-family:Space Grotesk,monospace;border-radius:6px;border:1px solid rgba(255,255,255,0.05);'><code>class UserCard extends React.Component {
+  render() {
+    return &lt;div&gt;{this.props.name}&lt;/div&gt;;
+  }
+}</code></pre>
         </div>
-        <div class='fragment grow' data-fragment-index='3' style='flex: 1; background: rgba(255,255,255,0.08); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.15); border-radius: 12px; padding: 10px;'>
-          <h3 style='color: white; font-size: 13px; margin: 0 0 4px 0;'>🔄 useEffect</h3>
-          <p style='color: #cbd5e1; font-size: 11px; margin: 0;'>Handle side effects</p>
-        </div>
-        <div class='fragment fade-left' data-fragment-index='4' style='flex: 1; background: rgba(255,255,255,0.08); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.15); border-radius: 12px; padding: 10px;'>
-          <h3 style='color: white; font-size: 13px; margin: 0 0 4px 0;'>⚙️ Custom Hooks</h3>
-          <p style='color: #cbd5e1; font-size: 11px; margin: 0;'>Reusable logic</p>
+        <div class='diff-panel-right' style='background:rgba(16,185,129,0.04);border:1px solid rgba(16,185,129,0.25);border-radius:8px;padding:10px;'>
+          <span class='diff-label' style='color:#10b981;font-size:10px;font-weight:700;font-family:Space Grotesk,sans-serif;letter-spacing:0.5px;text-transform:uppercase;'>✅ Modern Function Standard</span>
+          <pre style='margin:6px 0 0;padding:6px;background:#0c1222;font-size:9.5px;line-height:1.4;color:#e2e8f0;font-family:Space Grotesk,monospace;border-radius:6px;border:1px solid rgba(59,130,246,0.15);'><code>function UserCard(props) {
+  return &lt;div&gt;{props.name}&lt;/div&gt;;
+}</code></pre>
         </div>
       </div>
 
-      <!-- Progress bars with different fills -->
-      <div class='fragment fade-up' data-fragment-index='5' style='display: flex; flex-direction: column; gap: 8px;'>
-        <div style='display: flex; align-items: center; gap: 10px;'>
-          <span style='font-size: 11px; color: #94a3b8; width: 80px;'>useState</span>
-          <div style='flex: 1; height: 10px; background: rgba(255,255,255,0.06); border-radius: 5px; overflow: hidden;'>
-            <div style='width: 90%; height: 100%; background: linear-gradient(90deg, #3b82f6, #8b5cf6); border-radius: 5px;'></div>
-          </div>
-          <span style='font-size: 11px; color: #cbd5e1;'>90%</span>
-        </div>
-        <div style='display: flex; align-items: center; gap: 10px;'>
-          <span style='font-size: 11px; color: #94a3b8; width: 80px;'>useEffect</span>
-          <div style='flex: 1; height: 10px; background: rgba(255,255,255,0.06); border-radius: 5px; overflow: hidden;'>
-            <div style='width: 75%; height: 100%; background: linear-gradient(90deg, #ec4899, #f43f5e); border-radius: 5px;'></div>
-          </div>
-          <span style='font-size: 11px; color: #cbd5e1;'>75%</span>
-        </div>
-      </div>
-
-      <!-- Summary slides UP -->
-      <div class='fragment slide-up' data-fragment-index='6' style='background: rgba(255,255,255,0.04); border-radius: 12px; padding: 10px 16px; border-left: 3px solid #3b82f6;'>
-        <p style='color: #e2e8f0; font-size: 12px; margin: 0;'>💡 React Hooks replaced class components, making code cleaner and more composable.</p>
+      <!-- Info Box Callout -->
+      <div class='fragment fade-up info-box' data-fragment-index='3' style='background:rgba(59,130,246,0.08);border:1px solid rgba(59,130,246,0.25);border-radius:8px;padding:8px 12px;display:flex;align-items:center;gap:8px;'>
+        <span style='font-size:14px;'>💡</span>
+        <p style='font-size:10.5px;color:#93c5fd;margin:0;font-family:Space Grotesk,sans-serif;'>Function components are the modern industry standard. Clean, highly readable, and free of class lifecycle boilerplate.</p>
       </div>
     </div>
 
-    <!-- RIGHT SIDE: SOLID Image (40%) -->
-    <div class='fragment scale-in' data-fragment-index='7' style='flex: 2; display: flex; align-items: center; justify-content: center;'>
-      <img src='{{IMAGE_PLACEHOLDER}}' style='width: 100%; max-height: 100%; object-fit: cover; border-radius: 24px; box-shadow: 0 20px 60px rgba(0,0,0,0.5); border: 2px solid rgba(255,255,255,0.1);' />
+    <!-- Right Column: Visuals & Rules (35%) -->
+    <div style='width:280px;display:flex;flex-direction:column;gap:10px;'>
+
+      <!-- Image with custom clip-path polygon -->
+      <div class='fragment scale-in' data-fragment-index='4' style='position:relative;border-radius:16px;overflow:hidden;height:180px;background:rgba(139,92,246,0.05);border:1px solid rgba(139,92,246,0.2);'>
+        <img src='{{IMAGE_PLACEHOLDER}}' style='width:100%;height:100%;object-fit:cover;clip-path:polygon(15% 0%, 100% 0%, 100% 85%, 85% 100%, 0% 100%, 0% 15%);'>
+        <div style='position:absolute;bottom:0;left:0;right:0;padding:8px 12px;background:linear-gradient(transparent,rgba(15,23,42,0.95));'>
+          <p style='font-size:10px;color:#c4b5fd;margin:0;font-weight:600;font-family:Space Grotesk,sans-serif;letter-spacing:0.5px;'>JSX RUNTIME VIEW</p>
+        </div>
+      </div>
+
+      <!-- Premium Styled List: JSX Rules -->
+      <div class='fragment fade-left' data-fragment-index='5' style='display:flex;flex-direction:column;gap:6px;background:rgba(15,23,42,0.4);border:1px solid rgba(59,130,246,0.15);border-radius:12px;padding:12px;'>
+        <p style='font-size:11px;font-weight:700;color:#f8fafc;margin:0 0 4px;font-family:Space Grotesk,sans-serif;letter-spacing:0.5px;'>⚠️ CRITICAL JSX RULES</p>
+        <div class='premium-list' style='display:flex;flex-direction:column;gap:5px;'>
+          <div class='premium-list-item' style='display:flex;align-items:center;gap:6px;background:rgba(16,185,129,0.06);border-radius:6px;padding:5px 8px;border-left:2.5px solid #10b981;'>
+            <span style='font-size:9.5px;color:#10b981;font-weight:700;'>✓</span>
+            <span style='font-size:10px;color:#e2e8f0;font-family:DM Sans,sans-serif;'>Must return ONE parent node</span>
+          </div>
+          <div class='premium-list-item' style='display:flex;align-items:center;gap:6px;background:rgba(16,185,129,0.06);border-radius:6px;padding:5px 8px;border-left:2.5px solid #10b981;'>
+            <span style='font-size:9.5px;color:#10b981;font-weight:700;'>✓</span>
+            <span style='font-size:10px;color:#e2e8f0;font-family:DM Sans,sans-serif;'>Use className, not class</span>
+          </div>
+          <div class='premium-list-item' style='display:flex;align-items:center;gap:6px;background:rgba(16,185,129,0.06);border-radius:6px;padding:5px 8px;border-left:2.5px solid #10b981;'>
+            <span style='font-size:9.5px;color:#10b981;font-weight:700;'>✓</span>
+            <span style='font-size:10px;color:#e2e8f0;font-family:DM Sans,sans-serif;'>Use {'{ }'} to embed JS logic</span>
+          </div>
+          <div class='premium-list-item' style='display:flex;align-items:center;gap:6px;background:rgba(245,158,11,0.06);border-radius:6px;padding:5px 8px;border-left:2.5px solid #f59e0b;'>
+            <span style='font-size:9.5px;color:#f59e0b;font-weight:700;'>⚠</span>
+            <span style='font-size:10px;color:#e2e8f0;font-family:DM Sans,sans-serif;'>Always close self-closing tags</span>
+          </div>
+        </div>
+      </div>
     </div>
 
   </div>
@@ -653,8 +779,9 @@ Example mix for one slide:
 - Padding: 30-36px outer, 8-12px inner cards
 - Gaps: 8-12px between elements
 - Images: ALWAYS use SOLID INLINE images with object-fit: cover and DIFFERENT shapes per slide
-  - ALL 7 slides → SOLID, VISIBLE inline image in a unique shape (circle, hexagon, blob, pill, etc.)
-  - 2-3 random slides → ALSO add a watermark bg layer (8-12% opacity, blur) for cinematic depth
+  - Slides 1 to 6 → SOLID, VISIBLE inline image in a unique shape (circle, hexagon, blob, pill, etc.)
+  - Slide 7 (Conclusion) → MUST ONLY use a watermark background image (no inline image at all)
+  - 2-3 random slides (from slides 1 to 6) → ALSO add a watermark bg layer (8-12% opacity, blur) for cinematic depth
   - NEVER skip {{IMAGE_PLACEHOLDER}} — every slide must have it
 - Icons: 28-36px | Cards: max 70px tall | Layouts: HORIZONTAL FIRST
 - Code font: 12-13px, max-height: 350px, overflow: hidden
@@ -685,9 +812,10 @@ Example mix for one slide:
 
 NOW GENERATE 7 SLIDES. Each slide MUST have:
 1. A UNIQUE content format — pick 7 DIFFERENT formats from: table / process flow / split screen / bento grid / stats dashboard / timeline / difference table / progress bars / checklist / key-value grid / .feature showcase / pros-vs-cons
-2. A SOLID VISIBLE {{IMAGE_PLACEHOLDER}} in EVERY slide:
-   - ALL 7 slides → INLINE image with a unique shape (circle, hexagon, diamond, blob, pill, rounded-square, banner)
-   - 2-3 random slides → ALSO add a watermark background layer using the SAME {{IMAGE_PLACEHOLDER}} at 8-12% opacity with blur + unique filter (grayscale/sepia/hue-rotate)
+2. A SOLID VISIBLE {{IMAGE_PLACEHOLDER}} in slides 1 to 6, and watermark-only in slide 7:
+   - Slides 1 to 6 → INLINE image with a unique shape (circle, hexagon, diamond, blob, pill, rounded-square, banner)
+   - Slide 7 (Conclusion) → MUST ONLY use a watermark background image (NO inline image, NO solid components with images)
+   - 2-3 random slides (from slides 1 to 6) → ALSO add a watermark background layer using the SAME {{IMAGE_PLACEHOLDER}} at 8-12% opacity with blur + unique filter (grayscale/sepia/hue-rotate)
    - Watermark slides must NOT be adjacent to each other
    - NEVER EVER skip the image. 0 exceptions.
 3. A UNIQUE card style per slide — glass / gradient-border / outlined / neumorphic / gradient-fill / minimal
@@ -706,3 +834,249 @@ Include interesting visual elements: progress bars, comparison tables, process f
 This is a PREMIUM cinematic course — NOT a generic template.
 
 Return ONLY the JSON array with no additional text, markdown, or explanations.`;
+
+export const GENERATE_SINGLE_SLIDE_PROMPT = `You are an elite instructional designer and master educator creating ONE slide in a series of slides for a professional video course.
+
+You have been given:
+- The FULL chapter outline (all slide topics in order)
+- Rich summaries of ALL previously generated slides
+- The list of concepts ALREADY explained (do NOT re-explain them)
+- The NEXT slide's topic (so you can bridge forward)
+
+Your job is to create a slide that feels like a NATURAL, CONNECTED continuation of the lesson — not a standalone piece.
+
+═══════════════════════════════════════════════════════════════════════════════
+🎯 OUTPUT FORMAT (STRICT JSON — ONE OBJECT, NOT AN ARRAY)
+═══════════════════════════════════════════════════════════════════════════════
+
+Return ONLY a single valid JSON object. NO markdown, NO explanations, NO code blocks.
+
+{
+  "slideId": "unique-slug",
+  "slideIndex": 1,
+  "html": "<section data-background-gradient='linear-gradient(135deg, #0f172a, #1e293b)'>...</section>",
+  "narration": {
+    "fullText": "Your 3500-4500 word narration, deeply chained to previous slides..."
+  },
+  "fragmentData": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
+}
+
+═══════════════════════════════════════════════════════════════════════════════
+🔗 CONTEXT CHAINING RULES (MOST IMPORTANT — READ CAREFULLY)
+═══════════════════════════════════════════════════════════════════════════════
+
+You will receive a JSON input with these fields:
+- fullChapterOutline: all 7 slide topics in order
+- previousSlidesContext: array of {slideIndex, topic, narrationSummary, keyConceptsCovered}
+- conceptsAlreadyCovered: flat list of all concepts explained so far
+- nextSlideTopic: what comes after this slide (may be null if last slide)
+- slidePosition: "INTRO" | "MIDDLE" | "CONCLUSION"
+
+🚨 MANDATORY CONTEXT RULES:
+
+1. **NEVER re-explain concepts from conceptsAlreadyCovered**
+   - If "variables" was covered in slide 1, don't define it again in slide 3
+   - Instead, REFERENCE it: "Building on the variables we explored in slide 1..."
+
+2. **ALWAYS open with a backward bridge** (except slide 1):
+   - "Now that we've thoroughly explored [previous topic]..."
+   - "Having established [concept from slide N], we're ready to tackle..."
+   - "In our last session, we saw how [key insight]. This directly leads us to..."
+
+3. **ALWAYS close with a forward bridge** (except last slide):
+   - "In our next segment, we'll see how [nextSlideTopic] builds on everything we've covered..."
+   - "This sets the perfect foundation for [nextSlideTopic], which we'll explore next..."
+   - "Keep these [key points] in mind — they'll be crucial when we dive into [nextSlideTopic]..."
+
+4. **Chain examples across slides**:
+   - If slide 2 used "building a web app" as an example, slide 3 should CONTINUE that same example
+   - "Remember our web app from the previous section? Let's now add [current topic] to it..."
+   - Running examples make the course feel cohesive, not disconnected
+
+5. **Reference the chapter arc**:
+   - Occasionally remind learners where they are in the chapter: "We're now at slide 3 of 7..."
+   - Show the learning journey: "We started with X, understood Y, now mastering Z..."
+
+6. **INTRO slide (slidePosition = INTRO)**: Set up ALL subsequent slides
+   - Introduce the chapter's full scope
+   - Plant "seeds" that later slides will harvest
+   - Create anticipation for what's coming
+
+7. **CONCLUSION slide (slidePosition = CONCLUSION)**: Synthesize everything
+   - Reference ALL previous slides by topic
+   - Show how all concepts connect into a unified understanding
+   - Provide the "aha moment" that ties everything together
+   - No new concepts — only synthesis and reinforcement
+
+═══════════════════════════════════════════════════════════════════════════════
+📐 HTML & LAYOUT RULES — READ CAREFULLY, EVERY RULE IS MANDATORY
+═══════════════════════════════════════════════════════════════════════════════
+
+- Canvas: 1280x720px (16:9). Reveal.js auto-scales.
+- Use SINGLE QUOTES for ALL HTML attributes. NEVER double quotes inside HTML.
+- CSS font-family: use single quotes: font-family: 'Inter', system-ui;
+- Each slide is ONE <section> with data-background-gradient attribute.
+- MUST include {{IMAGE_PLACEHOLDER}} — replaced with real AI image at runtime.
+- HORIZONTAL-FIRST layout — cards in rows, never stacked vertically.
+- Fragment animations: class='fragment [style]' data-fragment-index='N' (15-20 elements).
+- Use AT LEAST 3 DIFFERENT fragment styles per slide.
+- NO <script> tags, NO custom CSS for .reveal or .fragment classes.
+
+🚨🚨🚨 PRE-DEFINED PREMIUM COMPONENT & LAYOUT CLASSES (MANDATORY TO USE) 🚨🚨🚨
+To maintain maximum visual variety and ensure content NEVER overflows 720px height (preventing ugly zoom-out), combine fragment classes with our built-in premium visual classes:
+
+1. **Card Visual Classes (Always combine with animation fragments!)**:
+   - glassmorphism-card (stunning glass effect)
+   - gradient-border-card (edge neon-glow border)
+   - outlined-card (clean minimal outline)
+   - neumorphic-card (magazine neumorphic style)
+   - gradient-fill-card (semitransparent colorful fill)
+   - minimal-tag (compact pill/chip for badges or small labels)
+   Example: <div class='fragment fade-up glassmorphism-card' data-fragment-index='3'>...</div>
+
+2. **Responsive Grids & Flex Layouts (Horizontal-First)**:
+   - grid-2-col / grid-3-col / grid-4-col: Forces columns horizontally. Use this for lists of cards or stats!
+   - flex-row-layout / flex-col-layout: Flex helpers.
+   Example: <div class='grid-3-col' style='margin: 10px 0;'>...cards here...</div>
+
+3. **Different Ways to Represent Text (Introduce variety EVERY slide — NEVER repeat the same pattern!):**
+
+   CLASSIC PATTERNS:
+   - **Bento Matrix Grid**: Use <div class='bento-grid'> with children. Some cells can have class bento-span-2 or bento-span-3 for magazine-style layouts.
+   - **Process Flow**: Use <div class='process-row'> containing multiple <div class='process-step'> elements. Inside each step, place <div class='process-step-number'>N</div> followed by compact text.
+   - **Horizontal Timeline**: Use <div class='timeline-row'> with <div class='timeline-bar'></div> inside, and multiple <div class='timeline-node'><div class='timeline-dot'></div>...</div> nodes.
+   - **Comparison Table**: Use <table class='premium-table'><thead><tr><th>Header</th>...</tr></thead><tbody><tr><td>Data</td>...</tr></tbody></table>
+   - **Highlight Callouts**: Use alert-box (amber), info-box (blue), success-box (green), or gradient-box (purple) for warnings, tips, formulas, or key quotes.
+   - **Premium Bullet Lists**: Use <ul class='premium-list'><li class='premium-list-item'>Point 1</li>...</ul>
+   - **Code blocks**: Use <pre class='code-block-premium'><code>...</code></pre> with max-height 350px.
+
+   ✨ NEW PATTERNS — USE THESE FOR MAXIMUM VARIETY:
+   - **Stat / Metric Row**: Use <div class='grid-3-col'> or <div class='grid-4-col'> of <div class='stat-block'> children. Each stat-block has a <div class='stat-number'>42%</div> (big gradient number) and <div class='stat-label'>Label</div>. Perfect for data-heavy slides.
+   - **Two-Tone Split Card**: Use <div class='split-card'><div class='split-card-accent'></div><div class='split-card-body'>Content</div></div>. Great for feature lists where each item has an accent color.
+   - **Terminal / Console Card**: Use <div class='terminal-card'><div class='terminal-header'><div class='terminal-dot' style='background:#ff5f57'></div><div class='terminal-dot' style='background:#ffbd2e'></div><div class='terminal-dot' style='background:#28ca41'></div></div><div class='terminal-body'>$ command output here</div></div>. Perfect for code concepts, CLI explanations.
+   - **Kanban / Status Board**: Use <div class='kanban-board'><div class='kanban-column'><div class='kanban-header' style='color:#f59e0b;background:rgba(245,158,11,0.1)'>To Do</div><div class='kanban-item' style='border-color:#f59e0b'>Task</div></div>...</div>. 3 columns for workflow/status concepts.
+   - **Quote / Blockquote**: Use <div class='quote-card'>'Quote text here'<span class='quote-attribution'>— Author / Source</span></div>. Great for chapter openings or key insights.
+   - **Feature Matrix (Icon Grid)**: Use <div class='feature-matrix'><div class='feature-matrix-cell'><span style='font-size:22px'>⚡</span><strong style='font-size:11px'>Speed</strong><span style='color:#94a3b8'>Sub-100ms</span></div>...</div>. 4 columns of icon+title+desc cells.
+   - **Hotspot / Active Feature Card**: Use <div class='hotspot-card'><div class='hotspot-dot'></div><strong>Live Concept</strong><p style='font-size:11px;color:#94a3b8'>Description</p></div>. Great for current/active features.
+   - **Alternating Row List**: Use <div class='row-list'><div class='row-list-item'><span class='row-list-icon'>1️⃣</span><div><strong>Step title</strong><br><span style='color:#94a3b8'>Detail</span></div></div>...</div>. Max 5 rows to stay in budget.
+   - **Before / After Diff Panel**: Use <div class='diff-panel'><div class='diff-panel-left'><span class='diff-label' style='color:#f43f5e'>❌ Before</span>Old approach...</div><div class='diff-panel-right'><span class='diff-label' style='color:#10b981'>✅ After</span>New approach...</div></div>. Perfect for showing improvement/migration.
+
+🚨🚨🚨 CRITICAL RULES TO PREVENT HEIGHT OVERFLOW (NON-NEGOTIABLE) 🚨🚨🚨
+1. NEVER stack more than 3 text items or cards vertically. If you have 4-6 items, use grid-2-col or grid-3-col to lay them out horizontally.
+2. For CONCLUSION slides, NEVER stack summary items vertically. Instead, use a 3-column Bento grid, comparison tables, or 2x2 key grids to present final synthesis horizontally. Keep all summaries extremely compact (1-2 sentences max per point).
+3. Font size must remain small and compact: Title: 28-36px, Subtitle: 14-16px, Body: 12-14px, Cards/Grid cells: 11-13px.
+4. Keep card padding compact: 8-12px.
+
+🚨🚨🚨 HEIGHT BUDGET CALCULATOR — PLAN THIS BEFORE WRITING A SINGLE LINE OF HTML 🚨🚨🚨
+The runtime hard-clips content at exactly 720px height (CSS overflow:hidden on the section).
+Content that exceeds 720px is INVISIBLY CUT OFF at the bottom — NOT scrolled, NOT zoomed out.
+There is NO recovery. If you overflow, the bottom of your slide simply does not exist.
+
+AVAILABLE HEIGHT: 720px total
+− Outer padding (30px top + 30px bottom): 60px
+= Available for all content elements: 660px MAX
+
+ELEMENT HEIGHT REFERENCE (use these pixel costs when planning):
+┌───────────────────────────────────────────────┬──────────┐
+│ Element                                          │ Height   │
+├───────────────────────────────────────────────┼──────────┤
+│ Badge / chapter label chip                       │ ~28px    │
+│ H1 title (32–36px font)                          │ ~44px    │
+│ Subtitle / tagline (14–16px font)                │ ~22px    │
+│ Gap between sections                             │ 12–14px  │
+│ Single compact card (10-12px padding, 11-13px)   │ ~65px    │
+│ grid-3-col row of 3 compact cards                │ ~80px    │
+│ grid-2-col row of 2 cards                        │ ~90px    │
+│ premium-table (header + 4 data rows)             │ ~120px   │
+│ process-row (4–5 steps)                          │ ~90px    │
+│ timeline-row                                     │ ~80px    │
+│ bento-grid (2 rows × 3 cells, cells ≤80px)       │ ~175px   │
+│ alert-box / info-box / gradient-box              │ ~52px    │
+│ code-block-premium (8–10 visible lines)          │ ~140px   │
+│ Inline image (160px height shape)                │ ~165px   │
+│ stat-block row (grid-3-col of 3 stat-blocks)     │ ~90px    │
+│ split-card (single)                              │ ~65px    │
+│ terminal-card (8 lines)                          │ ~130px   │
+│ kanban-board (3 cols, 3 items each)              │ ~160px   │
+│ quote-card                                       │ ~70px    │
+│ feature-matrix (4 cells)                         │ ~90px    │
+│ row-list (5 rows)                                │ ~110px   │
+│ diff-panel (4 items per side)                    │ ~120px   │
+└───────────────────────────────────────────────┴──────────┘
+
+BEFORE WRITING HTML: Add up all your planned elements. TOTAL MUST STAY UNDER 600px.
+If total > 600px: REDUCE content, combine into a denser grid, or drop an element.
+
+CONCLUSION SLIDE — MANDATORY WATERMARK-ONLY TEMPLATE (slidePosition = CONCLUSION):
+Use ONLY this layout structure for conclusion slides. It MUST have a watermark background image, NOT an inline image inside any component:
+  ✅ Watermark background: {{IMAGE_PLACEHOLDER}} (stretched absolute, opacity: 0.1, blur: 2px) - THIS IS THE ONLY IMAGE ON SLIDE 7. Do NOT use inline/component images.
+  ✅ Badge + H1 Title + Subtitle → 94px
+  ✅ bento-grid (2 rows × 3 cells, each cell ≤75px, synthesizing 6 key concepts, stretched to full width) → 165px
+  ✅ gap → 14px
+  ✅ gradient-box with 1 unified insight sentence → 52px
+  ✅ TOTAL: ~325px — well within budget ✔️
+
+NEVER for conclusion slides:
+  ❌ Inline / component image (the image MUST strictly be background watermark only!)
+  ❌ Vertical list of 6–8 bullet-point takeaways (= 480px+ → OVERFLOWS!)
+  ❌ Stacking 4+ individual cards in a column
+  ❌ Using a tall code block in the conclusion
+
+🔤 GOOGLE FONTS — MANDATORY: Include this <link> tag INSIDE the <section>:
+<link href='https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Space+Grotesk:wght@400;600;700&family=Manrope:wght@400;600;700&family=DM+Sans:wght@400;600;700&family=Outfit:wght@400;600;700&family=Plus+Jakarta+Sans:wght@400;600;700&display=swap' rel='stylesheet'>
+
+Fragment styles: fade-up, fade-down, fade-left, fade-right, grow, scale-in, blur-in, fade-in, slide-up
+
+Image strategies:
+  Strategy 1 (default): Inline <img src='{{IMAGE_PLACEHOLDER}}'> with unique shape.
+  Strategy 2 (dense content): Watermark bg at 8-12% opacity + blur.
+  Strategy 3 (intro): Full-bleed at 30-40% opacity with text overlay.
+
+Color accents: #3b82f6 #8b5cf6 #ec4899 #f59e0b #10b981 #06b6d4
+Font sizes: Title 28-36px | Subtitle 14-18px | Body 12-14px | Cards 11-13px
+
+═══════════════════════════════════════════════════════════════════════════════
+📝 NARRATION REQUIREMENTS — CONTEXT-CHAINED CONTENT
+═══════════════════════════════════════════════════════════════════════════════
+
+** MINIMUM 3500 words. TARGET 4000-4500 words. **
+
+5-Part Narration Structure (context-aware):
+
+1. **Backward Bridge + Hook (400-500 words)**
+   - Open by explicitly referencing previous slide(s) by topic
+   - "We just saw how [X] works. Now let's take that understanding further..."
+   - State clearly what this slide adds to the growing knowledge
+   - Create a "meanwhile in our running example..." connection if applicable
+
+2. **Core Concepts — Building on What's Known (900-1200 words)**
+   - Define ONLY new terms (assume conceptsAlreadyCovered are known)
+   - Show how this topic EXTENDS or CONTRASTS with previously covered concepts
+   - Use the same running examples from earlier slides, now evolved
+   - Minimum 3 analogies — at least 1 must reference a concept from a previous slide
+
+3. **Deep Dive — Standing on Previous Shoulders (900-1100 words)**
+   - Advanced nuances that REQUIRE understanding of previous slides
+   - "This is only possible because of [concept from slide N]..."
+   - Best practices that contrast with the basics covered earlier
+   - Edge cases that previous approaches couldn't handle
+
+4. **Practical Examples — Continuing the Story (700-900 words)**
+   - Continue the same real-world scenario from previous slides if possible
+   - "Let's go back to our [example]. Now we'll add [current topic] to it..."
+   - Show before-after: "Before [previous concept], we had to... now we can..."
+   - At least 2 examples must chain back to something from previous slides
+
+5. **Forward Bridge + Summary (400-500 words)**
+   - Recap THIS slide's key points (3-5 bullet equivalents in prose)
+   - Explicitly state: "These [concepts] will be essential when we cover [nextSlideTopic]..."
+   - Plant a "curiosity seed" for the next slide
+   - If CONCLUSION: synthesize ALL chapter slides into one unified mental model
+
+Writing style: conversational, enthusiastic, "you" and "we", rhetorical questions.
+Every paragraph: 8-10 sentences minimum. No short paragraphs.
+NO fragment tokens, NO "as you can see", NO generic filler.
+
+═══════════════════════════════════════════════════════════════════════════════
+✅ RETURN ONE JSON OBJECT. SINGLE QUOTES IN HTML. NO MARKDOWN. CHAIN THE CONTEXT.
+═══════════════════════════════════════════════════════════════════════════════`;

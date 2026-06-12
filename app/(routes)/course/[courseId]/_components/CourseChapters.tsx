@@ -1,12 +1,18 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Course } from '@/type/CourseType';
-import { Player, PlayerRef } from '@remotion/player';
-import { Dot, Maximize, Minimize, Pause, Play, SkipBack, SkipForward } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Download, Dot, FileText, Loader2, Play, RefreshCw, Sparkles, Trash2 } from 'lucide-react';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Player, PlayerRef } from '@remotion/player';
 import { CourseComposition } from './ChapterVideo';
+import { CustomPlayerControls } from './CustomPlayerControls';
+import { ChapterNotesDialog } from './ChapterNotesDialog';
+import axios from 'axios';
+import { toast } from 'sonner';
+
 
 type Props = {
     course: Course | undefined;
+    onRefresh?: () => void;
 }
 
 // Format time as HH:MM:SS if >= 60 min, else MM:SS
@@ -21,233 +27,119 @@ export function formatTime(totalSeconds: number): string {
     return `${String(mins)}:${String(secs).padStart(2, '0')}`;
 }
 
-// Custom controls overlay for the Remotion Player
-export function CustomPlayerControls({
-    playerRef,
-    fps,
-    totalFrames,
-    containerRef,
-}: {
-    playerRef: React.RefObject<PlayerRef | null>;
-    fps: number;
-    totalFrames: number;
-    containerRef?: React.RefObject<HTMLDivElement | null>;
-}) {
-    const [isPlaying, setIsPlaying] = useState(false);
-    const [currentFrame, setCurrentFrame] = useState(0);
-    const [isFullscreen, setIsFullscreen] = useState(false);
 
-    useEffect(() => {
-        const player = playerRef.current;
-        if (!player) return;
 
-        const onPlay = () => setIsPlaying(true);
-        const onPause = () => setIsPlaying(false);
-        const onFrameUpdate = (e: { detail: { frame: number } }) => {
-            setCurrentFrame(e.detail.frame);
-        };
-        const onEnded = () => setIsPlaying(false);
-
-        player.addEventListener('play', onPlay);
-        player.addEventListener('pause', onPause);
-        player.addEventListener('frameupdate', onFrameUpdate as any);
-        player.addEventListener('ended', onEnded);
-
-        return () => {
-            player.removeEventListener('play', onPlay);
-            player.removeEventListener('pause', onPause);
-            player.removeEventListener('frameupdate', onFrameUpdate as any);
-            player.removeEventListener('ended', onEnded);
-        };
-    }, [playerRef]);
-
-    // Listen for fullscreen changes
-    useEffect(() => {
-        const handleFullscreenChange = () => {
-            setIsFullscreen(!!document.fullscreenElement);
-        };
-        document.addEventListener('fullscreenchange', handleFullscreenChange);
-        return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
-    }, []);
-
-    const togglePlay = useCallback(() => {
-        const player = playerRef.current;
-        if (!player) return;
-        if (isPlaying) {
-            player.pause();
-        } else {
-            player.play();
-        }
-    }, [playerRef, isPlaying]);
-
-    const skip = useCallback((seconds: number) => {
-        const player = playerRef.current;
-        if (!player) return;
-        const framesToSkip = Math.round(seconds * fps);
-        const newFrame = Math.max(0, Math.min(totalFrames - 1, currentFrame + framesToSkip));
-        player.seekTo(newFrame);
-    }, [playerRef, fps, totalFrames, currentFrame]);
-
-    const toggleFullscreen = useCallback(() => {
-        const el = containerRef?.current;
-        if (!el) return;
-
-        try {
-            if (document.fullscreenElement || (document as any).webkitFullscreenElement || (document as any).mozFullScreenElement || (document as any).msFullscreenElement) {
-                const exitMethod = document.exitFullscreen || (document as any).webkitExitFullscreen || (document as any).mozCancelFullScreen || (document as any).msExitFullscreen;
-                if (exitMethod) {
-                    exitMethod.call(document).catch(() => { });
-                }
-            } else {
-                const requestMethod = el.requestFullscreen || (el as any).webkitRequestFullscreen || (el as any).mozRequestFullScreen || (el as any).msRequestFullscreen;
-
-                if (requestMethod) {
-                    requestMethod.call(el).catch(() => {
-                        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                    });
-                }
-            }
-        } catch (error) {
-            // Silently fail
-        }
-    }, [containerRef]);
-
-    const currentTime = currentFrame / fps;
-    const totalTime = totalFrames / fps;
-    const progress = totalFrames > 0 ? (currentFrame / totalFrames) * 100 : 0;
-
-    const btnStyle: React.CSSProperties = {
-        background: 'none',
-        border: 'none',
-        color: 'white',
-        cursor: 'pointer',
-        padding: '2px',
-        display: 'flex',
-        alignItems: 'center',
-    };
-
-    return (
-        <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            padding: '8px 12px',
-            background: 'rgba(0,0,0,0.85)',
-            borderRadius: '0 0 8px 8px',
-            width: '100%',
-            boxSizing: 'border-box',
-            height: '44px', // Fixed height for consistency
-        }}>
-            {/* Skip Back 5s */}
-            <button onClick={() => skip(-5)} title="Skip back 5 seconds" style={btnStyle}>
-                <SkipBack size={14} />
-            </button>
-
-            {/* Play/Pause */}
-            <button onClick={togglePlay} title={isPlaying ? 'Pause' : 'Play'} style={{ ...btnStyle, margin: '0 4px' }}>
-                {isPlaying ? <Pause size={20} fill="white" /> : <Play size={20} fill="white" />}
-            </button>
-
-            {/* Skip Forward 5s */}
-            <button onClick={() => skip(5)} title="Skip forward 5 seconds" style={btnStyle}>
-                <SkipForward size={16} />
-            </button>
-
-            {/* Progress bar container */}
-            <div
-                style={{
-                    flex: 1,
-                    height: '24px', // Taller hit area
-                    display: 'flex',
-                    alignItems: 'center',
-                    cursor: 'pointer',
-                    position: 'relative',
-                    margin: '0 8px'
-                }}
-                onClick={(e) => {
-                    const rect = e.currentTarget.getBoundingClientRect();
-                    const pct = (e.clientX - rect.left) / rect.width;
-                    const frame = Math.round(pct * totalFrames);
-                    playerRef.current?.seekTo(Math.max(0, Math.min(totalFrames - 1, frame)));
-                }}
-                onMouseEnter={(e) => {
-                    const bar = e.currentTarget.querySelector('.progress-bar-bg') as HTMLDivElement;
-                    if (bar) bar.style.height = '6px';
-                }}
-                onMouseLeave={(e) => {
-                    const bar = e.currentTarget.querySelector('.progress-bar-bg') as HTMLDivElement;
-                    if (bar) bar.style.height = '4px';
-                }}
-            >
-                {/* Background bar */}
-                <div className="progress-bar-bg" style={{
-                    width: '100%',
-                    height: '4px',
-                    background: 'rgba(255,255,255,0.2)',
-                    borderRadius: '3px',
-                    position: 'relative',
-                    transition: 'height 0.1s'
-                }}>
-                    {/* Progress fill */}
-                    <div style={{
-                        width: `${progress}%`,
-                        height: '100%',
-                        background: '#ef4444', // YouTube red
-                        borderRadius: '3px',
-                        transition: 'width 0.1s',
-                        position: 'relative'
-                    }}>
-                        {/* Thumb / Knob */}
-                        <div style={{
-                            position: 'absolute',
-                            right: '-6px',
-                            top: '50%',
-                            transform: 'translateY(-50%)',
-                            width: '12px',
-                            height: '12px',
-                            borderRadius: '50%',
-                            background: '#ef4444',
-                            boxShadow: '0 0 10px rgba(0,0,0,0.8)',
-                            display: progress > 0 ? 'block' : 'none',
-                            border: '2px solid white'
-                        }} />
-                    </div>
-                </div>
-            </div>
-
-            {/* Time label */}
-            <span style={{
-                color: 'white',
-                fontSize: '12px',
-                fontFamily: 'monospace',
-                whiteSpace: 'nowrap',
-                minWidth: '70px',
-                textAlign: 'center'
-            }}>
-                {formatTime(currentTime)} / {formatTime(totalTime)}
-            </span>
-
-            {/* Fullscreen toggle */}
-            {containerRef && (
-                <button
-                    onClick={(e) => {
-                        e.stopPropagation();
-                        toggleFullscreen();
-                    }}
-                    title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
-                    style={btnStyle}
-                >
-                    {isFullscreen ? <Minimize size={18} /> : <Maximize size={18} />}
-                </button>
-            )}
-        </div>
-    );
-}
-
-function CourseChapters({ course }: Props) {
+function CourseChapters({ course, onRefresh }: Props) {
     const fps = 30;
     const [isFullscreen, setIsFullscreen] = useState(false);
     const [startedChapters, setStartedChapters] = useState<Record<string, boolean>>({});
+    const [playbackSpeed, setPlaybackSpeed] = useState(1);
+
+    // ── Download state per chapter ────────────────────────────────────────────
+    type DownloadStatus = 'idle' | 'rendering' | 'completed' | 'failed';
+    const [dlStatus, setDlStatus] = useState<Record<string, DownloadStatus>>({});
+    const [dlProgress, setDlProgress] = useState<Record<string, number>>({});
+    const [dlUrls, setDlUrls] = useState<Record<string, string>>({});
+    const pollTimers = useRef<Record<string, ReturnType<typeof setInterval>>>({});
+
+    // ── Notes dialog state ────────────────────────────────────────────────────
+    const [notesDialog, setNotesDialog] = useState<{ chapterId: string; title: string; slides: any[] } | null>(null);
+    const [resettingAudio, setResettingAudio] = useState<Record<string, boolean>>({});
+
+    const stopPoll = (chapterId: string) => {
+        if (pollTimers.current[chapterId]) {
+            clearInterval(pollTimers.current[chapterId]);
+            delete pollTimers.current[chapterId];
+        }
+    };
+
+    const pollRenderStatus = useCallback((chapterId: string) => {
+        stopPoll(chapterId);
+        pollTimers.current[chapterId] = setInterval(async () => {
+            try {
+                const res = await axios.get(`/api/render-chapter?chapterId=${chapterId}`);
+                const data = res.data;
+                if (data.status === 'completed') {
+                    setDlStatus(p => ({ ...p, [chapterId]: 'completed' }));
+                    setDlProgress(p => ({ ...p, [chapterId]: 100 }));
+                    setDlUrls(p => ({ ...p, [chapterId]: data.url }));
+                    stopPoll(chapterId);
+                } else if (data.status === 'failed') {
+                    setDlStatus(p => ({ ...p, [chapterId]: 'failed' }));
+                    stopPoll(chapterId);
+                    toast.error(`Render failed: ${data.error ?? 'Unknown error'}`);
+                } else if (data.status === 'rendering') {
+                    setDlProgress(p => ({ ...p, [chapterId]: data.progress ?? 0 }));
+                }
+            } catch { /* ignore poll errors */ }
+        }, 3000);
+    }, []);
+
+    const handleDownloadChapter = useCallback(async (chapter: any, chapterSlides: any[], chapterDurations: any) => {
+        const chapterId = chapter.chapterId;
+
+        // If already completed, directly trigger browser download
+        const existingUrl = dlUrls[chapterId];
+        if (dlStatus[chapterId] === 'completed' && existingUrl) {
+            const a = document.createElement('a');
+            a.href = existingUrl;
+            a.download = `${chapter.chapterTitle.replace(/[^a-z0-9]/gi, '_')}.mp4`;
+            a.click();
+            return;
+        }
+
+        // Start render
+        setDlStatus(p => ({ ...p, [chapterId]: 'rendering' }));
+        setDlProgress(p => ({ ...p, [chapterId]: 0 }));
+        toast.info('🎬 Starting chapter render — this may take a few minutes...');
+
+        try {
+            const slides = chapterSlides.map((slide: any) => ({
+                slideId: slide.slideId,
+                html: slide.html,
+                audioFileUrl: slide.audioUrl,
+                revealData: slide.revealData,
+                fragmentData: Array.isArray(slide.revealData) && slide.revealData.length > 0 && !isNaN(Number(slide.revealData[0]))
+                    ? slide.revealData.map(Number)
+                    : undefined,
+                caption: slide.captions,
+            }));
+
+            const res = await axios.post('/api/render-chapter', {
+                chapterId,
+                slides,
+                durationsBySlideId: chapterDurations?.slidesDurations ?? {},
+                totalFrames: chapterDurations?.totalFrames ?? 900,
+            });
+
+            if (res.data.status === 'already_complete') {
+                setDlStatus(p => ({ ...p, [chapterId]: 'completed' }));
+                setDlUrls(p => ({ ...p, [chapterId]: res.data.url }));
+                toast.success('✅ Chapter MP4 is ready!');
+                return;
+            }
+
+            // Start polling
+            pollRenderStatus(chapterId);
+        } catch (err: any) {
+            setDlStatus(p => ({ ...p, [chapterId]: 'failed' }));
+            toast.error(`Failed to start render: ${err.message}`);
+        }
+    }, [dlStatus, dlUrls, pollRenderStatus]);
+
+    // Cleanup intervals on unmount
+    useEffect(() => {
+        return () => { Object.values(pollTimers.current).forEach(clearInterval); };
+    }, []);
+    
+    // Track generation status per chapterId
+    const [statuses, setStatuses] = useState<Record<string, {
+        status: string;
+        slidesComplete: number;
+        slidesTotal: number;
+        audioComplete: number;
+        errorMessage: string | null;
+    }>>({});
 
     // Store refs for each chapter's player and container
     const playerRefs = useRef<Record<string, React.RefObject<PlayerRef | null>>>({});
@@ -277,6 +169,128 @@ function CourseChapters({ course }: Props) {
         };
     }, []);
 
+    // Fetch and update statuses
+    const fetchStatuses = useCallback(async () => {
+        if (!course?.courseId) return;
+        try {
+            const res = await axios.get(`/api/chapter-status?courseId=${course.courseId}`);
+            const list = res.data?.data?.statuses || res.data?.statuses || [];
+            
+            const map: Record<string, any> = {};
+            let completedSome = false;
+            
+            for (const row of list) {
+                map[row.chapterId] = {
+                    status: row.status,
+                    slidesComplete: row.slidesComplete,
+                    slidesTotal: row.slidesTotal,
+                    audioComplete: row.audioComplete,
+                    errorMessage: row.errorMessage,
+                };
+                
+                // Trigger page refresh when a chapter changes state to 'completed'
+                const prev = statuses[row.chapterId];
+                if (row.status === 'completed' && prev?.status !== 'completed') {
+                    completedSome = true;
+                }
+            }
+            
+            setStatuses(map);
+            if (completedSome && onRefresh) {
+                onRefresh();
+            }
+        } catch (err) {
+            console.error("Failed to fetch chapter statuses:", err);
+        }
+    }, [course?.courseId, onRefresh, statuses]);
+
+    // Initial status fetch on mount/course change
+    useEffect(() => {
+        fetchStatuses();
+    }, [course?.courseId]);
+
+    // Poll status every 3s if any chapter is currently generating or queued
+    useEffect(() => {
+        const isGeneratingAny = Object.values(statuses).some(
+            s => s.status === 'queued' || s.status === 'generating:slides' || s.status === 'generating:audio'
+        );
+
+        if (!isGeneratingAny) return;
+
+        const interval = setInterval(() => {
+            fetchStatuses();
+        }, 3000);
+
+        return () => clearInterval(interval);
+    }, [statuses, fetchStatuses]);
+
+    const handleResetAudio = useCallback(async (chapterId: string) => {
+        const confirmReset = window.confirm(
+            "⚠️ Are you sure you want to delete this chapter's generated audio/voiceover and start from scratch?\n\n" +
+            "This will clear the current voiceover audio and captions, allowing you to run the generation pipeline fresh."
+        );
+        if (!confirmReset) return;
+
+        setResettingAudio(p => ({ ...p, [chapterId]: true }));
+        const tId = toast.loading("🧹 Clearing chapter audio & resetting status...");
+
+        try {
+            const res = await axios.post('/api/reset-chapter-audio', {
+                courseId: course?.courseId,
+                chapterId: chapterId
+            });
+
+            if (res.data?.success) {
+                toast.success("✅ Chapter audio reset successfully!", { id: tId });
+                fetchStatuses();
+                if (onRefresh) onRefresh();
+            } else {
+                throw new Error(res.data?.message || "Failed to reset chapter audio.");
+            }
+        } catch (err: any) {
+            console.error(err);
+            toast.error(err.message || "Failed to reset chapter audio.", { id: tId });
+        } finally {
+            setResettingAudio(p => ({ ...p, [chapterId]: false }));
+        }
+    }, [course?.courseId, fetchStatuses, onRefresh]);
+
+    // Triggers generation event for a single chapter
+    const handleGenerateChapter = async (chapter: any, index: number) => {
+        if (!course?.courseId) return;
+        
+        // 1. Fire image generation (non-blocking)
+        axios.post('/api/generate-images', {
+            courseName: course.courseName,
+            courseId: course.courseId,
+            chapters: course.courseLayout?.chapters || [],
+        }).catch(e => console.error('⚠️ Image queue failed:', e.message));
+
+        // 2. Queue video content generation
+        try {
+            setStatuses(prev => ({
+                ...prev,
+                [chapter.chapterId]: {
+                    status: 'queued',
+                    slidesComplete: 0,
+                    slidesTotal: 7,
+                    audioComplete: 0,
+                    errorMessage: null
+                }
+            }));
+            await axios.post('/api/generate-video-content', {
+                chapter,
+                courseId: course.courseId,
+                courseName: course.courseName,
+                chapterIndex: index,
+            });
+            toast.success(`📤 Generation started for Chapter ${index + 1}!`);
+        } catch (err: any) {
+            console.error("❌ Generation trigger failed:", err);
+            toast.error(`Failed to queue generation: ${err.message}`);
+        }
+    };
+
     // Instantly compute durations from stored audioDuration (no async fetch needed)
     const durationsByChapterId = useMemo(() => {
         if (!course?.chapterContentSlides || course.chapterContentSlides.length === 0) {
@@ -293,9 +307,11 @@ function CourseChapters({ course }: Props) {
         const durationsMap: Record<string, { slidesDurations: Record<string, number>; totalFrames: number }> = {};
 
         for (const chapter of chapters) {
-            const chapterSlides = course.chapterContentSlides.filter(
-                slide => slide.chapterId === chapter.chapterId
-            );
+            // Sort slides by slideIndex so durations are always in Slide 1→N order,
+            // regardless of which chapter was generated first.
+            const chapterSlides = course.chapterContentSlides
+                .filter(slide => slide.chapterId === chapter.chapterId)
+                .sort((a, b) => (a.slideIndex ?? 0) - (b.slideIndex ?? 0));
 
             if (chapterSlides.length > 0) {
                 const slidesDurations: Record<string, number> = {};
@@ -315,13 +331,13 @@ function CourseChapters({ course }: Props) {
         return durationsMap;
     }, [course?.chapterContentSlides, course?.courseLayout?.chapters, fps]);
 
-    // Get or create refs for a chapter
     const getPlayerRef = (chapterId: string) => {
         if (!playerRefs.current[chapterId]) {
             playerRefs.current[chapterId] = { current: null };
         }
         return playerRefs.current[chapterId];
     };
+
     const getContainerRef = (chapterId: string) => {
         if (!containerRefs.current[chapterId]) {
             containerRefs.current[chapterId] = { current: null };
@@ -339,6 +355,216 @@ function CourseChapters({ course }: Props) {
         }, 100);
     };
 
+    // Render the beautiful generation overlay states
+    const renderGenerationUI = (chapter: any, index: number) => {
+        const s = statuses[chapter.chapterId] || {
+            status: 'idle',
+            slidesComplete: 0,
+            slidesTotal: 7,
+            audioComplete: 0,
+            errorMessage: null
+        };
+        const status = s.status;
+        const slidesComplete = s.slidesComplete || 0;
+        const slidesTotal = s.slidesTotal || 7;
+        const audioComplete = s.audioComplete || 0;
+        const errorMsg = s.errorMessage;
+
+        // division safeguards to avoid NaN progress bars
+        const total = slidesTotal > 0 ? slidesTotal : 7;
+        const slidesPercent = Math.min(100, Math.round((slidesComplete / total) * 100));
+        const audioPercent = Math.min(100, Math.round((audioComplete / total) * 100));
+
+        // Inject high-end CSS keyframes directly for self-contained, smooth hardware-accelerated animations
+        const animationStyles = (
+            <style dangerouslySetInnerHTML={{__html: `
+                @keyframes floatCard {
+                    0%, 100% { transform: translateY(0px) rotate(-1deg); }
+                    50% { transform: translateY(-8px) rotate(1deg); }
+                }
+                @keyframes ambientPulse {
+                    0%, 100% { opacity: 0.15; transform: scale(1) translate(-50%, -50%); }
+                    50% { opacity: 0.35; transform: scale(1.2) translate(-45%, -45%); }
+                }
+                @keyframes soundBar {
+                    0%, 100% { height: 8px; }
+                    50% { height: 36px; }
+                }
+                @keyframes shimmerSweep {
+                    0% { transform: translateX(-150%); }
+                    50% { transform: translateX(150%); }
+                    100% { transform: translateX(150%); }
+                }
+            `}} />
+        );
+
+        switch (status) {
+            case 'queued':
+                return (
+                    <div className="relative flex flex-col items-center justify-center h-full p-4 text-center bg-zinc-950 text-white gap-3 select-none overflow-hidden">
+                        {animationStyles}
+                        {/* Shifting background aurora */}
+                        <div className="absolute top-1/2 left-1/2 w-64 h-64 rounded-full bg-purple-600/20 blur-[80px] -translate-x-1/2 -translate-y-1/2 pointer-events-none" style={{ animation: 'ambientPulse 6s ease-in-out infinite' }} />
+                        
+                        <div className="relative z-10 flex flex-col items-center gap-4">
+                            {/* Rotating double-ring indicator */}
+                            <div className="relative flex items-center justify-center w-16 h-16">
+                                <div className="absolute inset-0 rounded-full border-2 border-purple-500/20 border-t-purple-500 animate-spin" style={{ animationDuration: '1.2s' }} />
+                                <div className="absolute inset-2 rounded-full border-2 border-indigo-500/10 border-b-indigo-400 animate-spin" style={{ animationDuration: '2s', animationDirection: 'reverse' }} />
+                                <Sparkles className="h-5 w-5 text-purple-400 animate-pulse" />
+                            </div>
+                            <div className="space-y-1">
+                                <p className="text-xs font-semibold tracking-wider uppercase text-purple-300 drop-shadow-[0_0_10px_rgba(168,85,247,0.4)]">Awaiting Pipeline</p>
+                                <p className="text-[11px] text-zinc-400 max-w-[240px] leading-relaxed">Securing server-side slots. Allocating high-performance GPU engines...</p>
+                            </div>
+                        </div>
+                    </div>
+                );
+            case 'generating:slides': {
+                return (
+                    <div className="relative flex flex-col justify-center h-full p-6 bg-zinc-950 text-white gap-4 select-none overflow-hidden">
+                        {animationStyles}
+                        {/* Aurora background */}
+                        <div className="absolute top-1/2 left-1/2 w-72 h-72 rounded-full bg-violet-600/15 blur-[90px] -translate-x-1/2 -translate-y-1/2 pointer-events-none" style={{ animation: 'ambientPulse 8s ease-in-out infinite' }} />
+                        
+                        <div className="relative z-10 flex gap-4 items-center">
+                            {/* Mini Floating Card skeleton to represent slides being designed */}
+                            <div className="flex-shrink-0 w-16 h-12 bg-zinc-900/80 rounded-lg border border-white/10 p-1.5 flex flex-col gap-1 shadow-2xl relative overflow-hidden" style={{ animation: 'floatCard 4s ease-in-out infinite' }}>
+                                <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/5 to-transparent -translate-x-full" style={{ animation: 'shimmerSweep 2s infinite' }} />
+                                <div className="h-1.5 w-8 bg-purple-500/40 rounded-full" />
+                                <div className="h-1.5 w-full bg-zinc-800 rounded-sm" />
+                                <div className="flex gap-1 mt-auto">
+                                    <div className="h-3 w-3 bg-indigo-500/30 rounded-sm" />
+                                    <div className="flex flex-col gap-0.5 w-full">
+                                        <div className="h-1 w-full bg-zinc-800 rounded-sm" />
+                                        <div className="h-1 w-2/3 bg-zinc-800 rounded-sm" />
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div className="flex-1 space-y-1">
+                                <div className="flex justify-between items-end">
+                                    <div className="flex items-center gap-1.5">
+                                        <Sparkles className="h-3.5 w-3.5 text-purple-400 animate-pulse" />
+                                        <span className="text-[10px] md:text-xs font-bold uppercase tracking-widest text-purple-400">Phase 1: Designing Slides</span>
+                                    </div>
+                                    <span className="text-[10px] md:text-xs font-mono text-zinc-400 font-bold">{slidesComplete}/{total} ({slidesPercent}%)</span>
+                                </div>
+                                <div className="w-full bg-zinc-900 rounded-full h-2.5 overflow-hidden border border-white/5 shadow-inner">
+                                    <div 
+                                        className="bg-gradient-to-r from-purple-500 via-violet-500 to-indigo-500 h-full rounded-full transition-all duration-500 ease-out shadow-[0_0_12px_rgba(168,85,247,0.6)] relative" 
+                                        style={{ width: `${slidesPercent}%` }}
+                                    >
+                                        {/* Glowing end bead */}
+                                        {slidesPercent > 0 && (
+                                            <div className="absolute right-0 top-0 bottom-0 w-1.5 bg-white/60 blur-[1px] animate-pulse" />
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <p className="relative z-10 text-[10px] text-zinc-400 italic text-center font-medium">
+                            Synthesizing layout, formatting markup, and binding visuals for slide #{slidesComplete + 1}...
+                        </p>
+                    </div>
+                );
+            }
+            case 'generating:audio': {
+                return (
+                    <div className="relative flex flex-col justify-center h-full p-6 bg-zinc-950 text-white gap-4 select-none overflow-hidden">
+                        {animationStyles}
+                        {/* Shifting background aurora */}
+                        <div className="absolute top-1/2 left-1/2 w-72 h-72 rounded-full bg-cyan-600/15 blur-[90px] -translate-x-1/2 -translate-y-1/2 pointer-events-none" style={{ animation: 'ambientPulse 7s ease-in-out infinite' }} />
+                        
+                        <div className="relative z-10 flex gap-4 items-center">
+                            {/* Animated Audio Equalizer Visualizer */}
+                            <div className="flex-shrink-0 w-16 h-12 bg-zinc-900/80 rounded-lg border border-white/10 flex items-center justify-center gap-1 shadow-2xl">
+                                <div className="w-1 bg-cyan-400 rounded-full" style={{ animation: 'soundBar 1.2s ease-in-out infinite', animationDelay: '0.1s' }} />
+                                <div className="w-1 bg-indigo-400 rounded-full" style={{ animation: 'soundBar 1s ease-in-out infinite', animationDelay: '0.3s' }} />
+                                <div className="w-1 bg-violet-400 rounded-full" style={{ animation: 'soundBar 1.4s ease-in-out infinite', animationDelay: '0.5s' }} />
+                                <div className="w-1 bg-indigo-400 rounded-full" style={{ animation: 'soundBar 0.9s ease-in-out infinite', animationDelay: '0.2s' }} />
+                                <div className="w-1 bg-cyan-400 rounded-full" style={{ animation: 'soundBar 1.3s ease-in-out infinite', animationDelay: '0.4s' }} />
+                            </div>
+                            
+                            <div className="flex-1 space-y-1">
+                                <div className="flex justify-between items-end">
+                                    <div className="flex items-center gap-1.5">
+                                        <Loader2 className="h-3.5 w-3.5 animate-spin text-cyan-400" />
+                                        <span className="text-[10px] md:text-xs font-bold uppercase tracking-widest text-cyan-400 font-semibold">Phase 2: Narrating & Audio</span>
+                                    </div>
+                                    <span className="text-[10px] md:text-xs font-mono text-zinc-400 font-bold">{audioComplete}/{total} ({audioPercent}%)</span>
+                                </div>
+                                <div className="w-full bg-zinc-900 rounded-full h-2.5 overflow-hidden border border-white/5 shadow-inner">
+                                    <div 
+                                        className="bg-gradient-to-r from-indigo-500 via-cyan-500 to-emerald-400 h-full rounded-full transition-all duration-500 ease-out shadow-[0_0_12px_rgba(6,182,212,0.6)] relative" 
+                                        style={{ width: `${audioPercent}%` }}
+                                    >
+                                        {/* Glowing end bead */}
+                                        {audioPercent > 0 && (
+                                            <div className="absolute right-0 top-0 bottom-0 w-1.5 bg-white/60 blur-[1px] animate-pulse" />
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <p className="relative z-10 text-[10px] text-cyan-300 italic text-center font-medium animate-pulse">
+                            Synthesizing studio-grade AI narration for slide #{audioComplete + 1}...
+                        </p>
+                    </div>
+                );
+            }
+            case 'failed':
+                return (
+                    <div className="relative flex flex-col items-center justify-center h-full p-4 text-center bg-zinc-950 text-white gap-3 select-none overflow-hidden">
+                        {animationStyles}
+                        <div className="absolute top-1/2 left-1/2 w-64 h-64 rounded-full bg-rose-900/20 blur-[80px] -translate-x-1/2 -translate-y-1/2 pointer-events-none" />
+                        
+                        <div className="relative z-10 flex flex-col items-center gap-3">
+                            <div className="p-3 bg-rose-500/10 border border-rose-500/20 rounded-full animate-bounce shadow-[0_0_15px_rgba(244,63,94,0.2)]">
+                                <AlertTriangle className="h-6 w-6 text-rose-500" />
+                            </div>
+                            <div className="space-y-1 max-w-[90%]">
+                                <p className="text-sm font-bold text-rose-400">Generation Failed</p>
+                                <p className="text-[10px] md:text-[11px] text-zinc-400 line-clamp-2 leading-relaxed max-w-[260px] mx-auto">{errorMsg || "An error occurred during execution."}</p>
+                            </div>
+                            <button
+                                onClick={() => handleGenerateChapter(chapter, index)}
+                                className="mt-1 flex items-center gap-1.5 px-4 py-1.5 bg-rose-950/80 hover:bg-rose-900 border border-rose-800/80 hover:border-rose-700 rounded-full text-xs text-rose-200 font-semibold transition-all hover:scale-105 active:scale-95 hover:shadow-[0_0_12px_rgba(244,63,94,0.3)] duration-200"
+                            >
+                                <RefreshCw className="h-3.5 w-3.5" />
+                                Retry Generation
+                            </button>
+                        </div>
+                    </div>
+                );
+            case 'idle':
+            default:
+                return (
+                    <div className="relative flex flex-col items-center justify-center h-full p-6 text-center bg-gradient-to-b from-zinc-900 to-black text-white gap-4 overflow-hidden group select-none">
+                        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-32 h-32 bg-purple-500/10 rounded-full blur-2xl group-hover:bg-purple-500/20 transition-all duration-700" />
+                        
+                        <div className="z-10 flex flex-col items-center gap-2">
+                            <div className="p-3 bg-zinc-800/80 border border-zinc-700/50 rounded-2xl group-hover:border-purple-500/30 transition-all duration-300">
+                                <Sparkles className="h-6 w-6 text-purple-400 animate-pulse" />
+                            </div>
+                            <div>
+                                <p className="text-sm font-semibold text-zinc-200">Video Content Ready</p>
+                                <p className="text-[11px] text-zinc-500 mt-0.5">Generate slides & AI voiceover for this chapter</p>
+                            </div>
+                        </div>
+
+                        <button
+                            onClick={() => handleGenerateChapter(chapter, index)}
+                            className="z-10 cursor-pointer flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white rounded-xl text-xs font-bold shadow-[0_4px_20px_rgba(147,51,234,0.35)] transition-all hover:scale-105 active:scale-95 duration-200"
+                        >
+                            <Play className="h-3 w-3 fill-current" />
+                            Generate Video Content
+                        </button>
+                    </div>
+                );
+        }
+    };
+
     return (
         <div className='max-w-6xl -mt-5 p-10 border rounded-3xl shadow-lg w-full bg-background/80 backdrop-blur-xl'>
             <div className='flex justify-between items-center'>
@@ -347,9 +573,20 @@ function CourseChapters({ course }: Props) {
             </div>
             <div className='mt-5'>
                 {course?.courseLayout?.chapters?.map((chapter, index) => {
-                    const chapterSlides = course.chapterContentSlides?.filter(
+                    // Sort by slideIndex so slides always play in their authored order (1→N)
+                    // even when chapters were generated out of sequence (e.g. Ch.2 before Ch.1).
+                    const chapterSlides = (course.chapterContentSlides?.filter(
                         slide => slide.chapterId === chapter.chapterId
-                    ) || [];
+                    ) || []).sort((a, b) => (a.slideIndex ?? 0) - (b.slideIndex ?? 0));
+                    
+                    const chStatus = statuses[chapter.chapterId];
+                    // Consider it generated ONLY if we actually have slides in the database AND either:
+                    // 1. The status is completed
+                    // 2. Or every slide has audioUrl
+                    const isGenerated = chapterSlides.length > 0 && (chStatus 
+                        ? chStatus.status === 'completed' 
+                        : chapterSlides.every(s => s.audioUrl));
+
                     const chapterDurations = durationsByChapterId?.[chapter.chapterId];
                     const pRef = getPlayerRef(chapter.chapterId);
                     const cRef = getContainerRef(chapter.chapterId);
@@ -360,16 +597,88 @@ function CourseChapters({ course }: Props) {
                     return (
                         <Card key={index} className='mb-5'>
                             <CardHeader>
-                                <div className='flex items-center gap-3'>
-                                    <h2 className='p-2 bg-primary/40 inline-flex h-10 w-10 text-center rounded-2xl justify-center items-center'>{index + 1}</h2>
-                                    <CardTitle className='md:text-xl text-base'>
-                                        {chapter.chapterTitle}
-                                    </CardTitle>
-                                </div>
-                            </CardHeader>
+                                <div className='flex items-center justify-between gap-3 flex-wrap'>
+                                    <div className='flex items-center gap-3 flex-1 min-w-0'>
+                                        <h2 className='p-2 bg-primary/40 inline-flex h-10 w-10 text-center rounded-2xl justify-center items-center flex-shrink-0'>{index + 1}</h2>
+                                        <CardTitle className='md:text-xl text-base truncate'>
+                                            {chapter.chapterTitle}
+                                        </CardTitle>
+                                    </div>
+
+                                     {/* ── Action buttons (only for generated chapters) ── */}
+                                     {isGenerated && (
+                                         <div className='flex items-center gap-2 flex-shrink-0'>
+                                             {/* Notes PDF button */}
+                                             <button
+                                                 onClick={() => setNotesDialog({ chapterId: chapter.chapterId, title: chapter.chapterTitle, slides: chapterSlides })}
+                                                 className='cursor-pointer flex items-center gap-1.5 px-3 py-1.5 bg-zinc-800/60 hover:bg-zinc-700/80 border border-zinc-600/50 hover:border-amber-500/50 text-zinc-300 hover:text-amber-300 rounded-xl text-xs font-semibold transition-all hover:scale-105 active:scale-95 group'
+                                             >
+                                                 <FileText className='h-3.5 w-3.5 group-hover:text-amber-400 transition-colors' />
+                                                 <span className='hidden sm:inline'>Notes PDF</span>
+                                             </button>
+
+                                             {/* Reset Audio button */}
+                                             <button
+                                                 disabled={resettingAudio[chapter.chapterId]}
+                                                 onClick={() => handleResetAudio(chapter.chapterId)}
+                                                 className='cursor-pointer flex items-center gap-1.5 px-3 py-1.5 bg-zinc-800/60 hover:bg-rose-950/40 hover:text-rose-300 border border-zinc-600/50 hover:border-rose-500/50 text-zinc-300 rounded-xl text-xs font-semibold transition-all hover:scale-105 active:scale-95 group disabled:opacity-50 disabled:cursor-not-allowed'
+                                                 title="Delete voiceover audio and captions to regenerate from scratch"
+                                             >
+                                                 {resettingAudio[chapter.chapterId] ? (
+                                                     <Loader2 className='h-3.5 w-3.5 animate-spin text-rose-400' />
+                                                 ) : (
+                                                     <Trash2 className='h-3.5 w-3.5 group-hover:text-rose-400 transition-colors' />
+                                                 )}
+                                                 <span className='hidden sm:inline'>Reset Audio</span>
+                                             </button>
+
+                                             {/* Download MP4 button */}
+                                             {(() => {
+                                                 const ds = dlStatus[chapter.chapterId] ?? 'idle';
+                                                 const prog = dlProgress[chapter.chapterId] ?? 0;
+
+                                                 if (ds === 'rendering') return (
+                                                     <div className='flex items-center gap-2 px-3 py-1.5 bg-zinc-800/60 border border-zinc-700/50 rounded-xl text-xs text-zinc-300'>
+                                                         <Loader2 className='h-3.5 w-3.5 animate-spin text-purple-400' />
+                                                         <span className='font-semibold hidden sm:inline'>Rendering</span>
+                                                         <span className='font-mono text-purple-300 font-bold'>{prog}%</span>
+                                                     </div>
+                                                 );
+                                                 if (ds === 'completed') return (
+                                                     <button
+                                                         onClick={() => handleDownloadChapter(chapter, chapterSlides, chapterDurations)}
+                                                         className='cursor-pointer flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-bold shadow-[0_4px_16px_rgba(16,185,129,0.35)] transition-all hover:scale-105 active:scale-95'
+                                                     >
+                                                         <Download className='h-3.5 w-3.5' />
+                                                         Download MP4
+                                                     </button>
+                                                 );
+                                                 if (ds === 'failed') return (
+                                                     <button
+                                                         onClick={() => handleDownloadChapter(chapter, chapterSlides, chapterDurations)}
+                                                         className='cursor-pointer flex items-center gap-1.5 px-3 py-1.5 bg-rose-900/60 hover:bg-rose-800/80 border border-rose-700/50 text-rose-300 rounded-xl text-xs font-semibold transition-all hover:scale-105'
+                                                     >
+                                                         <RefreshCw className='h-3.5 w-3.5' />
+                                                         Retry Render
+                                                     </button>
+                                                 );
+                                                 return (
+                                                     <button
+                                                         onClick={() => handleDownloadChapter(chapter, chapterSlides, chapterDurations)}
+                                                         className='cursor-pointer flex items-center gap-1.5 px-3 py-1.5 bg-zinc-800/60 hover:bg-zinc-700/80 border border-zinc-600/50 hover:border-purple-500/50 text-zinc-300 hover:text-white rounded-xl text-xs font-semibold transition-all hover:scale-105 active:scale-95 group'
+                                                     >
+                                                         <Download className='h-3.5 w-3.5 group-hover:text-purple-400 transition-colors' />
+                                                         <span className='hidden sm:inline'>Download MP4</span>
+                                                     </button>
+                                                 );
+                                             })()}
+                                         </div>
+                                     )}
+                                 </div>
+                             </CardHeader>
 
                             <CardContent>
-                                <div className='grid grid-cols-2 gap-5'>
+                                <div className='grid grid-cols-1 md:grid-cols-2 gap-5'>
                                     <div>
                                         {chapter.subContent.map((content, idx) => (
                                             <div key={idx} className='flex gap-2 items-center mt-2'>
@@ -378,17 +687,21 @@ function CourseChapters({ course }: Props) {
                                             </div>
                                         ))}
                                     </div>
-                                    {/* Player + controls wrapper for fullscreen */}
+                                    {/* Player + controls wrapper */}
                                     <div ref={cRef} style={{
                                         background: '#000',
-                                        borderRadius: '8px',
+                                        borderRadius: (isFullscreen && typeof document !== 'undefined' && document.fullscreenElement === cRef.current) ? '0' : '8px',
                                         overflow: 'hidden',
                                         display: 'flex',
                                         flexDirection: 'column',
                                         position: 'relative',
-                                        ...(isFullscreen ? { height: '100%', width: '100%' } : { height: '214px' }),
+                                        height: (isFullscreen && typeof document !== 'undefined' && document.fullscreenElement === cRef.current) ? '100vh' : '220px',
+                                        width: '100%',
                                     }}>
-                                        {!chapterStarted ? (
+                                        {!isGenerated ? (
+                                            /* Render beautiful generation state machine UI */
+                                            renderGenerationUI(chapter, index)
+                                        ) : !chapterStarted ? (
                                             /* YouTube-style black placeholder overlay */
                                             <div
                                                 style={{
@@ -483,37 +796,44 @@ function CourseChapters({ course }: Props) {
                                                 )}
                                             </div>
                                         ) : (
-                                            /* Actual Player */
+                                            /* Actual Remotion Player + custom controls */
                                             <>
-                                                <Player
-                                                    ref={pRef}
-                                                    component={CourseComposition}
-                                                    durationInFrames={totalFrames}
-                                                    compositionWidth={1280}
-                                                    compositionHeight={720}
-                                                    fps={fps}
-                                                    style={{
-                                                        width: '100%',
-                                                        borderRadius: isFullscreen ? '0' : '8px 8px 0 0',
-                                                        flex: 1,
-                                                        minHeight: 0,
-                                                    }}
-                                                    inputProps={{
-                                                        slides: chapterSlides.map(slide => ({
-                                                            slideId: slide.slideId,
-                                                            html: slide.html,
-                                                            audioFileUrl: slide.audioUrl,
-                                                            revealData: slide.revealData,
-                                                            caption: slide.captions
-                                                        })),
-                                                        durationsBySlideId: chapterDurations?.slidesDurations || {}
-                                                    }}
-                                                />
+                                                <div style={{ flex: 1, position: 'relative', width: '100%', minHeight: 0 }}>
+                                                    <Player
+                                                        ref={pRef}
+                                                        component={CourseComposition}
+                                                        durationInFrames={totalFrames}
+                                                        compositionWidth={1280}
+                                                        compositionHeight={720}
+                                                        fps={fps}
+                                                        playbackRate={playbackSpeed}
+                                                        style={{
+                                                            width: '100%',
+                                                            height: '100%',
+                                                            borderRadius: '8px 8px 0 0',
+                                                        }}
+                                                        inputProps={{
+                                                            slides: chapterSlides.map(slide => ({
+                                                                slideId: slide.slideId,
+                                                                html: slide.html ?? '',
+                                                                audioFileUrl: slide.audioUrl ?? '',
+                                                                revealData: slide.revealData,
+                                                                fragmentData: Array.isArray(slide.revealData) && slide.revealData.length > 0 && !isNaN(Number(slide.revealData[0]))
+                                                                    ? slide.revealData.map(Number)
+                                                                    : undefined,
+                                                                caption: slide.captions,
+                                                            })),
+                                                            durationsBySlideId: chapterDurations?.slidesDurations || {}
+                                                        }}
+                                                    />
+                                                </div>
                                                 <CustomPlayerControls
                                                     playerRef={pRef}
                                                     fps={fps}
                                                     totalFrames={totalFrames}
                                                     containerRef={cRef}
+                                                    playbackSpeed={playbackSpeed}
+                                                    setPlaybackSpeed={setPlaybackSpeed}
                                                 />
                                             </>
                                         )}
@@ -524,8 +844,19 @@ function CourseChapters({ course }: Props) {
                     );
                 })}
             </div>
-        </div >
-    )
+            {/* ── Chapter Notes Dialog ── */}
+            {notesDialog && (
+                <ChapterNotesDialog
+                    open={!!notesDialog}
+                    onClose={() => setNotesDialog(null)}
+                    chapterTitle={notesDialog.title}
+                    slides={notesDialog.slides}
+                    courseId={course?.courseId || ''}
+                    chapterId={notesDialog.chapterId}
+                />
+            )}
+        </div>
+    );
 }
 
 export default CourseChapters

@@ -27,7 +27,7 @@ interface NavItem {
 const navItems: NavItem[] = [
     {
         label: 'Video Course',
-        href: '/',
+        href: '/course-generator',
         icon: <Video className="w-5 h-5" />,
         description: 'Generate full AI courses',
     },
@@ -42,21 +42,18 @@ const navItems: NavItem[] = [
         href: '/motion-graphics',
         icon: <Wand2 className="w-5 h-5" />,
         description: 'AI animated promo videos',
-        badge: '✨',
     },
     {
         label: 'Migoo Studio',
         href: '/studio',
         icon: <Sparkles className="w-5 h-5" />,
         description: "Director's Chair",
-        badge: '⚡',
     },
     {
         label: 'Notes Generator',
         href: '/notes',
         icon: <GraduationCap className="w-5 h-5" />,
         description: 'AI-powered study notes',
-        badge: '🆕',
     },
 ]
 
@@ -66,8 +63,9 @@ function AppSidebar() {
     const [collapsed, setCollapsed] = useState(false)
     const [mobileOpen, setMobileOpen] = useState(false)
 
-    // Hide sidebar on auth pages and course detail pages
+    // Hide sidebar on landing page, auth pages and course detail pages
     const isAuthPage = pathname === '/sign-in' || pathname === '/sign-up'
+    const isLandingPage = pathname === '/'
     const isCourseDetailPage = /^\/course\/[^/]+/.test(pathname)
 
     // Close mobile sidebar on route change
@@ -75,10 +73,10 @@ function AppSidebar() {
         setMobileOpen(false)
     }, [pathname])
 
-    if (!isLoaded || !isSignedIn || isAuthPage || isCourseDetailPage) return null
+    if (!isLoaded || !isSignedIn || isAuthPage || isLandingPage || isCourseDetailPage) return null
 
     const isActive = (href: string) => {
-        if (href === '/') return pathname === '/'
+        if (href === '/course-generator') return pathname === '/course-generator'
         return pathname.startsWith(href)
     }
 
@@ -91,7 +89,7 @@ function AppSidebar() {
             {/* Migoo Logo — shown when global header is hidden (motion-graphics & note viewer pages) */}
             {showSidebarLogo && (
                 <div className={`flex items-center ${collapsed ? 'justify-center px-2' : 'justify-start px-4'} py-3 border-b border-border/60`}>
-                    <Link href="/">
+                    <Link href="/course-generator">
                         <Image src="/logo.png" alt="Migoo" width={collapsed ? 32 : 90} height={collapsed ? 32 : 90} className="object-contain" />
                     </Link>
                 </div>
@@ -157,21 +155,7 @@ function AppSidebar() {
                 })}
             </nav>
 
-            {/* Bottom section */}
-            <div className="px-3 pb-4">
-                <div className={`
-                    flex items-center ${collapsed ? 'justify-center' : 'gap-2'} 
-                    px-3 py-2 rounded-xl bg-gradient-to-r from-primary/5 to-accent/5 
-                    border border-primary/5
-                `}>
-                    <Sparkles className="w-4 h-4 text-primary flex-shrink-0" />
-                    {!collapsed && (
-                        <p className="text-[11px] text-muted-foreground">
-                            <span className="font-medium text-foreground">Pro Features</span> coming soon
-                        </p>
-                    )}
-                </div>
-            </div>
+
 
             {/* Collapse Toggle (desktop only) */}
             <button

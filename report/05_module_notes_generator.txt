@@ -1,0 +1,307 @@
+================================================================================
+         MODULE 5: AI NOTES GENERATOR
+         "Smart Notes, Beautifully Crafted"
+================================================================================
+
+1. MODULE OVERVIEW
+------------------
+
+The AI Notes Generator converts any source material — a topic, pasted text,
+or uploaded documents — into beautifully formatted, multi-page, printer-ready
+study notes. This module extends Migoo beyond video into the document
+generation space, making it a comprehensive content creation platform.
+
+The generator supports 6 distinct note styles and 4 decorative page designs,
+producing Cornell-style, Mind Map, Flashcard, Infographic, Cheat Sheet, and
+Timeline layouts with professional typography and A4-compliant pagination.
+
+Production Pipeline:
+  Source Input (Topic/Text/Document) → Sarvam Vision Extraction (if doc) →
+  AI Note Generation (Groq LLM) → Structured JSON → Multi-Page Rendering →
+  PDF/PNG Export
+
+
+2. TECHNICAL ARCHITECTURE
+-------------------------
+
+Frontend:
+  - File: app/notes/page.tsx (45KB) — Notes dashboard + creation form
+  - File: app/notes/[noteId]/page.tsx (1515+ lines) — Note viewer/renderer
+  - UI: Multi-page A4 document viewer with print-ready CSS
+
+API Layer:
+  - POST /api/notes — Create new note project
+  - GET  /api/notes — List user's note projects
+  - GET  /api/notes/[noteId] — Fetch specific note data
+  - PATCH /api/notes/[noteId] — Update note settings
+  - DELETE /api/notes/[noteId] — Delete note project
+  - POST /api/notes/[noteId]/generate — Trigger AI note generation
+  - POST /api/notes/[noteId]/upload — Upload image assets
+  - POST /api/notes/[noteId]/process-doc — Sarvam Vision document processing
+
+Database Schema:
+  - notesProjects: noteId, userId, title, sourceType (text/document/topic/url),
+    sourceContent, extractedContent, uploadedAssets (JSON), noteStyle
+    (cornell/mindmap/flashcard/infographic/cheatsheet/timeline),
+    pageDesign (botanical/abstractPastel/geoPebbles/elegantLeaf),
+    generatedData (JSON), generatedHtml, exportUrl, thumbnailUrl, status
+
+AI Processing:
+  - File: lib/chunked-notes-generator.ts (13KB) — Smart content sampler +
+    tiered model strategy for note generation
+
+
+3. SOURCE INPUT SYSTEM
+------------------------
+
+The Notes Generator supports three input modes, auto-detected based on
+what the user provides:
+
+  MODE 1 — TOPIC (sourceType: 'topic')
+  - User enters only a title (e.g., "Quantum Computing")
+  - AI generates complete notes from its training knowledge
+  - No source material needed — pure generative mode
+
+  MODE 2 — TEXT (sourceType: 'text')
+  - User pastes raw content (lecture notes, article, transcript)
+  - Content length can range from a few paragraphs to 60,000+ characters
+  - Smart sampling ensures even massive documents are processed
+
+  MODE 3 — DOCUMENT (sourceType: 'document')
+  - User uploads PDF or images
+  - Sarvam Vision OCR extracts text automatically
+  - Extracted content displayed for review before generation
+  - Supports multi-page PDFs with full text extraction
+
+  AUTO-DETECTION LOGIC (getSourceType function):
+  - If tempNoteId AND extractedContent exist → 'document'
+  - If uploadedAssets contain PDF or image → 'document'
+  - If sourceContent length > 20 chars → 'text'
+  - Otherwise → 'topic'
+
+
+4. DOCUMENT PROCESSING (Sarvam Vision OCR)
+--------------------------------------------
+
+When a user uploads a document, the system processes it in real-time:
+
+  a) Frontend sends raw binary file to /api/notes/[noteId]/process-doc
+     with headers:
+     - x-filename: Original filename
+     - x-content-type: MIME type (application/pdf, image/png, etc.)
+
+  b) Server proxies the file to Sarvam's Azure-hosted Vision API
+     (no CORS issues — server-side proxy)
+
+  c) Sarvam Vision analyzes each page:
+     - OCR text extraction from scanned documents
+     - Structured text from digital PDFs
+     - Diagram and chart description
+     - Table data extraction
+
+  d) Extracted text stored in notesProjects.extractedContent
+
+  e) Frontend displays extracted content in a reviewable panel:
+     - Character count displayed
+     - Scrollable preview with monospaced font
+     - "Ready" badge when extraction completes
+     - User can review before generating notes
+
+
+5. SMART CONTENT SAMPLER + TIERED MODEL STRATEGY
+---------------------------------------------------
+
+The chunked-notes-generator.ts implements a sophisticated content processing
+pipeline that handles documents of any size:
+
+  TIERED MODEL STRATEGY:
+
+  Tier 1 — llama-3.3-70b-versatile (High Quality)
+    - Max content chars: 16,000
+    - Max output tokens: 5,500
+    - Head chars: 2,500 (intro, objectives, TOC)
+    - Tail chars: 1,200 (conclusion, references)
+    - Min chars per section: 500
+    - TPM: ~12K free tier
+
+  Tier 2 — llama-3.1-8b-instant (High Capacity)
+    - Max content chars: 55,000
+    - Max output tokens: 6,500
+    - Head chars: 5,000
+    - Tail chars: 2,500
+    - Min chars per section: 1,000
+    - TPM: 250K free tier, 131K context window
+    - Triggered automatically when Tier 1 hits 413/429 error
+
+  AUTOMATIC TIER ESCALATION:
+  - System starts with Tier 1 (higher quality)
+  - If request is too large or rate limited, catches TOO_LARGE error
+  - Automatically escalates to Tier 2 (larger capacity)
+  - Transparent to user — no manual intervention needed
+
+  SMART SAMPLING ALGORITHM (smartSample function):
+
+  For documents larger than tier's maxContentChars:
+  a) HEADING DETECTION (detectHeadings function):
+     - Scans document line by line
+     - Identifies headings using heuristics:
+       * Lines starting with # (Markdown headers)
+       * Lines starting with numbers (e.g., "1. Introduction")
+       * ALL CAPS lines (e.g., "METHODOLOGY")
+       * Title Case lines (e.g., "System Design")
+     - Heading criteria: 2-80 chars, not pure punctuation
+
+  b) SECTION-BASED SAMPLING:
+     - Takes generous HEAD (first 2,500-5,000 chars)
+     - Distributes middle budget across detected headings
+     - Each section excerpt = middleBudget / numHeadings chars
+     - Takes TAIL (last 1,200-2,500 chars)
+     - Sections joined with "---" separators
+
+  c) UNIFORM SAMPLING FALLBACK:
+     - If no headings detected, takes 20 evenly-spaced samples
+     - Each sample = middleBudget / 20 chars
+     - Ensures coverage across the entire document
+
+  GROQ DIRECT API CALL (callGroqDirect function):
+  - Multi-key rotation: Supports comma-separated GROQ_API_KEYS
+  - Rate limit handling: Parses "try again in X.Xs" from error
+  - Key rotation on failure: Cycles to next API key
+  - JSON response format enforcement: response_format.type = "json_object"
+  - Trailing comma fix: Regex cleanup for malformed JSON
+  - 3-minute timeout (180,000ms) for large document processing
+
+
+6. NOTE STYLES (6 Types)
+--------------------------
+
+  1. CORNELL NOTES (value: 'cornell')
+     - Classic two-column study format
+     - Left column: Cues, keywords, questions
+     - Right column: Detailed notes and explanations
+     - Bottom: Summary section
+     - Icon: BookOpen, Color: violet-to-purple gradient
+
+  2. MIND MAP (value: 'mindmap')
+     - Visual hierarchical layout
+     - Central topic with branching subtopics
+     - Color-coded branches for different sections
+     - Icon: Brain, Color: cyan-to-blue gradient
+
+  3. FLASHCARDS (value: 'flashcard')
+     - Term → Definition card format
+     - Grid layout of individual cards
+     - Front: Question/Term, Back: Answer/Definition
+     - Icon: Grid3X3, Color: amber-to-orange gradient
+
+  4. INFOGRAPHIC (value: 'infographic')
+     - Visual summary with statistics and icons
+     - Data visualization elements
+     - Icon-driven key points
+     - Icon: LayoutGrid, Color: emerald-to-green gradient
+
+  5. CHEAT SHEET (value: 'cheatsheet')
+     - Dense, quick-reference format
+     - Code blocks for technical content
+     - Compact typography for maximum information density
+     - Icon: FileText, Color: rose-to-pink gradient
+
+  6. TIMELINE (value: 'timeline')
+     - Chronological event layout
+     - Vertical timeline with date markers
+     - Event descriptions with connected lines
+     - Icon: Clock, Color: indigo-to-violet gradient
+
+
+7. PAGE DESIGNS (4 Decorative Themes)
+---------------------------------------
+
+  1. BOTANICAL (value: 'botanical')
+     - Sage green organic blobs, leaves, and rings
+     - Nature-inspired decorative elements
+     - Preview: /notes-design/d3.png
+
+  2. ABSTRACT PASTEL (value: 'abstractPastel')
+     - Pink blobs, dots, dashes, and flower shapes
+     - Soft, artistic decorative borders
+     - Preview: /notes-design/d1.jpg
+
+  3. GEO PEBBLES (value: 'geoPebbles')
+     - Colorful hand-drawn pebble border design
+     - Playful geometric decorations
+     - Preview: /notes-design/d2.png
+
+  4. ELEGANT LEAF (value: 'elegantLeaf')
+     - Gold framed with navy blue leaf accents
+     - Formal, premium decorative style
+     - Preview: /notes-design/d4.png
+
+
+8. A4 MULTI-PAGE RENDERER
+----------------------------
+
+The note viewer (app/notes/[noteId]/page.tsx — 1515+ lines) implements a
+sophisticated multi-page A4 document renderer:
+
+  - A4-compliant dimensions with proper margins
+  - Automatic content pagination across multiple pages
+  - Print-ready CSS with @media print rules
+  - PDF/PNG export functionality via html-to-image and jsPDF
+  - Decorative page design backgrounds applied per page
+  - Professional typography with Google Fonts
+  - Font Awesome 6 icon integration for visual elements
+  - Theme-aware color system
+
+
+9. ASSET EMBEDDING
+--------------------
+
+Users can upload supplementary images (charts, screenshots, diagrams):
+
+  a) Assets uploaded via /api/notes/[noteId]/upload
+  b) Stored in notesProjects.uploadedAssets as JSON array:
+     [{ url, description, type }]
+  c) AI receives asset embed instructions in the prompt
+  d) Generated notes include embeddedAssets array:
+     [{ assetIndex, placement, caption }]
+  e) Renderer displays uploaded images at specified locations
+  f) Images rendered with elegant framing and captions
+
+
+10. DATA FLOW DIAGRAM
+-----------------------
+
+User enters title + (optional content/document/assets)
+      │
+      ▼
+[Auto-detect sourceType] → topic / text / document
+      │
+      ├─ Document? → [Sarvam Vision OCR] → extractedContent
+      │
+      ▼
+[Create notesProject in DB]
+      │
+      ▼
+[Upload image assets if any]
+      │
+      ▼
+[POST /generate] → Trigger AI generation
+      │
+      ▼
+[Smart Content Sampler]
+      ├─→ detectHeadings → section-based sampling
+      ├─→ smartSample → fit within tier's maxContentChars
+      │
+      ▼
+[Tier 1: llama-3.3-70b-versatile] → Generate structured JSON
+      │
+      ├─ TOO_LARGE? → [Tier 2: llama-3.1-8b-instant]
+      │
+      ▼
+[generatedData JSON saved to DB]
+      │
+      ▼
+[A4 Multi-Page Renderer] → Beautiful study notes
+      │
+      ▼
+[Export] → PDF / PNG download

@@ -4,7 +4,7 @@ import { usePathname } from 'next/navigation'
 function GradientBackground() {
     const pathname = usePathname()
 
-    // Hide gradient on auth pages only
+    // Hide gradient only on auth pages
     const isAuthPage = pathname === '/sign-in' || pathname === '/sign-up'
 
     if (isAuthPage) return null
@@ -20,4 +20,3 @@ function GradientBackground() {
 }
 
 export default GradientBackground
-

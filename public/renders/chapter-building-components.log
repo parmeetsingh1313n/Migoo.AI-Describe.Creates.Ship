@@ -1,0 +1,31 @@
+[2026-05-25T14:09:37.118Z] 🚀 Started. 7 slides, FFmpeg+Puppeteer mode
+[2026-05-25T14:09:37.121Z] 📽 Slide 1/7 — 427.8s
+[2026-05-25T14:14:02.661Z]   🎵 Audio ready
+[2026-05-25T14:14:02.717Z]   🎞 15 reveal state(s)
+[2026-05-25T14:19:40.229Z]   ✅ Slide 1 done
+[2026-05-25T14:19:40.245Z] 📽 Slide 2/7 — 495.1s
+[2026-05-25T14:19:45.378Z]   🎵 Audio ready
+[2026-05-25T14:19:45.391Z]   🎞 7 reveal state(s)
+[2026-05-25T14:26:16.592Z]   ✅ Slide 2 done
+[2026-05-25T14:26:16.597Z] 📽 Slide 3/7 — 544.2s
+[2026-05-25T14:26:21.745Z]   🎵 Audio ready
+[2026-05-25T14:26:21.749Z]   🎞 7 reveal state(s)
+[2026-05-25T14:34:12.303Z]   ✅ Slide 3 done
+[2026-05-25T14:34:12.319Z] 📽 Slide 4/7 — 525.0s
+[2026-05-25T14:34:19.348Z]   🎵 Audio ready
+[2026-05-25T14:34:19.358Z]   🎞 8 reveal state(s)
+[2026-05-25T14:41:07.251Z]   ✅ Slide 4 done
+[2026-05-25T14:41:07.257Z] 📽 Slide 5/7 — 459.5s
+[2026-05-25T14:45:40.075Z]   🎵 Audio ready
+[2026-05-25T14:45:40.088Z]   🎞 7 reveal state(s)
+[2026-05-25T15:03:53.888Z]   ✅ Slide 5 done
+[2026-05-25T15:03:53.895Z] 📽 Slide 6/7 — 430.3s
+[2026-05-25T15:04:02.641Z]   🎵 Audio ready
+[2026-05-25T15:04:02.649Z]   🎞 9 reveal state(s)
+[2026-05-25T15:06:19.015Z]   ✅ Slide 6 done
+[2026-05-25T15:06:19.020Z] 📽 Slide 7/7 — 375.1s
+[2026-05-25T15:06:22.420Z]   🎵 Audio ready
+[2026-05-25T15:06:22.422Z]   🎞 9 reveal state(s)
+[2026-05-25T15:08:24.569Z]   ✅ Slide 7 done
+[2026-05-25T15:08:24.570Z] 🔗 Concatenating 7 slides...
+[2026-05-25T15:08:28.281Z] 🏁 DONE! 124.5 MB → A:\React Projects\9. AI Video Course Generator\ai-video-course-generator\public\renders\chapter-building-components.mp4

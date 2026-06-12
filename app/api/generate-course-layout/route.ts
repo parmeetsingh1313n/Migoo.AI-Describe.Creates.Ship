@@ -71,7 +71,7 @@ export async function POST(req: NextRequest) {
         // Generate comprehensive course layout
         // ═══════════════════════════════════════════════════════════════════
         console.log('🤖 Generating comprehensive course layout with OpenRouter AI...');
-        console.log('Model: z-ai/glm-4.5-air:free');
+        console.log('Model: openrouter/owl-alpha');
         console.log('Temperature: 0.7 (balanced creativity)');
         console.log('Max Tokens: 8000 (increased for detailed courses)');
 
@@ -79,7 +79,7 @@ export async function POST(req: NextRequest) {
             COURSE_CONFIG_PROMPT,
             userInput,
             {
-                model: 'z-ai/glm-4.5-air:free',
+                model: 'openrouter/owl-alpha',
                 temperature: 0.7,
                 maxTokens: 8000,
             }
@@ -177,7 +177,7 @@ export async function POST(req: NextRequest) {
             course: courseResult[0],
             metadata: {
                 generatedAt: new Date().toISOString(),
-                model: 'z-ai/glm-4.5-air:free',
+                model: 'openrouter/owl-alpha',
                 courseId,
                 type,
                 courseName: result.courseName,

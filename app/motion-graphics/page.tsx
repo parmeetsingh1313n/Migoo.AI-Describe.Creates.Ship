@@ -32,6 +32,9 @@ import { useRouter } from 'next/navigation'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { MUSIC_URLS } from '@/lib/music-urls'
+import RotatingText from './_components/RotatingText'
+import EmptyMotionState from './_components/EmptyMotionState'
+import CoreFeatures from './_components/CoreFeatures'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -230,13 +233,28 @@ export default function MotionGraphicsPage() {
 
                 {/* ─── Header ────────────────────────────────────────── */}
                 <div className="text-center mb-10">
-                    <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-white border border-border mb-5 shadow-sm">
-                        <Wand2 className="w-4 h-4 text-primary" />
-                        <span className="text-sm font-medium text-foreground">Motion Graphics</span>
-                    </div>
-                    <h1 className="text-4xl md:text-5xl font-bold tracking-tight mb-4 leading-tight text-foreground">
-                        Your Ideas,{" "}
-                        <span className="text-primary border-b border-primary/30">
+                    <h1 
+                      className="text-4xl md:text-5xl text-center mb-4 flex items-center justify-center gap-x-2.5 flex-wrap text-foreground"
+                      style={{
+                        fontFamily: "'Instrument Serif', serif",
+                        fontStyle: 'italic',
+                        fontWeight: 700,
+                        letterSpacing: '-0.3px',
+                        lineHeight: '1.25',
+                        minHeight: '60px'
+                      }}
+                    >
+                        <RotatingText
+                          texts={[
+                            "Your Ideas,",
+                            "Your Vision,",
+                            "Your Brand,",
+                            "Your Story,"
+                          ]}
+                          duration={2600}
+                          className="text-foreground w-[180px] sm:w-[220px] md:w-[260px] justify-end"
+                        />
+                        <span className="text-primary border-b border-primary/30 shrink-0">
                             In Motion.
                         </span>
                     </h1>
@@ -446,29 +464,8 @@ export default function MotionGraphicsPage() {
                     </div>
                 </div>
 
-                {/* ─── Use Cases ─────────────────────────────────────── */}
-                <div className="mt-14">
-                    <p className="text-center text-sm font-bold text-muted-foreground/80 uppercase tracking-[0.2em] mb-8">
-                        What can you create
-                    </p>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-5">
-                        {USE_CASES.map((uc, i) => (
-                            <div
-                                key={i}
-                                className="group relative flex items-start gap-4 p-5 rounded-2xl bg-white/80 backdrop-blur-md border border-white/40 hover:border-primary/20 shadow-[0_2px_10px_-3px_rgba(0,0,0,0.05)] hover:shadow-[0_8px_30px_-4px_rgba(0,0,0,0.1)] hover:-translate-y-1 transition-all duration-300 overflow-hidden cursor-default"
-                            >
-                                <div className="absolute inset-0 bg-gradient-to-br from-primary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none" />
-                                <div className={`w-11 h-11 rounded-2xl bg-gradient-to-br ${uc.color} flex items-center justify-center shrink-0 shadow-md transform group-hover:scale-110 transition-transform duration-300`}>
-                                    <uc.icon className="w-5 h-5 text-white" />
-                                </div>
-                                <div className="relative z-10 pt-0.5">
-                                    <p className="text-sm font-bold text-foreground mb-1 group-hover:text-primary transition-colors">{uc.title}</p>
-                                    <p className="text-xs text-muted-foreground leading-relaxed">{uc.desc}</p>
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-                </div>
+                {/* ─── Core Features marketing section ─── */}
+                <CoreFeatures />
 
                 {/* ─── Your Projects ─────────────────────────────────── */}
                 <div className="mt-14">
@@ -489,13 +486,7 @@ export default function MotionGraphicsPage() {
                             <Loader2 className="w-6 h-6 animate-spin text-primary" />
                         </div>
                     ) : projects.length === 0 ? (
-                        <div className="text-center py-16 rounded-2xl bg-white/60 border border-dashed border-border">
-                            <div className="w-14 h-14 rounded-2xl bg-muted flex items-center justify-center mx-auto mb-4">
-                                <Sparkles className="w-7 h-7 text-muted-foreground" />
-                            </div>
-                            <h3 className="text-base font-bold text-foreground mb-1">No projects yet</h3>
-                            <p className="text-sm text-muted-foreground">Create your first motion graphic above!</p>
-                        </div>
+                        <EmptyMotionState />
                     ) : (
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
                             {projects.map((project) => {

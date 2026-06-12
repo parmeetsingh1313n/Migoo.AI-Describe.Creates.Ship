@@ -244,6 +244,36 @@ function SeriesVideosPageContent() {
         setReRenderingId(null)
     }
 
+    // ─── Force re-render a stuck rendering video ─────────────────────────
+    const handleForceReRender = async (videoId: string) => {
+        setOpenCardPopover(null)
+        if (!confirm('This will terminate the current render and start a fresh one. Continue?')) return
+        setReRenderingId(videoId)
+        try {
+            // Reset THIS specific video's status directly and trigger a fresh render
+            const resetRes = await fetch('/api/video/re-render', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ videoId }),
+            })
+            const resetData = await resetRes.json()
+            if (resetData.success) {
+                toast.success('Force re-render started!')
+                setVideos(prev => prev.map(v =>
+                    v.videoId === videoId
+                        ? { ...v, status: 'rendering', videoUrl: null }
+                        : v
+                ))
+                fetchData()
+            } else {
+                toast.error(resetData.error || 'Failed to force re-render')
+            }
+        } catch {
+            toast.error('Failed to force re-render')
+        }
+        setReRenderingId(null)
+    }
+
     const activeStepIndex = getActiveStepIndex(series?.status ?? null)
 
     // ─── Loading State ───────────────────────────────────────────────
@@ -550,7 +580,7 @@ function SeriesVideosPageContent() {
                                 {/* Popover menu */}
                                 {openCardPopover === video.videoId && (
                                     <div className="absolute right-0 top-9 z-30 w-44 bg-white rounded-xl border border-border/60 shadow-xl shadow-black/10 py-1.5 animate-in fade-in zoom-in-95 duration-150">
-                                        {/* Re-render option — shown for failed/completed/pending videos (not while rendering) */}
+                                    {/* Re-render option — shown for failed/completed/pending videos */}
                                         {video.status !== 'rendering' && (
                                             <button
                                                 onClick={(e) => {
@@ -568,11 +598,23 @@ function SeriesVideosPageContent() {
                                                 Re-render MP4
                                             </button>
                                         )}
+                                        {/* Force re-render for STUCK renders — shows Retry button */}
                                         {video.status === 'rendering' && (
-                                            <div className="flex items-center gap-2.5 px-3 py-2 text-sm text-muted-foreground">
-                                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                                Rendering...
-                                            </div>
+                                            <button
+                                                onClick={(e) => {
+                                                    e.stopPropagation()
+                                                    handleForceReRender(video.videoId)
+                                                }}
+                                                disabled={reRenderingId === video.videoId}
+                                                className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors cursor-pointer disabled:opacity-50 font-medium"
+                                            >
+                                                {reRenderingId === video.videoId ? (
+                                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                                ) : (
+                                                    <RefreshCw className="w-3.5 h-3.5" />
+                                                )}
+                                                Force Retry Render
+                                            </button>
                                         )}
                                     </div>
                                 )}

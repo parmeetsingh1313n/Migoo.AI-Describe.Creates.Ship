@@ -12,6 +12,7 @@ import {
   Img,
   interpolate,
   Video,
+  OffthreadVideo,
   Sequence,
   staticFile,
   useCurrentFrame,
@@ -58,8 +59,6 @@ export interface CompositionProps {
   durationInFrames: number;
 }
 
-// Safety margin: avoid seeking into the very last portion of a source video.
-// Using browser-native <Video> decoder (not Rust compositor), so 0.5s is sufficient.
 const SAFETY_MARGIN_SEC = 0.5;
 
 // ─── SafeImg wrapper: catches image load errors gracefully ───────────────────
@@ -88,9 +87,8 @@ const SafeImg: React.FC<React.ComponentProps<typeof Img>> = (props) => {
 };
 
 // ─── SafeVideo wrapper: catches video load errors gracefully ──────────────────
-// When Remotion's <Video> hits a 403 or format error, it throws a fatal
-// MEDIA_ELEMENT_ERROR that kills the entire render. This wrapper catches it
-// and shows a gradient fallback instead of crashing.
+// Used ONLY for AvatarClipScene — avatar videos need HTML5 real-time playback.
+// Scene videos use SafeOffthreadVideo (Rust/FFmpeg frame extraction) instead.
 const SafeVideo: React.FC<React.ComponentProps<typeof Video>> = (props) => {
   const [hasError, setHasError] = useState(false);
   const handleError = useCallback((err: Error) => {
@@ -119,6 +117,38 @@ const SafeVideo: React.FC<React.ComponentProps<typeof Video>> = (props) => {
   }
 
   return <Video {...props} onError={handleError} />;
+};
+
+// ─── SafeOffthreadVideo: Rust/FFmpeg-based decoder for scene videos ───────────
+// OffthreadVideo uses Remotion's native frame extractor instead of the browser's
+// HTML5 video decoder. This ELIMINATES the delayRender() timeout that occurs
+// when Chromium can't decode a video file during CLI rendering.
+// It supports playbackRate, muted, style — but NOT pauseWhenBuffering/crossOrigin.
+const SafeOffthreadVideo: React.FC<React.ComponentProps<typeof OffthreadVideo>> = (props) => {
+  const [hasError, setHasError] = useState(false);
+  const handleError = useCallback((err: Error) => {
+    console.warn(
+      `⚠️ SafeOffthreadVideo: Error loading video: ${props.src?.toString().substring(0, 80)}... — ${err.message}`
+    );
+    setHasError(true);
+  }, [props.src]);
+
+  if (hasError || !props.src) {
+    return (
+      <AbsoluteFill style={{ backgroundColor: '#1a1a2e' }}>
+        <div
+          style={{
+            width: '100%',
+            height: '100%',
+            background:
+              'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)',
+          }}
+        />
+      </AbsoluteFill>
+    );
+  }
+
+  return <OffthreadVideo {...props} onError={handleError} />;
 };
 
 // ─── Crossfade overlay: fades in then out to create a smooth bridge ───────────
@@ -213,36 +243,73 @@ const VideoScene: React.FC<{
 
 const VideoClipScene: React.FC<{
   videoUrl: string;
+  imageUrl?: string;
   duration: number; // in frames (target sequence duration)
   sourceDuration?: number; // in seconds (actual AI video duration, e.g. 5 or 10 for Kling)
-}> = ({ videoUrl, duration, sourceDuration }) => {
+}> = ({ videoUrl, imageUrl, duration, sourceDuration }) => {
   const { fps } = useVideoConfig();
+  const frame = useCurrentFrame();
 
   const resolvedVideoUrl = useMemo(() => resolveLocalUrl(videoUrl) || "", [videoUrl]);
+  const resolvedImageUrl = useMemo(() => resolveLocalUrl(imageUrl) || "", [imageUrl]);
 
-  // ── Crash-proof playback rate (designed for Kling 2.5 Turbo) ────────────
+  // Actual length of the video file in seconds (default to 5s if undefined)
+  const actualLength = sourceDuration && sourceDuration > 0 ? sourceDuration : 5;
+  // Subtract a safe margin to avoid seeking past the file end
+  const safeLength = Math.max(0.5, actualLength - SAFETY_MARGIN_SEC);
+
   const targetDurationSec = duration / fps;
 
+  // Compute playback rate:
+  // • Video SHORTER than scene → slow down to fill (pbRate < 1.0).
+  // • Video LONGER than scene → play at 1.0x; OffthreadVideo freezes the last
+  //   frame for the tiny gap (≤0.4s safety margin). Never speed-up — that
+  //   risks seeking past the file end and crashes the compositor.
   const pbRate = useMemo(() => {
-    const actualLength = sourceDuration && sourceDuration > 0 ? sourceDuration : 5;
-    const safeLength = Math.max(0.5, actualLength - SAFETY_MARGIN_SEC);
-    return Math.max(0.01, Math.min(4.0, safeLength / targetDurationSec));
-  }, [sourceDuration, targetDurationSec]);
+    if (targetDurationSec > safeLength) {
+      return Math.max(0.0625, safeLength / targetDurationSec); // slow-down only
+    }
+    return 1.0;
+  }, [safeLength, targetDurationSec]);
 
+  // How many frames the video safely covers at the computed playback rate.
+  // When pbRate < 1 (slow-down): videoPlayFrames ≈ duration (fills the scene).
+  // When pbRate = 1 (video longer): videoPlayFrames = safeLength * fps (then fallback).
+  const videoPlayFrames = Math.floor((safeLength * fps) / pbRate);
+
+  if (resolvedVideoUrl && frame < videoPlayFrames) {
+    return (
+      <AbsoluteFill style={{ backgroundColor: 'black' }}>
+        <SafeOffthreadVideo
+          src={resolvedVideoUrl}
+          style={{
+            width: '100%',
+            height: '100%',
+            objectFit: 'cover',
+          }}
+          muted
+          playbackRate={pbRate}
+        />
+      </AbsoluteFill>
+    );
+  }
+
+  // Video exhausted or no URL — fall back to static image with ken-burns
   return (
-    <AbsoluteFill style={{ backgroundColor: 'black' }}>
-      <SafeVideo
-        src={resolvedVideoUrl}
-        style={{
-          width: '100%',
-          height: '100%',
-          objectFit: 'cover',
-        }}
-        muted
-        playbackRate={pbRate}
-        crossOrigin="anonymous"
-        pauseWhenBuffering
-      />
+    <AbsoluteFill>
+      {resolvedImageUrl ? (
+        <SafeImg
+          src={resolvedImageUrl}
+          style={{
+            width: '100%',
+            height: '100%',
+            objectFit: 'cover',
+          }}
+          crossOrigin="anonymous"
+        />
+      ) : (
+        <div style={{ width: '100%', height: '100%', backgroundColor: 'black' }} />
+      )}
     </AbsoluteFill>
   );
 };
@@ -284,41 +351,70 @@ const SlideshowScene: React.FC<{
   );
 };
 
-// ─── Split-screen scene: two user-uploaded videos stacked vertically ─────────
-// NOTE: img-to-video clips are NEVER passed here — only real user uploaded videos.
 const SplitScreenScene: React.FC<{
   urls: [string, string];
   duration: number;
   sourceDuration?: number;
-}> = ({ urls, duration, sourceDuration }) => {
+  fallbackImageUrl?: string;
+}> = ({ urls, duration, sourceDuration, fallbackImageUrl }) => {
   const { fps } = useVideoConfig();
+  const frame = useCurrentFrame();
   const targetDurationSec = duration / fps;
-  const safeSourceDuration = Math.max(0.5, (sourceDuration || 5) - SAFETY_MARGIN_SEC);
-  const pbRate = Math.max(0.01, Math.min(4.0, safeSourceDuration / targetDurationSec));
+
+  const actualLength = sourceDuration && sourceDuration > 0 ? sourceDuration : 5;
+  const safeLength = Math.max(0.5, actualLength - 0.4);
+
+  // Safe stretch: slow-down only — never speed up past 1.0x.
+  const pbRate = useMemo(() => {
+    if (targetDurationSec > safeLength) {
+      return Math.max(0.0625, safeLength / targetDurationSec);
+    }
+    return 1.0;
+  }, [safeLength, targetDurationSec]);
+
+  const videoPlayFrames = Math.floor((safeLength * fps) / pbRate);
 
   const topUrl    = useMemo(() => resolveLocalUrl(urls[0]) || '', [urls]);
   const bottomUrl = useMemo(() => resolveLocalUrl(urls[1]) || '', [urls]);
+  const resolvedImageUrl = useMemo(() => resolveLocalUrl(fallbackImageUrl) || '', [fallbackImageUrl]);
 
+  if (topUrl && bottomUrl && frame < videoPlayFrames) {
+    return (
+      <AbsoluteFill style={{ backgroundColor: 'black', flexDirection: 'column' }}>
+        {/* Top half */}
+        <div style={{ flex: 1, overflow: 'hidden', borderBottom: '3px solid rgba(139,92,246,0.6)' }}>
+          <SafeOffthreadVideo
+            src={topUrl}
+            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+            muted
+            playbackRate={pbRate}
+          />
+        </div>
+        {/* Bottom half */}
+        <div style={{ flex: 1, overflow: 'hidden' }}>
+          <SafeOffthreadVideo
+            src={bottomUrl}
+            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+            muted
+            playbackRate={pbRate}
+          />
+        </div>
+      </AbsoluteFill>
+    );
+  }
+
+  // Video exhausted or no URLs — fallback
   return (
-    <AbsoluteFill style={{ backgroundColor: 'black', flexDirection: 'column' }}>
-      {/* Top half */}
-      <div style={{ flex: 1, overflow: 'hidden', borderBottom: '3px solid rgba(139,92,246,0.6)' }}>
-        <SafeVideo
-          src={topUrl}
+    <AbsoluteFill>
+      {resolvedImageUrl ? (
+        <SafeImg
+          src={resolvedImageUrl}
           style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-          muted playbackRate={pbRate}
-          crossOrigin="anonymous" pauseWhenBuffering
+          crossOrigin="anonymous"
         />
-      </div>
-      {/* Bottom half */}
-      <div style={{ flex: 1, overflow: 'hidden' }}>
-        <SafeVideo
-          src={bottomUrl}
-          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-          muted playbackRate={pbRate}
-          crossOrigin="anonymous" pauseWhenBuffering
-        />
-      </div>
+      ) : (
+        <div style={{ width: '100%', height: '100%', backgroundColor: 'black' }} />
+      )}
     </AbsoluteFill>
   );
 };
@@ -340,7 +436,8 @@ interface CompositeAssetEntry {
 const CompositeScene: React.FC<{
   assets: CompositeAssetEntry[];
   duration: number; // total frames for this scene
-}> = ({ assets, duration }) => {
+  fallbackImageUrl?: string;
+}> = ({ assets, duration, fallbackImageUrl }) => {
   const { fps } = useVideoConfig();
   const frame = useCurrentFrame();
   const totalSec = duration / fps;
@@ -459,6 +556,7 @@ const CompositeScene: React.FC<{
             {asset.kind === 'video' && asset.url && (
               <CompositeVideoSub
                 url={asset.url}
+                imageUrl={fallbackImageUrl}
                 duration={assetDuration}
                 sourceDuration={asset.durationSec}
               />
@@ -520,30 +618,53 @@ const CompositeImageSub: React.FC<{
 
 const CompositeVideoSub: React.FC<{
   url: string;
+  imageUrl?: string;
   duration: number; // frames
   sourceDuration?: number; // seconds
-}> = ({ url, duration, sourceDuration }) => {
+}> = ({ url, imageUrl, duration, sourceDuration }) => {
   const { fps } = useVideoConfig();
+  const frame = useCurrentFrame();
   const resolvedUrl = useMemo(() => resolveLocalUrl(url) || '', [url]);
+  const resolvedImageUrl = useMemo(() => resolveLocalUrl(imageUrl) || '', [imageUrl]);
   const targetSec = duration / fps;
 
-  // Stretch video to exactly fill allocated time (no freeze)
+  const actual = sourceDuration && sourceDuration > 0 ? sourceDuration : 5;
+  const safeActual = Math.max(0.5, actual - SAFETY_MARGIN_SEC);
+
+  // Safe stretch: slow-down only — never speed up past 1.0x.
   const pbRate = useMemo(() => {
-    const actual = sourceDuration && sourceDuration > 0 ? sourceDuration : 5;
-    const safeActual = Math.max(0.5, actual - SAFETY_MARGIN_SEC);
-    return Math.max(0.01, Math.min(4.0, safeActual / targetSec));
-  }, [sourceDuration, targetSec]);
+    if (targetSec > safeActual) {
+      return Math.max(0.0625, safeActual / targetSec);
+    }
+    return 1.0;
+  }, [safeActual, targetSec]);
+
+  const videoPlayFrames = Math.floor((safeActual * fps) / pbRate);
+
+  if (resolvedUrl && frame < videoPlayFrames) {
+    return (
+      <AbsoluteFill style={{ backgroundColor: 'black' }}>
+        <SafeOffthreadVideo
+          src={resolvedUrl}
+          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+          muted
+          playbackRate={pbRate}
+        />
+      </AbsoluteFill>
+    );
+  }
 
   return (
-    <AbsoluteFill style={{ backgroundColor: 'black' }}>
-      <SafeVideo
-        src={resolvedUrl}
-        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-        muted
-        playbackRate={pbRate}
-        crossOrigin="anonymous"
-        pauseWhenBuffering
-      />
+    <AbsoluteFill>
+      {resolvedImageUrl ? (
+        <SafeImg
+          src={resolvedImageUrl}
+          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+          crossOrigin="anonymous"
+        />
+      ) : (
+        <div style={{ width: '100%', height: '100%', backgroundColor: 'black' }} />
+      )}
     </AbsoluteFill>
   );
 };
@@ -554,33 +675,41 @@ const CompositeSplitSub: React.FC<{
   sourceDuration?: number;
 }> = ({ urls, duration, sourceDuration }) => {
   const { fps } = useVideoConfig();
+  const frame = useCurrentFrame();
   const targetSec = duration / fps;
   const safeSrcDur = Math.max(0.5, (sourceDuration || 5) - SAFETY_MARGIN_SEC);
-  const pbRate = Math.max(0.01, Math.min(4.0, safeSrcDur / targetSec));
+  const pbRate = targetSec > safeSrcDur
+    ? Math.max(0.0625, safeSrcDur / targetSec)
+    : 1.0;
+  const videoPlayFrames = Math.floor((safeSrcDur * fps) / pbRate);
 
   const topUrl = useMemo(() => resolveLocalUrl(urls[0]) || '', [urls]);
   const bottomUrl = useMemo(() => resolveLocalUrl(urls[1]) || '', [urls]);
 
-  return (
-    <AbsoluteFill style={{ backgroundColor: 'black', flexDirection: 'column' }}>
-      <div style={{ flex: 1, overflow: 'hidden', borderBottom: '3px solid rgba(139,92,246,0.6)' }}>
-        <SafeVideo
-          src={topUrl}
-          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-          muted playbackRate={pbRate}
-          crossOrigin="anonymous" pauseWhenBuffering
-        />
-      </div>
-      <div style={{ flex: 1, overflow: 'hidden' }}>
-        <SafeVideo
-          src={bottomUrl}
-          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-          muted playbackRate={pbRate}
-          crossOrigin="anonymous" pauseWhenBuffering
-        />
-      </div>
-    </AbsoluteFill>
-  );
+  if (frame < videoPlayFrames) {
+    return (
+      <AbsoluteFill style={{ backgroundColor: 'black', flexDirection: 'column' }}>
+        <div style={{ flex: 1, overflow: 'hidden', borderBottom: '3px solid rgba(139,92,246,0.6)' }}>
+          <SafeOffthreadVideo
+            src={topUrl}
+            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+            muted
+            playbackRate={pbRate}
+          />
+        </div>
+        <div style={{ flex: 1, overflow: 'hidden' }}>
+          <SafeOffthreadVideo
+            src={bottomUrl}
+            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+            muted
+            playbackRate={pbRate}
+          />
+        </div>
+      </AbsoluteFill>
+    );
+  }
+
+  return <div style={{ width: '100%', height: '100%', backgroundColor: 'black' }} />;
 };
 
 
@@ -593,8 +722,10 @@ const Captions: React.FC<{
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
   // Sequence resets frame to 0 at contentStart. Audio also starts at contentStart with no delay.
-  const SYNC_OFFSET = 0.0;
-  const currentTime = (frame / fps) + SYNC_OFFSET;
+  // SYNC_OFFSET: 0 = captions appear exactly when the word is spoken (Whisper timestamps).
+  // Set negative to delay captions, positive to show them slightly early.
+  const SYNC_OFFSET = -0.5;
+  const rawTime = (frame / fps) + SYNC_OFFSET;
 
   const style = useMemo(() =>
     captionStyles.find(s => s.id === styleId) || captionStyles[0],
@@ -602,10 +733,23 @@ const Captions: React.FC<{
   );
 
   const activeSegment = segments.find(
-    (s) => currentTime >= s.start && currentTime <= s.end
+    (s) => rawTime >= s.start && rawTime <= s.end
   );
 
-  if (!activeSegment || currentTime < 0) return null;
+  if (!activeSegment || rawTime < 0) return null;
+
+  // Calculate progress within the active segment
+  const totalDuration = activeSegment.end - activeSegment.start;
+  const rawProgress = totalDuration > 0 
+    ? Math.max(0, Math.min(1, (rawTime - activeSegment.start) / totalDuration))
+    : 0;
+
+  // Apply a gentle ease-out/decelerating curve so the captions feel slightly slower/more relaxed,
+  // matching natural human speaking cadence which naturally slows down towards the end of a segment.
+  const adjustedProgress = Math.pow(rawProgress, 1.15); // Gently dampens and slows down highlights
+
+  // The effective currentTime to use for all calculations inside this segment:
+  const currentTime = activeSegment.start + adjustedProgress * totalDuration;
 
   // ── Base style applied to the caption container ─────────────────────────
   const baseStyle: React.CSSProperties = {
@@ -631,7 +775,6 @@ const Captions: React.FC<{
 
   // ── Word-level animation helpers ────────────────────────────────────────
   const words = activeSegment.text.split(' ');
-  const totalDuration = activeSegment.end - activeSegment.start;
   const timePerWord = totalDuration / words.length;
   const activeWordIndex = Math.floor((currentTime - activeSegment.start) / timePerWord);
 
@@ -665,8 +808,8 @@ const Captions: React.FC<{
     // ── WORD-POP (Hormozi / MrBeast / Gradient): each word shown, active word
     //    scales up and changes to highlightColor with optional extra styles ──
     if (style.animation === 'word-pop') {
+      const isUpper = style.textTransform === 'uppercase';
       return words.map((word, i) => {
-        const isActive = i <= activeWordIndex;
         const isCurrent = i === activeWordIndex;
         const scale = isCurrent
           ? interpolate(
@@ -676,18 +819,20 @@ const Captions: React.FC<{
               { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' }
             )
           : 1;
+        const wordColor = isCurrent ? style.highlightColor : style.color;
+        const activeExtra = isCurrent && (style as any).activeWordStyle ? (style as any).activeWordStyle : {};
         return (
           <span
             key={i}
             style={{
               display: 'inline-block',
-              color: isActive ? style.highlightColor : style.color,
+              color: wordColor,
               transform: `scale(${scale})`,
               transition: 'color 0.08s ease',
-              ...((isActive && (style as any).activeWordStyle) || {}),
+              ...activeExtra,
             }}
           >
-            {word}
+            {isUpper ? word.toUpperCase() : word}
           </span>
         );
       });
@@ -695,6 +840,7 @@ const Captions: React.FC<{
 
     // ── KARAOKE: word-by-word highlight with optional activeWordStyle ────────
     if (style.animation === 'karaoke') {
+      const isUpper = style.textTransform === 'uppercase';
       return words.map((word, i) => {
         const isActive = i <= activeWordIndex;
         return (
@@ -707,7 +853,7 @@ const Captions: React.FC<{
               ...(isActive && (style as any).activeWordStyle ? (style as any).activeWordStyle : {}),
             }}
           >
-            {word}
+            {isUpper ? word.toUpperCase() : word}
           </span>
         );
       });
@@ -715,6 +861,7 @@ const Captions: React.FC<{
 
     // ── WORD-BOX: active word gets a background box highlight ────────────────
     if (style.animation === 'word-box') {
+      const isUpper = style.textTransform === 'uppercase';
       return words.map((word, i) => {
         const isActive = i <= activeWordIndex;
         return (
@@ -726,7 +873,7 @@ const Captions: React.FC<{
               ...(isActive && (style as any).activeWordStyle ? (style as any).activeWordStyle : {}),
             }}
           >
-            {word}
+            {isUpper ? word.toUpperCase() : word}
           </span>
         );
       });
@@ -734,6 +881,7 @@ const Captions: React.FC<{
 
     // ── WORD-BOUNCE: active word bounces upward ─────────────────────────────
     if (style.animation === 'word-bounce') {
+      const isUpper = style.textTransform === 'uppercase';
       return words.map((word, i) => {
         const isActive = i <= activeWordIndex;
         const isCurrent = i === activeWordIndex;
@@ -756,7 +904,7 @@ const Captions: React.FC<{
               transition: 'color 0.08s ease',
             }}
           >
-            {word}
+            {isUpper ? word.toUpperCase() : word}
           </span>
         );
       });
@@ -772,6 +920,36 @@ const Captions: React.FC<{
         { extrapolateRight: 'clamp' }
       ));
       return <span>{activeSegment.text.slice(0, charIndex)}</span>;
+    }
+
+    // ── SINGLE-WORD (MrBeast): only the current spoken word is shown ─────────
+    // Each word pops in from scale 0 with a spring, holds, then is replaced.
+    if (style.animation === 'single-word') {
+      const currentWord = words[Math.min(activeWordIndex, words.length - 1)];
+      if (!currentWord) return null;
+      const wordStart = activeSegment.start + activeWordIndex * timePerWord;
+      const elapsed = Math.max(0, currentTime - wordStart);
+      // Spring pop: 0 → overshoot → settle
+      const scale = interpolate(
+        elapsed,
+        [0, 0.06, 0.12, 0.2],
+        [0.5, 1.18, 0.95, 1.0],
+        { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' }
+      );
+      const displayWord = style.textTransform === 'uppercase'
+        ? currentWord.toUpperCase()
+        : currentWord;
+      return (
+        <span
+          key={activeWordIndex}
+          style={{
+            display: 'inline-block',
+            transform: `scale(${scale})`,
+          }}
+        >
+          {displayWord}
+        </span>
+      );
     }
 
     // ── Default: plain text (pop / bounce / fade / glow handled at container) ─
@@ -797,10 +975,24 @@ export function resolveLocalUrl(url: string | undefined): string | undefined {
   // file:// with "Can only download URLs starting with http:// or https://".
   // The Audio component in Puppeteer also fails with ERR_UNKNOWN_URL_SCHEME.
   //
-  // All locally-downloaded assets are now served as http://localhost:PORT/...
-  // Those URLs MUST pass through here UNCHANGED — never convert them to
-  // staticFile() which produces broken file:/// URLs on Windows.
+  // Localhost URLs from a different port (e.g. DB stored http://localhost:3000/...
+  // but server now runs on 3001) must have their origin updated to the active
+  // window origin so requests always hit the correct live server.
   // ─────────────────────────────────────────────────────────────────────────
+
+  // For localhost/127.0.0.1 URLs, strip the double /public/tmp/ prefix that
+  // can appear in legacy DB entries, then update to the active window origin.
+  if (cleanUrl.includes('localhost') || cleanUrl.includes('127.0.0.1')) {
+    // Strip stale /public/tmp/ and /public/avatars/ double-prefix
+    cleanUrl = cleanUrl.replace(/\/public\/tmp\//g, '/tmp/');
+    cleanUrl = cleanUrl.replace(/\/public\/avatars\//g, '/avatars/');
+    // Update port to the active window origin (browser only)
+    if (typeof window !== 'undefined' && window.location) {
+      cleanUrl = cleanUrl.replace(/^https?:\/\/[^\/]+/, window.location.origin);
+    }
+    return cleanUrl;
+  }
+
   if (cleanUrl.startsWith('http://') || cleanUrl.startsWith('https://')) {
     return cleanUrl;
   }
@@ -808,18 +1000,17 @@ export function resolveLocalUrl(url: string | undefined): string | undefined {
   if (cleanUrl.startsWith('file:///')) return cleanUrl;
 
   // Absolute Windows paths (A:/path/to/image.jpg)
-  // We no longer convert these to file:/// because it fails in Chromium with spaces.
-  // Instead, these should have been converted to http://localhost:PORT/ by the caller.
   if (cleanUrl.match(/^[a-zA-Z]:\//)) {
     return cleanUrl;
   }
 
-  // Unix absolute paths not under /public/ — return as-is
-  if (cleanUrl.startsWith('/') && !cleanUrl.startsWith('/public/')) {
+  // Unix absolute paths not under /public/ or /tmp/ — return as-is
+  if (cleanUrl.startsWith('/') && !cleanUrl.startsWith('/public/') && !cleanUrl.startsWith('/tmp/')) {
       return cleanUrl;
   }
 
-  // Strip /public/ prefix from legacy paths
+  // Strip /public/ prefix from legacy relative paths before passing to staticFile()
+  // (staticFile() re-adds the correct prefix for Remotion's webpack server)
   while (cleanUrl.startsWith('/public/') || cleanUrl.startsWith('public/')) {
     cleanUrl = cleanUrl.replace(/^\/?public\//, '');
   }
@@ -830,7 +1021,9 @@ export function resolveLocalUrl(url: string | undefined): string | undefined {
     if (match) return staticFile(match[0]);
   }
 
-  // Remaining relative paths → staticFile (used in cloud/GitHub-Actions renders)
+  // All relative paths (including /tmp/) → staticFile()
+  // Remotion's webpack server in Next.js projects serves the public dir WITH
+  // the /public/ prefix, so staticFile() is required to generate the correct URL.
   const finalUrl = cleanUrl.startsWith('/') ? cleanUrl.substring(1) : cleanUrl;
   return staticFile(finalUrl);
 }
@@ -948,6 +1141,7 @@ export const MainComposition: React.FC<CompositionProps> = ({
               <CompositeScene
                 assets={compositePayload.assets}
                 duration={sceneDuration}
+                fallbackImageUrl={url}
               />
             ) : splitPayload ? (
               // ── Split-screen: two real user videos side-by-side ─────────────
@@ -955,6 +1149,7 @@ export const MainComposition: React.FC<CompositionProps> = ({
                 urls={splitPayload.urls}
                 duration={sceneDuration}
                 sourceDuration={sourceDurationSec}
+                fallbackImageUrl={url}
               />
             ) : slideshowPayload ? (
               // ── Slideshow: cycle N images smoothly ──────────────────────────
@@ -966,6 +1161,7 @@ export const MainComposition: React.FC<CompositionProps> = ({
               // ── AI/user video clip ───────────────────────────────────────────
               <VideoClipScene
                 videoUrl={sceneVideoUrl}
+                imageUrl={url}
                 duration={sceneDuration}
                 sourceDuration={sourceDurationSec}
               />

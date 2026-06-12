@@ -1,0 +1,93 @@
+name: Render Chapter Video
+
+# Triggered by POST https://api.github.com/repos/{owner}/{repo}/dispatches
+# with event_type = "render-chapter"
+#
+# client_payload fields:
+#   chapterId         - e.g. "component-lifecycle-effects"
+#   slides            - Array of slide objects (html, audioFileUrl, revealData, fragmentData, caption)
+#   durationsBySlideId- Map of slideId → frame count
+#   webhookUrl        - Full URL to POST results back to (e.g. https://your-app.vercel.app/api/render-chapter-callback)
+
+on:
+  repository_dispatch:
+    types: [render-chapter]
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120  # Chapter renders can take 30-60 min for long courses
+
+    steps:
+      # ── 1. Checkout ──────────────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── 2. Node.js ───────────────────────────────────────────────────────────
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      # ── 3. Install dependencies ───────────────────────────────────────────────
+      - name: Install npm dependencies
+        run: npm ci --legacy-peer-deps
+
+      # ── 4. Puppeteer Chrome ───────────────────────────────────────────────────
+      # Puppeteer bundles its own Chrome; this ensures it's downloaded.
+      - name: Install Puppeteer Chrome
+        run: npx puppeteer browsers install chrome
+
+      # ── 5. Write render payload ───────────────────────────────────────────────
+      - name: Write render payload to file
+        run: |
+          mkdir -p tmp out
+          echo '${{ toJson(github.event.client_payload) }}' > tmp/chapter-payload.json
+          echo "✅ Payload written ($(wc -c < tmp/chapter-payload.json) bytes)"
+
+      # ── 6. Render slides → MP4 ────────────────────────────────────────────────
+      - name: Render chapter video
+        run: node scripts/render-chapter-gh.js
+        env:
+          # Appwrite auth for downloading slide audio files
+          APPWRITE_ENDPOINT:    ${{ secrets.APPWRITE_ENDPOINT }}
+          APPWRITE_PROJECT_ID:  ${{ secrets.APPWRITE_PROJECT_ID }}
+          APPWRITE_API_KEY:     ${{ secrets.APPWRITE_API_KEY }}
+          # Extra Appwrite projects 1–5 (multi-project support — add as many as you use)
+          APPWRITE_PROJECT_ID1: ${{ secrets.APPWRITE_PROJECT_ID1 }}
+          APPWRITE_API_KEY1:    ${{ secrets.APPWRITE_API_KEY1 }}
+          APPWRITE_PROJECT_ID2: ${{ secrets.APPWRITE_PROJECT_ID2 }}
+          APPWRITE_API_KEY2:    ${{ secrets.APPWRITE_API_KEY2 }}
+          APPWRITE_PROJECT_ID3: ${{ secrets.APPWRITE_PROJECT_ID3 }}
+          APPWRITE_API_KEY3:    ${{ secrets.APPWRITE_API_KEY3 }}
+          APPWRITE_PROJECT_ID4: ${{ secrets.APPWRITE_PROJECT_ID4 }}
+          APPWRITE_API_KEY4:    ${{ secrets.APPWRITE_API_KEY4 }}
+          APPWRITE_PROJECT_ID5: ${{ secrets.APPWRITE_PROJECT_ID5 }}
+          APPWRITE_API_KEY5:    ${{ secrets.APPWRITE_API_KEY5 }}
+
+      # ── 7. Upload MP4 to Appwrite + call webhook ──────────────────────────────
+      - name: Upload rendered video & notify app
+        env:
+          APPWRITE_ENDPOINT:   ${{ secrets.APPWRITE_ENDPOINT }}
+          APPWRITE_PROJECT_ID: ${{ secrets.APPWRITE_PROJECT_ID }}
+          APPWRITE_API_KEY:    ${{ secrets.APPWRITE_API_KEY }}
+          # Use a dedicated bucket for rendered chapter videos
+          APPWRITE_BUCKET_ID:  ${{ secrets.APPWRITE_VIDEO_BUCKET_ID }}
+          CHAPTER_ID:          ${{ github.event.client_payload.chapterId }}
+          WEBHOOK_URL:         ${{ github.event.client_payload.webhookUrl }}
+        run: node scripts/upload-chapter-render.js
+
+      # ── 8. Failure notification ───────────────────────────────────────────────
+      - name: Notify app of failure
+        if: failure()
+        env:
+          WEBHOOK_URL:  ${{ github.event.client_payload.webhookUrl }}
+          CHAPTER_ID:   ${{ github.event.client_payload.chapterId }}
+        run: |
+          if [ -n "$WEBHOOK_URL" ]; then
+            curl -s -X POST "$WEBHOOK_URL" \
+              -H "Content-Type: application/json" \
+              -d "{\"chapterId\":\"$CHAPTER_ID\",\"status\":\"failed\",\"error\":\"GitHub Actions render job failed — check Actions logs\"}"
+            echo "✅ Failure webhook sent"
+          fi

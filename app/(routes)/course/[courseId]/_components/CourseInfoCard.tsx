@@ -1,9 +1,10 @@
 import { Course } from '@/type/CourseType';
-import { Player, PlayerRef } from '@remotion/player';
 import { BookOpen, ChartNoAxesColumnIncreasing, Clock, Play, Sparkles } from 'lucide-react';
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { formatTime } from './CourseChapters';
+import { Player, PlayerRef } from '@remotion/player';
 import { CourseComposition } from './ChapterVideo';
-import { CustomPlayerControls, formatTime } from './CourseChapters';
+import { CustomPlayerControls } from './CustomPlayerControls';
 
 type Props = {
     course: Course | undefined;
@@ -11,12 +12,60 @@ type Props = {
 
 function CourseInfoCard({ course }: Props) {
     const fps = 30;
-    const slides = course?.chapterContentSlides ?? [];
+    const rawSlides = course?.chapterContentSlides ?? [];
+
+    // Build a chapter-index lookup so we can sort by chapter order (Ch1 → Ch2 → ...)
+    // regardless of which chapter was generated first in the DB.
+    const chapterOrderMap = useMemo(() => {
+        const map: Record<string, number> = {};
+        course?.courseLayout?.chapters?.forEach((ch, idx) => {
+            map[ch.chapterId] = idx;
+        });
+        return map;
+    }, [course?.courseLayout?.chapters]);
+
+    // Sort all slides: primary = chapter position in courseLayout, secondary = slideIndex
+    const slides = useMemo(() => {
+        if (!rawSlides.length) return rawSlides;
+        return [...rawSlides].sort((a, b) => {
+            const chA = chapterOrderMap[a.chapterId] ?? 999;
+            const chB = chapterOrderMap[b.chapterId] ?? 999;
+            if (chA !== chB) return chA - chB;
+            return (a.slideIndex ?? 0) - (b.slideIndex ?? 0);
+        });
+    }, [rawSlides, chapterOrderMap]);
+
     const [isStarted, setIsStarted] = useState(false);
     const [hasImageError, setHasImageError] = useState(false);
+    const [playbackSpeed, setPlaybackSpeed] = useState(1);
 
     const playerRef = useRef<PlayerRef | null>(null);
     const containerRef = useRef<HTMLDivElement | null>(null);
+    const [isFullscreen, setIsFullscreen] = useState(false);
+
+    // Track fullscreen state globally with vendor prefix support
+    useEffect(() => {
+        const getFullscreenElement = () => {
+            return document.fullscreenElement ||
+                (document as any).webkitFullscreenElement ||
+                (document as any).mozFullScreenElement ||
+                (document as any).msFullscreenElement;
+        };
+
+        const handler = () => setIsFullscreen(!!getFullscreenElement());
+
+        document.addEventListener('fullscreenchange', handler);
+        document.addEventListener('webkitfullscreenchange', handler);
+        document.addEventListener('mozfullscreenchange', handler);
+        document.addEventListener('MSFullscreenChange', handler);
+
+        return () => {
+            document.removeEventListener('fullscreenchange', handler);
+            document.removeEventListener('webkitfullscreenchange', handler);
+            document.removeEventListener('mozfullscreenchange', handler);
+            document.removeEventListener('MSFullscreenChange', handler);
+        };
+    }, []);
 
     // Instantly compute durations from stored audioDuration (no async fetch needed)
     const durationsBySlideId = useMemo(() => {
@@ -69,7 +118,19 @@ function CourseInfoCard({ course }: Props) {
 
                 </div>
                 {/* Player + custom controls wrapper for fullscreen */}
-                <div ref={containerRef} className='border-2 rounded-2xl border-white/10 overflow-hidden lg:col-span-2 flex flex-col relative' style={{ background: '#000', height: '380px', width: '100%' }}>
+                <div 
+                    ref={containerRef} 
+                    className={`overflow-hidden lg:col-span-2 flex flex-col relative ${
+                        (isFullscreen && typeof document !== 'undefined' && document.fullscreenElement === containerRef.current) 
+                            ? 'border-0' 
+                            : 'border-2 rounded-2xl border-white/10'
+                    }`} 
+                    style={{ 
+                        background: '#000', 
+                        height: (isFullscreen && typeof document !== 'undefined' && document.fullscreenElement === containerRef.current) ? '100vh' : '380px', 
+                        width: '100%' 
+                    }}
+                >
                     {!isStarted ? (
                         /* YouTube-style thumbnail overlay */
                         <div
@@ -216,9 +277,9 @@ function CourseInfoCard({ course }: Props) {
                             )}
                         </div>
                     ) : (
-                        /* Actual Player */
+                        /* Actual Remotion Player + custom controls */
                         <>
-                            <div style={{ flex: 1, position: 'relative', width: '100%', height: 'calc(100% - 44px)' }}>
+                            <div style={{ flex: 1, position: 'relative', width: '100%', minHeight: 0 }}>
                                 <Player
                                     ref={playerRef}
                                     component={CourseComposition}
@@ -226,17 +287,18 @@ function CourseInfoCard({ course }: Props) {
                                     compositionWidth={1280}
                                     compositionHeight={720}
                                     fps={fps}
-                                    style={{
-                                        width: '100%',
-                                        height: '100%',
-                                    }}
+                                    playbackRate={playbackSpeed}
+                                    style={{ width: '100%', height: '100%' }}
                                     inputProps={{
                                         slides: slides.map(slide => ({
                                             slideId: slide.slideId,
-                                            html: slide.html,
-                                            audioFileUrl: slide.audioUrl,
+                                            html: slide.html ?? '',
+                                            audioFileUrl: slide.audioUrl ?? '',
                                             revealData: slide.revealData,
-                                            caption: slide.captions
+                                            fragmentData: Array.isArray(slide.revealData) && slide.revealData.length > 0 && !isNaN(Number(slide.revealData[0]))
+                                                ? slide.revealData.map(Number)
+                                                : undefined,
+                                            caption: slide.captions,
                                         })),
                                         durationsBySlideId: durationsBySlideId || {}
                                     }}
@@ -247,6 +309,8 @@ function CourseInfoCard({ course }: Props) {
                                 fps={fps}
                                 totalFrames={totalFrames || 30}
                                 containerRef={containerRef}
+                                playbackSpeed={playbackSpeed}
+                                setPlaybackSpeed={setPlaybackSpeed}
                             />
                         </>
                     )}

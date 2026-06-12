@@ -48,7 +48,7 @@ export async function POST(req: NextRequest) {
             title,
             duration,
             platform,
-            publishTime: new Date(publishTime),
+            publishTime: new Date(publishTime), // already normalized to UTC by schema
             status: 'active',
         }).returning();
 

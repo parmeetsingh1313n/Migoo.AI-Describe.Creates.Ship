@@ -43,6 +43,7 @@ export interface DesignConfig {
         muted: string        // Secondary text
         line: string         // Divider / connector lines
         quoteMark: string    // Large quote mark color
+        shadow: string       // Drop shadow color (translucent)
     }
 }
 
@@ -66,6 +67,7 @@ export const NOTE_DESIGNS: Record<NoteDesignKey, DesignConfig> = {
             accent: '#c06080', accentLight: '#fdf2f6', accentLighter: '#fef8fa',
             accentBorder: '#e8a0b8', circle: '#c06080',
             text: '#3d3040', muted: '#8a7a8a', line: '#d4899f', quoteMark: '#c06080',
+            shadow: 'rgba(192,96,128,0.2)',
         },
     },
 
@@ -88,6 +90,7 @@ export const NOTE_DESIGNS: Record<NoteDesignKey, DesignConfig> = {
             accent: '#2b7a78', accentLight: '#e6f4f4', accentLighter: '#f0f9f9',
             accentBorder: '#7ac0be', circle: '#2b7a78',
             text: '#2d3748', muted: '#718096', line: '#7ab8b6', quoteMark: '#2b7a78',
+            shadow: 'rgba(43,122,120,0.2)',
         },
     },
 
@@ -110,6 +113,7 @@ export const NOTE_DESIGNS: Record<NoteDesignKey, DesignConfig> = {
             accent: '#5a6b4f', accentLight: '#eee9df', accentLighter: '#f3f0e8',
             accentBorder: '#a3b096', circle: '#6b7c60',
             text: '#3a3f32', muted: '#6b7c60', line: '#a3b096', quoteMark: '#6b7c60',
+            shadow: 'rgba(90,107,79,0.2)',
         },
     },
 
@@ -132,6 +136,7 @@ export const NOTE_DESIGNS: Record<NoteDesignKey, DesignConfig> = {
             accent: '#4a6274', accentLight: '#edf1f5', accentLighter: '#f5f7fa',
             accentBorder: '#93a8b8', circle: '#4a6274',
             text: '#2c3e50', muted: '#6b7b8d', line: '#93a8b8', quoteMark: '#4a6274',
+            shadow: 'rgba(74,98,116,0.2)',
         },
     },
 }

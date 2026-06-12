@@ -1,4 +1,5 @@
 "use client"
+import TypingHeadline from './TypingHeadline';
 import {
     InputGroup,
     InputGroupAddon,
@@ -24,7 +25,7 @@ import { toast } from "sonner"
 function Hero() {
 
     const [userInput, setUserInput] = useState('');
-    const [type, setType] = useState('full-course');
+    const [type, setType] = useState<'video' | 'article' | 'tutorial' | 'course'>('course');
     const [loading, setLoading] = useState(false);
     const { user } = useUser();
     const router = useRouter();
@@ -56,10 +57,17 @@ function Hero() {
 }
 
     return (
-        <div className="flex items-center flex-col mt-20">
+        <div className="flex items-center flex-col mt-6">
             <div>
-                <h2 className="text-4xl font-bold">Learn Smarter with <span className="text-primary">AI Video Courses</span></h2>
-                <p className="mt-4 text-lg text-center  text-muted-foreground">Turn any Topic into a Complete Course</p>
+                <TypingHeadline
+                  typedText="Learn Smarter with AI Video Courses"
+                  delay={500}
+                  speed={60}
+                  holdDelay={3500}
+                  loop={false}
+                  className="text-4xl md:text-5xl font-bold text-center"
+                />
+                <p className="mt-4 text-lg text-center text-muted-foreground">Turn any Topic into a Complete Course</p>
             </div>
             <div className="grid w-full max-w-xl mt-5 gap-6 bg-white z-10">
                 <InputGroup>
@@ -71,13 +79,15 @@ function Hero() {
                         onChange={(e) => setUserInput(e.target.value)}
                     />
                     <InputGroupAddon align="block-end">
-                        <Select>
+                        <Select value={type} onValueChange={(val) => setType(val as 'video' | 'article' | 'tutorial' | 'course')}>
                             <SelectTrigger className="w-[180px]">
-                                <SelectValue placeholder="full-course" />
+                                <SelectValue placeholder="Select type" />
                             </SelectTrigger>
                             <SelectContent>
-                                <SelectItem value="full-course">Full Course</SelectItem>
-                                <SelectItem value="quick-explain-video">Quick Explain Video</SelectItem>
+                                <SelectItem value="course">Full Course</SelectItem>
+                                <SelectItem value="video">Video</SelectItem>
+                                <SelectItem value="tutorial">Tutorial</SelectItem>
+                                <SelectItem value="article">Article</SelectItem>
                             </SelectContent>
                         </Select>
                         {user ? <InputGroupButton className="ml-auto" size="sm" variant="default" onClick={GenerateCourseLayout} disabled={loading}>

@@ -2,6 +2,7 @@ import React from 'react';
 import { Composition, registerRoot } from 'remotion';
 import { MainComposition, CompositionProps } from './Composition';
 import { MotionGraphicComposition, MotionGraphicCompositionProps } from './MotionGraphicComposition';
+import { CourseComposition } from './CourseComposition';
 
 export const RemotionRoot: React.FC = () => {
   return (
@@ -56,6 +57,22 @@ export const RemotionRoot: React.FC = () => {
           audioDuration: 0,
           voiceoverEnabled: false,
         } as MotionGraphicCompositionProps}
+      />
+      {/* Course chapter renderer — 1280×720 @30fps */}
+      <Composition
+        id="CourseVideo"
+        component={CourseComposition as any}
+        fps={30}
+        width={1280}
+        height={720}
+        calculateMetadata={({ props }) => ({
+          durationInFrames: (props as any).durationInFrames || 900,
+        })}
+        defaultProps={{
+          slides: [] as any[],
+          durationsBySlideId: {} as Record<string, number>,
+          durationInFrames: 900,
+        }}
       />
     </>
   );

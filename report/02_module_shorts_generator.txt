@@ -1,0 +1,281 @@
+================================================================================
+         MODULE 2: SHORT VIDEO GENERATOR
+         "1-Click Viral Short-Form Video Factory"
+================================================================================
+
+1. MODULE OVERVIEW
+------------------
+
+The Short Video Generator is Migoo's automated content machine for social
+media platforms. It produces viral short-form videos (TikTok, Instagram Reels,
+YouTube Shorts) through a fully automated 7-step Inngest durable workflow.
+
+Users configure their content niche, voice, music, visual style, and caption
+style through a step-by-step wizard. Once submitted, the system autonomously
+generates scripts, voice narration, word-level captions, AI images, optional
+image-to-video conversion, and the final rendered video — all without any
+manual intervention.
+
+Production Pipeline:
+  Niche Selection → Script Generation → TTS Voice → Caption Sync →
+  AI Image Generation → Image-to-Video Conversion → Remotion Video Render
+
+
+2. TECHNICAL ARCHITECTURE
+-------------------------
+
+Frontend:
+  - File: app/short-generator/page.tsx (28KB) — Series dashboard + listing
+  - File: app/short-generator/create/page.tsx — Multi-step creation wizard
+  - File: app/short-generator/[seriesId]/ — Individual series detail view
+  - Components: app/short-generator/_components/ — Shared UI elements
+
+API Layer:
+  - POST /api/create-short-series — Create a new video series
+  - GET  /api/short-series — List all user series
+  - GET  /api/video — Fetch individual video assets
+  - POST /api/inngest — Inngest webhook endpoint for background processing
+
+Database Schema:
+  - shortVideoSeries: seriesId, userId, niche, language, voice, music,
+    videoStyle, captionStyle, title, duration, platform, publishTime,
+    thumbnailUrl, status, createdAt, updatedAt
+
+  - shortVideoAssets: videoId, seriesId, voice, language, videoTitle,
+    scriptData (JSON), audioUrl, audioDuration, captionData (JSON),
+    imageUrls (JSON), sceneVideoUrls (JSON), sceneThumbnailUrls (JSON),
+    avatarClipUrls (JSON), sceneAssetTypes (JSON), contextMarkdown,
+    videoUrl, thumbnailUrl, status
+
+Background Worker:
+  - File: inngest/functions.ts (126KB — the largest file in the codebase)
+  - Function: generateShortVideo — Inngest durable workflow
+  - Event trigger: "shorts/generate.video"
+  - Cancel event: "shorts/generate.cancel"
+
+
+3. CREATION WIZARD (6-Step Flow)
+---------------------------------
+
+The user configures their series through a 6-step guided wizard:
+
+  STEP 1 — NICHE SELECTION
+  User enters a content niche (e.g., "Ancient Civilizations", "Space Facts",
+  "Psychology Tricks"). Max 500 characters, validated by Zod schema.
+
+  STEP 2 — VOICE & LANGUAGE
+  User selects from multiple Sarvam AI voices and languages. Supports
+  English (en-IN), Hindi (hi-IN), and other Indian languages.
+
+  STEP 3 — BACKGROUND MUSIC
+  User selects a music track from preset options (cinematic, upbeat,
+  dramatic, chill). Music URLs managed via lib/music-urls.ts.
+
+  STEP 4 — VIDEO STYLE
+  Visual style for AI-generated images:
+  - Realistic — Photorealistic DSLR-quality visuals
+  - Cyberpunk — Neon-lit futuristic aesthetics
+  - GTA — Grand Theft Auto inspired art style
+  - Anime — Japanese animation style
+  - Watercolor — Artistic painted look
+  - Dark Fantasy — Moody cinematic atmosphere
+
+  STEP 5 — CAPTION STYLE
+  Multiple Hormozi-style dynamic caption presets from
+  lib/caption-styles.ts (14KB):
+  - Various font families, sizes, colors, and animation effects
+  - Word-by-word highlight animations
+  - Background styling options (solid, blur, gradient)
+
+  STEP 6 — SERIES DETAILS
+  - Series title
+  - Duration range: '30-50' seconds or '60-70' seconds
+  - Platform: YouTube / Instagram / Email
+  - Publish time scheduling
+
+  All inputs validated via createShortSeriesSchema (Zod):
+  - niche: max 500 chars, XSS-safe
+  - duration: regex /^\d+-\d+$/
+  - platform: enum ["youtube", "instagram", "email"]
+  - publishTime: ISO datetime string
+
+
+4. INNGEST DURABLE WORKFLOW (7-Step Pipeline)
+----------------------------------------------
+
+The generateShortVideo function (inngest/functions.ts) is a durable,
+step-based workflow that survives server restarts and handles failures
+gracefully. Each step is independently retryable.
+
+STEP 1 — FETCH SERIES DATA
+  - Reads series configuration from shortVideoSeries table
+  - Determines voice, language, caption style from series or studioPayload
+  - Updates status to "generating:script"
+
+STEP 2 — AI SCRIPT GENERATION
+  - Uses Groq LLM (llama-3.3-70b-versatile) via AI Fallback Client
+  - Generates 6-scene script with 310-350 total words
+  - Each scene: 50-60 words (4-5 rich sentences)
+  - Includes scene categorization: "real_entity", "living_thing", "general"
+
+  Script Validation & Retry:
+  - Maximum 3 generation attempts per script
+  - Word count validation (must reach 85% of target minimum)
+  - Best result tracking across attempts
+  - Temperature escalation: 0.7 → 0.8 → 0.85 per attempt
+
+  Scene Structure:
+  - scene1 (HOOK): Jaw-dropping fact, bold claim, or provocative question
+  - scene2-scene5 (BODY): Escalating intensity, each completely different
+  - scene6 (CONCLUSION): Emotionally resonant, ties key points together
+
+  Anti-Repetition Rules (enforced in prompt):
+  - No repeated ideas, phrases, or sentences across scenes
+  - Banned generic phrases list
+  - Each scene must contain 3+ specific facts (dates, names, numbers)
+
+  Translation Support:
+  - If target language is non-English, uses lib/translate.ts to translate
+    all narrations while preserving structure
+  - Word counts and durations recalculated after translation
+
+  Explicit Key Mapping:
+  - Model outputs scene1, scene2, ..., scene6 as explicit JSON keys
+  - System maps these back to a scenes[] array for downstream processing
+
+STEP 3 — TTS VOICE GENERATION
+  - Generates audio PER SCENE (not concatenated text)
+  - Per-scene voice config: pace and temperature can vary per scene
+  - Uses callSarvamTTS with retry logic (3 retries, exponential backoff)
+  - Smart text chunking for oversized narrations (2200 char limit)
+  - Progressive rate limiting: 1000ms delay between scenes
+  - Merges all scene audio via mergeWavBuffers into single WAV file
+
+  Duration Calculation:
+  - Reads WAV header: sample rate, data size, bytes per sample, channels
+  - Formula: audioDuration = dataSize / (sampleRate × bytesPerSample × channels)
+
+  Audio Upload:
+  - Uploads to Appwrite Storage via putWithRotation (multi-config rotation)
+  - Stores audioUrl and audioDuration in shortVideoAssets
+
+STEP 4 — CAPTION GENERATION
+  - Distributes audio duration across scenes based on word count ratios
+  - Generates word-level timestamps within each scene
+  - Creates captionData JSON with: transcript, wordTimestamps, segments
+  - Stores in shortVideoAssets.captionData
+
+STEP 5 — AI IMAGE GENERATION
+  - Uses Leonardo AI (lib/leonardo.ts — 44KB implementation)
+  - Parallel generation: generateNanoBananaImagesParallel function
+  - One image per scene based on imagePrompt from script
+  - Visual style applied based on user's videoStyle selection
+  - Images uploaded to Appwrite, URLs stored in imageUrls JSON array
+
+STEP 5.25 — IMAGE-TO-VIDEO CONVERSION (Optional)
+  - Uses Kling AI via lib/leonardo-video.ts (53KB implementation)
+  - Converts static AI images to 5-second video clips
+  - Parallel scene processing: generateKlingScenesParallel
+  - Video URLs stored in sceneVideoUrls JSON array
+  - Thumbnail URLs stored in sceneThumbnailUrls JSON array
+
+  Duration Probing (probeVideoDuration function):
+  - Fetches first 2MB of MP4 file
+  - Walks MP4 box headers (ftyp → moov → mvhd)
+  - Parses mvhd atom for timescale and duration
+  - Supports version 0 (32-bit) and version 1 (64-bit) mvhd
+  - Fallback: estimates duration from file size (~500 KB/s)
+
+STEP 5.5 — AVATAR CLIP INJECTION
+  - Pre-recorded AI avatar clips for intro and outro
+  - 6 avatar variations (3 intros, 3 outros) with pairing rules:
+    * Avatar1 Intro → Avatar4/Avatar5 Outro (random)
+    * Avatar2 Intro → Avatar4/Avatar5 Outro (random)
+    * Avatar3 Intro → Avatar6 Outro (fixed)
+  - Weighted selection: Avatar1 40%, Avatar2 40%, Avatar3 20%
+
+  English TTS for Avatars:
+  - Generates TTS for intro/outro scripts
+  - TIME-STRETCHING: Uses FFmpeg atempo filter to match TTS duration
+    to video clip duration
+  - Custom atempo filter chain builder for extreme ratios (>2.0x or <0.5x)
+  - Falls back to original TTS if FFmpeg fails
+
+STEP 6 — REMOTION VIDEO RENDER
+  - Assembles all assets: images/videos, audio, captions, music, avatars
+  - Uses Remotion Composition.tsx for programmatic rendering
+  - Caption styling applied per user selection
+  - Background music mixed at appropriate volume
+  - Outputs final MP4 video
+  - Uploads to Appwrite Storage
+
+STEP 7 — STATUS UPDATE & CLEANUP
+  - Updates shortVideoAssets with final videoUrl and thumbnailUrl
+  - Updates shortVideoSeries status to "completed"
+
+  Failure Handling (onFailure callback):
+  - Resets series status to "completed" to hide generating UI
+  - Marks any assets stuck in "processing"/"rendering" as "failed"
+
+
+5. DATA FLOW DIAGRAM
+---------------------
+
+User configures series (6-step wizard)
+      │
+      ▼
+[Zod Validation] → [Store in shortVideoSeries]
+      │
+      ▼
+[Inngest Event: shorts/generate.video]
+      │
+      ▼
+Step 1: [Fetch series from DB]
+      │
+      ▼
+Step 2: [Groq LLM] → 6-scene script → Translate if needed
+      │
+      ▼
+Step 3: [Sarvam TTS] → Per-scene audio → Merge WAV → Upload
+      │
+      ▼
+Step 4: [Caption Sync] → Word-level timestamps → captionData JSON
+      │
+      ▼
+Step 5: [Leonardo AI] → Parallel image generation → Upload
+      │
+      ▼
+Step 5.25: [Kling AI] → Image-to-video conversion → Upload
+      │
+      ▼
+Step 5.5: [Avatar Clips] → Select pair → TTS + time-stretch
+      │
+      ▼
+Step 6: [Remotion] → Compose all assets → Render MP4 → Upload
+      │
+      ▼
+Step 7: [Update DB] → status = "completed"
+
+
+6. KEY TECHNICAL INNOVATIONS
+------------------------------
+
+  - DURABLE WORKFLOWS: Inngest ensures each step is independently
+    retryable. If Step 5 (image generation) fails, the system can resume
+    from Step 5 without re-running Steps 1-4.
+
+  - MP4 BOX PARSER: Custom lightweight MP4 duration prober that works on
+    serverless (no ffprobe binary needed). Walks RIFF/ISOBMFF box headers
+    to extract duration from mvhd atom.
+
+  - ATEMPO FILTER CHAIN: Custom FFmpeg filter builder that chains multiple
+    atempo stages for extreme speed ratios (atempo supports 0.5-2.0x per
+    stage; chaining 3 stages covers ratios up to 8x).
+
+  - MULTI-CONFIG STORAGE ROTATION: putWithRotation in lib/blob.ts rotates
+    across multiple Appwrite configurations to distribute storage load and
+    avoid single-bucket limits.
+
+  - CONTENT UNIQUENESS: Randomized content angles (12 predefined angles)
+    combined with timestamp seeds ensure no two generated videos are alike,
+    even for the same niche.

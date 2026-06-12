@@ -455,21 +455,18 @@ async function submitLeonardoJobWithModel(
     throw new Error(`All keys failed: ${errors.join(", ")}`);
 }
 // ── Nano Banana 2 → Nano Banana fallback — 9:16 portrait dimensions ──────────
-// Valid pair per Leonardo docs: 768 × 1344
+// Valid pair per Leonardo docs: 768 × 1376 (9:16 aspect ratio)
 const NB_9x16_WIDTH  = 768;
-const NB_9x16_HEIGHT = 1344;
+const NB_9x16_HEIGHT = 1376;
 
 /**
  * Model priority list for Nano Banana image generation.
- * nano-banana-2 is tried first (priority), gemini-2.5-flash-image (Nano Banana v1) is the fallback.
- *
- * API model codes (per Leonardo.AI docs):
- *   Nano Banana 2  → "nano-banana-2"
- *   Nano Banana v1 → "gemini-2.5-flash-image"
+ * nano-banana-2 is tried first; if all keys fail, falls back to:
+ *   1. GPT Image-1.5 (via generateGptImage15SingleUrl)
+ *   2. Gemini Imagen (via GEMINI_API_KEY)
  */
 const NANO_BANANA_MODEL_PRIORITY = [
-    "nano-banana-2",            // ← Primary: Nano Banana 2 (always try first)
-    "gemini-2.5-flash-image",   // ← Fallback: Nano Banana v1 (if nb-2 fails)
+    "nano-banana-2",   // ← Only Leonardo model; GPT Image-1.5 is the next fallback
 ];
 
 /**
@@ -527,9 +524,84 @@ export async function generateNanoBananaImage(
         }
     }
 
+    // ── GPT Image-1.5 fallback ───────────────────────────────────────────────
+    console.warn(`⚠️ All Nano Banana models failed. Falling back to GPT Image-1.5...`);
+    try {
+        const gptUrl = await generateGptImage15SingleUrl(prompt, width, height);
+        console.log(`✅ GPT Image-1.5 fallback succeeded!`);
+        return gptUrl;
+    } catch (gptErr: any) {
+        allErrors.push(`[gpt-image-1.5 fallback]: ${gptErr?.message}`);
+    }
+
+    // ── Gemini Imagen ultimate fallback ──────────────────────────────────────
+    console.warn(`⚠️ GPT Image-1.5 also failed. Trying Gemini Imagen as last resort...`);
+    try {
+        const geminiUrl = await generateGeminiImage(prompt, width, height);
+        console.log(`✅ Gemini Imagen fallback succeeded!`);
+        return geminiUrl;
+    } catch (geminiErr: any) {
+        allErrors.push(`[gemini-imagen fallback]: ${geminiErr?.message}`);
+    }
+
     throw new Error(
-        `All Nano Banana models failed:\n${allErrors.join('\n')}`
+        `All image generation methods failed:\n${allErrors.join('\n')}`
     );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// GEMINI IMAGEN — Ultimate fallback image generation
+// Uses GEMINI_API_KEY from env. Uploads result to a temp URL via base64 data URI.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Generate an image using Google Gemini's image generation capability.
+ * Returns a base64 data URL (data:image/png;base64,...) which can be uploaded
+ * to Appwrite or used directly.
+ *
+ * Model: gemini-2.0-flash-preview-image-generation
+ * Uses GEMINI_API_KEY from environment.
+ */
+async function generateGeminiImage(
+    prompt: string,
+    _width: number = 1024,
+    _height: number = 1024,
+): Promise<string> {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) throw new Error('GEMINI_API_KEY not set — cannot use Gemini image fallback');
+
+    console.log(`🤖 Gemini Imagen: generating image...`);
+
+    const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-preview-image-generation:generateContent?key=${apiKey}`,
+        {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                contents: [{ parts: [{ text: prompt }] }],
+                generationConfig: { responseModalities: ['TEXT', 'IMAGE'] },
+            }),
+        }
+    );
+
+    if (!response.ok) {
+        const text = await response.text();
+        throw new Error(`Gemini image API error (${response.status}): ${text.substring(0, 200)}`);
+    }
+
+    const data = await response.json();
+    const parts = data?.candidates?.[0]?.content?.parts || [];
+
+    for (const part of parts) {
+        if (part?.inlineData?.data && part?.inlineData?.mimeType?.startsWith('image/')) {
+            const mimeType = part.inlineData.mimeType;
+            const base64 = part.inlineData.data;
+            // Return as a data URL — callers (Appwrite upload) can fetch this
+            return `data:${mimeType};base64,${base64}`;
+        }
+    }
+
+    throw new Error(`Gemini returned no image parts. Response: ${JSON.stringify(data).substring(0, 300)}`);
 }
 
 
@@ -547,9 +619,9 @@ function enhanceForRealism(prompt: string): string {
 }
 /**
  * submitLeonardoJobV2
- * Uses the REST v2 endpoint (Nano Banana 2 / Nano Banana).
+ * Uses the v2 REST endpoint (required for nano-banana-2, gemini-2.5-flash-image).
  * Polls via the v1 status endpoint (same generation system under the hood).
- * Tries all available keys with the specified model.
+ * Handles GraphQL-style error responses (arrays with message/extensions).
  */
 async function submitLeonardoJobV2(
     model: string,
@@ -590,24 +662,29 @@ async function submitLeonardoJobV2(
             });
 
             if (response.status === 429) {
-                console.warn(`⚠️ ${keyLabel} rate-limited (429). Trying next key...`);
                 errors.push(`${keyLabel}: Rate limited (429)`);
                 continue;
             }
-
             if (!response.ok) {
                 const text = await response.text();
-                console.warn(`⚠️ ${keyLabel} failed (${response.status}): ${text}`);
-                errors.push(`${keyLabel}: ${response.status} - ${text}`);
+                errors.push(`${keyLabel}: ${response.status} - ${text.substring(0, 120)}`);
                 continue;
             }
 
             const result = await response.json();
-            console.log(`📦 ${model} raw response: ${JSON.stringify(result).substring(0, 200)}`);
 
-            // v2 API response shape: { generate: { generationId: '...', cost: {...} } }
+            // Detect GraphQL-style error responses:
+            // v2 can return [{"message":"Insufficient tokens","extensions":{...}}]
+            const gqlError = extractGraphQLError(result);
+            if (gqlError) {
+                console.warn(`⚠️ ${keyLabel}: ${gqlError}`);
+                errors.push(`${keyLabel}: ${gqlError}`);
+                continue;
+            }
+
+            // v2 success: { generate: { generationId: '...' } }
             const generationId =
-                result?.generate?.generationId ||  // ← actual v2 shape
+                result?.generate?.generationId ||
                 result?.data?.generationId ||
                 result?.data?.id ||
                 result?.generationId ||
@@ -615,19 +692,42 @@ async function submitLeonardoJobV2(
                 result?.id;
 
             if (!generationId) {
-                console.error(`❌ ${keyLabel} — v2 response missing generationId. Full response:`, JSON.stringify(result));
-                errors.push(`${keyLabel}: v2 response missing generationId`);
+                console.error(`❌ ${keyLabel} — response missing generationId:`, JSON.stringify(result).substring(0, 300));
+                errors.push(`${keyLabel}: missing generationId`);
                 continue;
             }
 
             console.log(`✅ ${model} job submitted! ${keyLabel}, id: ${generationId}`);
             return { generationId, apiKey };
         } catch (e: any) {
-            console.warn(`🧨 Error with ${keyLabel} (${model}): ${e.message}`);
             errors.push(`${keyLabel}: ${e.message}`);
         }
     }
-    throw new Error(`All ${allKeys.length} Leonardo keys failed with model '${model}': ${errors.join(", ")}`);
+    throw new Error(`All ${allKeys.length} keys failed for ${model}: ${errors.join(", ")}`);
+}
+
+/**
+ * Detect GraphQL-style error responses from Leonardo v2 API.
+ * The v2 endpoint can return errors as:
+ *   - An array: [{"message":"Insufficient tokens","extensions":{"code":"HttpException"}}]
+ *   - An object with errors: {"errors":[{"message":"..."}]}
+ * Returns the error message string if an error is detected, null otherwise.
+ */
+function extractGraphQLError(result: any): string | null {
+    // Array of errors: [{message: "...", extensions: {code: "..."}}]
+    if (Array.isArray(result)) {
+        const msg = result[0]?.message || result[0]?.extensions?.details || "Unknown API error";
+        return msg;
+    }
+    // Object with errors array: {errors: [{message: "..."}]}
+    if (result?.errors && Array.isArray(result.errors)) {
+        return result.errors[0]?.message || "Unknown API error";
+    }
+    // Object with top-level message (non-success): {message: "...", code: "..."}
+    if (result?.message && !result?.generate && !result?.generationId) {
+        return result.message;
+    }
+    return null;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -692,14 +792,21 @@ async function submitNanoBananaJobWithKeyOrder(
                 errors.push(`${keyLabel}: Rate limited (429)`);
                 continue;
             }
-
             if (!response.ok) {
                 const text = await response.text();
-                errors.push(`${keyLabel}: ${response.status} - ${text}`);
+                errors.push(`${keyLabel}: ${response.status} - ${text.substring(0, 120)}`);
                 continue;
             }
 
             const result = await response.json();
+
+            // Detect GraphQL-style error responses (e.g. "Insufficient tokens")
+            const gqlError = extractGraphQLError(result);
+            if (gqlError) {
+                errors.push(`${keyLabel}: ${gqlError}`);
+                continue;
+            }
+
             const generationId =
                 result?.generate?.generationId ||
                 result?.data?.generationId ||
@@ -818,11 +925,52 @@ export async function generateNanoBananaImagesParallel(
     console.log(`✅ Submitted ${pendingJobs.length}/${scenes.length} Nano Banana jobs. Polling in parallel...`);
 
     // ── Phase 2: Poll ALL jobs in parallel ────────────────────────────────
+    // If a Nano Banana poll times out after 150 attempts, automatically fall
+    // back to GPT Image-1.5 (MEDIUM quality, 1024×1024) for that scene.
     const pollResults = await Promise.allSettled(
         pendingJobs.map(async (job) => {
-            const imageUrl = await pollLeonardoJob(job.generationId, job.apiKey, 150, cancelSignal);
-            console.log(`✅ Scene ${job.sceneIndex + 1} ${job.model} image ready!`);
-            return { sceneIndex: job.sceneIndex, imageUrl };
+            // Resolve the original prompt for this scene (needed for fallback)
+            const originalScene = scenes.find(s => s.index === job.sceneIndex);
+            const scenePrompt = originalScene?.prompt ?? "";
+            const sceneWidth  = originalScene?.width  ?? NB_9x16_WIDTH;
+            const sceneHeight = originalScene?.height ?? NB_9x16_HEIGHT;
+
+            try {
+                const imageUrl = await pollLeonardoJob(job.generationId, job.apiKey, 150, cancelSignal);
+                console.log(`✅ Scene ${job.sceneIndex + 1} ${job.model} image ready!`);
+                return { sceneIndex: job.sceneIndex, imageUrl };
+            } catch (pollErr: any) {
+                // Propagate cancellations immediately — don't attempt fallback
+                if (
+                    cancelSignal?.cancelled ||
+                    pollErr?.message?.includes('cancelled by force stop')
+                ) {
+                    throw pollErr;
+                }
+
+                console.warn(
+                    `⚠️ Scene ${job.sceneIndex + 1} Nano Banana poll timed out/failed: ` +
+                    `${pollErr?.message?.substring(0, 120)}. Falling back to GPT Image-1.5...`
+                );
+
+                // ── GPT Image-1.5 fallback (per-scene) ──────────────────
+                // Map the scene's dimensions to the nearest valid GPT 1.5 pair:
+                //   1024×1024 (1:1) | 1024×1536 (2:3 portrait) | 1536×1024 (3:2 landscape)
+                let gptWidth  = 1024;
+                let gptHeight = 1024;
+                const ratio = sceneWidth / sceneHeight;
+                if (ratio < 0.8) { gptWidth = 1024; gptHeight = 1536; }      // portrait
+                else if (ratio > 1.2) { gptWidth = 1536; gptHeight = 1024; } // landscape
+                // else square 1024×1024
+
+                const gptUrl = await generateGptImage15SingleUrl(
+                    scenePrompt,
+                    gptWidth,
+                    gptHeight
+                );
+                console.log(`✅ Scene ${job.sceneIndex + 1} GPT Image-1.5 fallback succeeded!`);
+                return { sceneIndex: job.sceneIndex, imageUrl: gptUrl };
+            }
         })
     );
 
@@ -852,6 +1000,55 @@ export async function generateNanoBananaImagesParallel(
     return results;
 }
 
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// GPT IMAGE-1.5 Fallback helper — single URL, no image reference
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Convenience wrapper around generateGptImage15 that:
+ *  - Uses no image reference (pure text-to-image)
+ *  - Returns a single URL string (not an array)
+ *  - Clamps width/height to valid GPT Image-1.5 pairs per the Leonardo docs:
+ *      1024×1024 (1:1)  |  1024×1536 (2:3)  |  1536×1024 (3:2)
+ *
+ * Used as the automatic fallback when Nano Banana 2 polling exceeds 150 attempts.
+ */
+async function generateGptImage15SingleUrl(
+    prompt: string,
+    width: number = 1024,
+    height: number = 1024,
+): Promise<string> {
+    // Validate / snap to a supported GPT Image-1.5 dimension pair
+    const VALID_PAIRS: Array<[number, number]> = [
+        [1024, 1024],
+        [1024, 1536],
+        [1536, 1024],
+    ];
+    const snapped = VALID_PAIRS.reduce((best, pair) => {
+        const dBest = Math.abs(best[0] - width) + Math.abs(best[1] - height);
+        const dCurr = Math.abs(pair[0] - width) + Math.abs(pair[1] - height);
+        return dCurr < dBest ? pair : best;
+    }, VALID_PAIRS[0]);
+
+    console.log(
+        `🤖 GPT Image-1.5 fallback: ${snapped[0]}×${snapped[1]}, MEDIUM quality, no ref image`
+    );
+
+    const urls = await generateGptImage15(
+        prompt,
+        null,            // no image reference
+        1,               // quantity = 1
+        "MEDIUM",        // quality
+        snapped[0],      // width
+        snapped[1],      // height
+    );
+
+    if (!urls || urls.length === 0) {
+        throw new Error("GPT Image-1.5 returned no image URLs");
+    }
+    return urls[0];
+}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // GPT IMAGE-1.5 — with User Image Reference Support
@@ -929,7 +1126,7 @@ export async function uploadImageToLeonardo(
             formData.append(key, value);
         }
     }
-    formData.append("file", new Blob([uploadBuffer], { type: "image/jpeg" }), "image.jpg");
+    formData.append("file", new Blob([new Uint8Array(uploadBuffer)], { type: "image/jpeg" }), "image.jpg");
 
     const uploadRes = await fetch(uploadUrl, {
         method: "POST",
@@ -1020,6 +1217,14 @@ export async function generateGptImage15(
 
             const result = await response.json();
             console.log(`📦 GPT Image-1.5 raw response: ${JSON.stringify(result).substring(0, 300)}`);
+
+            // Detect GraphQL-style error responses (HTTP 200 with error array/object)
+            const gqlErr = extractGraphQLError(result);
+            if (gqlErr) {
+                console.warn(`⚠️ ${keyLabel}: ${gqlErr}`);
+                errors.push(`${keyLabel}: ${gqlErr}`);
+                continue;
+            }
 
             generationId =
                 result?.generate?.generationId ||

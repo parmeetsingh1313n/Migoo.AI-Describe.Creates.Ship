@@ -23,6 +23,8 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
+import EmptyNotesState from './_components/EmptyNotesState'
+import RollingText from './_components/RollingText'
 import {
     Dialog,
     DialogContent,
@@ -330,15 +332,17 @@ export default function NotesPage() {
 
                 {/* ─── Header ────────────────────────────────────── */}
                 <div className="text-center mb-10">
-                    <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-white border border-border mb-5 shadow-sm">
-                        <GraduationCap className="w-4 h-4 text-primary" />
-                        <span className="text-sm font-medium text-foreground">Notes Generator</span>
-                    </div>
-                    <h1 className="text-4xl md:text-5xl font-bold tracking-tight mb-4 leading-tight text-foreground">
-                        Smart Notes,{" "}
-                        <span className="text-primary border-b border-primary/30">
-                            Beautifully Crafted.
-                        </span>
+                    <h1 className="text-4xl md:text-5xl font-bold tracking-tight mb-4 leading-tight text-foreground flex flex-wrap items-center justify-center gap-x-2.5">
+                        <RollingText
+                            text="Smart Notes,"
+                            className="text-black italic font-bold"
+                            style={{ fontFamily: "'Instrument Serif', serif" }}
+                        />
+                        <RollingText
+                            text="Beautifully Crafted."
+                            className="text-primary italic font-bold border-b border-primary/20 pb-0.5"
+                            style={{ fontFamily: "'Instrument Serif', serif" }}
+                        />
                     </h1>
                     <p className="text-muted-foreground max-w-lg mx-auto leading-relaxed">
                         Paste content, upload documents, or just give a topic — AI generates
@@ -357,6 +361,7 @@ export default function NotesPage() {
                                 Note Title / Topic
                             </label>
                             <input
+                                id="note-topic-input"
                                 type="text"
                                 value={title}
                                 onChange={(e) => setTitle(e.target.value)}
@@ -633,13 +638,7 @@ export default function NotesPage() {
                             <Loader2 className="w-6 h-6 animate-spin text-primary" />
                         </div>
                     ) : projects.length === 0 ? (
-                        <div className="text-center py-16 rounded-2xl bg-white/60 border border-dashed border-border">
-                            <div className="w-14 h-14 rounded-2xl bg-muted flex items-center justify-center mx-auto mb-4">
-                                <GraduationCap className="w-7 h-7 text-muted-foreground" />
-                            </div>
-                            <h3 className="text-base font-bold text-foreground mb-1">No notes yet</h3>
-                            <p className="text-sm text-muted-foreground">Create your first beautiful notes above!</p>
-                        </div>
+                        <EmptyNotesState />
                     ) : (
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
                             {projects.map((project) => {

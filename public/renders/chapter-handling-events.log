@@ -1,0 +1,31 @@
+[2026-05-27T10:49:44.164Z] 🚀 Started. 7 slides, FFmpeg+Puppeteer mode
+[2026-05-27T10:49:44.186Z] 📽 Slide 1/7 — 458.4s
+[2026-05-27T10:49:48.859Z]   🎵 Audio ready
+[2026-05-27T10:49:48.863Z]   🎞 7 reveal state(s)
+[2026-05-27T10:52:14.795Z]   ✅ Slide 1 done
+[2026-05-27T10:52:14.811Z] 📽 Slide 2/7 — 435.2s
+[2026-05-27T10:56:56.379Z]   🎵 Audio ready
+[2026-05-27T10:56:56.390Z]   🎞 11 reveal state(s)
+[2026-05-27T10:59:05.375Z]   ✅ Slide 2 done
+[2026-05-27T10:59:05.384Z] 📽 Slide 3/7 — 527.8s
+[2026-05-27T10:59:16.029Z]   🎵 Audio ready
+[2026-05-27T10:59:16.030Z]   🎞 6 reveal state(s)
+[2026-05-27T11:01:46.145Z]   ✅ Slide 3 done
+[2026-05-27T11:01:46.148Z] 📽 Slide 4/7 — 430.3s
+[2026-05-27T11:01:50.352Z]   🎵 Audio ready
+[2026-05-27T11:01:50.354Z]   🎞 9 reveal state(s)
+[2026-05-27T11:04:31.795Z]   ✅ Slide 4 done
+[2026-05-27T11:04:31.824Z] 📽 Slide 5/7 — 1.0s
+[2026-05-27T11:04:31.838Z]   ⚠️ Audio failed: Cannot read properties of null (reading 'includes') — making silent
+[2026-05-27T11:04:32.010Z]   🎞 8 reveal state(s)
+[2026-05-27T11:05:01.745Z]   ✅ Slide 5 done
+[2026-05-27T11:05:01.883Z] 📽 Slide 6/7 — 481.1s
+[2026-05-27T11:05:06.632Z]   🎵 Audio ready
+[2026-05-27T11:05:06.634Z]   🎞 7 reveal state(s)
+[2026-05-27T11:08:02.415Z]   ✅ Slide 6 done
+[2026-05-27T11:08:02.420Z] 📽 Slide 7/7 — 561.1s
+[2026-05-27T11:08:07.745Z]   🎵 Audio ready
+[2026-05-27T11:08:07.748Z]   🎞 8 reveal state(s)
+[2026-05-27T11:12:06.777Z]   ✅ Slide 7 done
+[2026-05-27T11:12:06.807Z] 🔗 Concatenating 7 slides...
+[2026-05-27T11:12:09.742Z] 🏁 DONE! 112.3 MB → A:\React Projects\9. AI Video Course Generator\ai-video-course-generator\public\renders\chapter-handling-events.mp4

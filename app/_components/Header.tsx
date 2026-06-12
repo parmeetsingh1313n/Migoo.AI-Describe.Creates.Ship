@@ -9,8 +9,8 @@ function Header() {
     const { isSignedIn, isLoaded } = useUser();
     const pathname = usePathname();
 
-    // Hide header on auth pages, motion-graphics project pages, and note viewer pages (they have their own top bar)
-    if (pathname === '/sign-in' || pathname === '/sign-up' || /^\/motion-graphics\/[^/]+/.test(pathname) || /^\/notes\/[^/]+/.test(pathname)) {
+    // Hide header on landing page, auth pages, motion-graphics project pages, and note viewer pages (they have their own top bar)
+    if (pathname === '/' || pathname === '/sign-in' || pathname === '/sign-up' || /^\/motion-graphics\/[^/]+/.test(pathname) || /^\/notes\/[^/]+/.test(pathname)) {
         return null;
     }
 
@@ -22,7 +22,7 @@ function Header() {
             <div className={`flex items-center justify-between px-4 py-2 ${isCourseDetailPage ? 'border-b shadow-sm bg-white' : ''}`}>
                 {/* Left: Logo */}
                 <div className='flex gap-2 items-center'>
-                    <Link href="/">
+                    <Link href="/course-generator">
                         <Image src={'/logo.png'} alt='logo' width={90} height={90} />
                     </Link>
                 </div>

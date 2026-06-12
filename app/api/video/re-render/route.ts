@@ -30,10 +30,8 @@ export async function POST(req: Request) {
             return NextResponse.json({ success: false, error: "Video not found" }, { status: 404 });
         }
 
-        // Guard: Don't re-render if already rendering
-        if (video.status === 'rendering') {
-            return NextResponse.json({ success: false, error: "Video is already rendering" }, { status: 409 });
-        }
+        // Guard removed: allow force-retry even if status is 'rendering'
+        // (video may be stuck due to a crash — user explicitly triggered Force Retry)
 
         // 2. Fetch series config for music, caption style, language
         const [series] = await db.select().from(shortVideoSeries).where(eq(shortVideoSeries.seriesId, video.seriesId));

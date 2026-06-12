@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import axios from 'axios';
 import { useEffect, useState } from 'react';
 import CourseListCard from './CourseListCard';
+import EmptyCoursesState from './EmptyCoursesState';
 
 function CourseListCardSkeleton() {
   const skeletonClass = 'bg-gradient-to-r from-[#8F4EE6]/20 via-[#5285D1]/20 to-[#33BDD1]/20 animate-pulse rounded-md';
@@ -62,45 +63,53 @@ function CourseList() {
   }
 
   const GenerateMissingThumbnails = async (courses: any[]) => {
-    for (const course of courses) {
+    // Fire all thumbnail events concurrently (non-blocking — Inngest handles generation)
+    await Promise.allSettled(
+      courses.map(course =>
+        axios.post('/api/generate-thumbnail', { courseId: course.courseId, courseName: course.courseName })
+          .then(() => console.log(`📤 Thumbnail queued: ${course.courseName}`))
+          .catch(err => console.error(`⚠️ Thumbnail queue failed for ${course.courseName}:`, err.message))
+      )
+    );
+
+    // Poll every 8s up to 5× to pick up completed thumbnails
+    let polls = 0;
+    const interval = setInterval(async () => {
+      polls++;
       try {
-        console.log(`🖼️ Generating thumbnail for: ${course.courseName}`);
-        await axios.post('/api/generate-thumbnail', {
-          courseId: course.courseId,
-          courseName: course.courseName,
-        });
-        console.log(`✅ Thumbnail generated for: ${course.courseName}`);
-      } catch (err: any) {
-        console.error(`❌ Thumbnail failed for ${course.courseName}:`, err.message);
-      }
-    }
-    // Refresh list to show newly generated thumbnails
-    const refreshed = await axios.get('/api/course');
-    const refreshedCourses = Array.isArray(refreshed.data) ? refreshed.data : (refreshed.data?.data || []);
-    setCourseList(refreshedCourses);
+        const refreshed = await axios.get('/api/course');
+        const refreshedCourses = Array.isArray(refreshed.data) ? refreshed.data : (refreshed.data?.data || []);
+        setCourseList(refreshedCourses);
+        const stillMissing = refreshedCourses.filter((c: any) => !c.courseThumbnail);
+        if (stillMissing.length === 0 || polls >= 5) clearInterval(interval);
+      } catch { clearInterval(interval); }
+    }, 8000);
   }
 
   return (
     <div className='max-w-6xl mx-auto mt-10'>
       <h2 className="text-2xl font-bold">My Courses</h2>
-      <div className='grid grid-cols-2 md:grid-cols-3 xl:grid-cols-3 gap-4 mt-4'>
-        {loading ? (
-          <>
-            <CourseListCardSkeleton />
-            <CourseListCardSkeleton />
-            <CourseListCardSkeleton />
-            <CourseListCardSkeleton />
-            <CourseListCardSkeleton />
-            <CourseListCardSkeleton />
-          </>
-        ) : (
-          courseList.map((course: any, index: number) => (
+
+      {loading ? (
+        <div className='grid grid-cols-2 md:grid-cols-3 xl:grid-cols-3 gap-4 mt-4'>
+          <CourseListCardSkeleton />
+          <CourseListCardSkeleton />
+          <CourseListCardSkeleton />
+          <CourseListCardSkeleton />
+          <CourseListCardSkeleton />
+          <CourseListCardSkeleton />
+        </div>
+      ) : courseList.length === 0 ? (
+        <EmptyCoursesState />
+      ) : (
+        <div className='grid grid-cols-2 md:grid-cols-3 xl:grid-cols-3 gap-4 mt-4'>
+          {courseList.map((course: any, index: number) => (
             <CourseListCard key={index} courseItem={course} />
-          ))
-        )}
-      </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
 
-export default CourseList
+export default CourseList
