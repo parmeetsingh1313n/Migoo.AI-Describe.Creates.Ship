@@ -179,6 +179,9 @@ function CourseChapters({ course, onRefresh }: Props) {
             const map: Record<string, any> = {};
             let completedSome = false;
             
+            const newDlStatus: Record<string, DownloadStatus> = {};
+            const newDlUrls: Record<string, string> = {};
+            
             for (const row of list) {
                 map[row.chapterId] = {
                     status: row.status,
@@ -188,6 +191,16 @@ function CourseChapters({ course, onRefresh }: Props) {
                     errorMessage: row.errorMessage,
                 };
                 
+                // Track render status from DB
+                if (row.renderStatus === 'video:completed' && row.videoUrl) {
+                    newDlStatus[row.chapterId] = 'completed';
+                    newDlUrls[row.chapterId] = row.videoUrl;
+                } else if (row.renderStatus === 'rendering:video') {
+                    newDlStatus[row.chapterId] = 'rendering';
+                } else if (row.renderStatus === 'video:failed') {
+                    newDlStatus[row.chapterId] = 'failed';
+                }
+                
                 // Trigger page refresh when a chapter changes state to 'completed'
                 const prev = statuses[row.chapterId];
                 if (row.status === 'completed' && prev?.status !== 'completed') {
@@ -196,6 +209,27 @@ function CourseChapters({ course, onRefresh }: Props) {
             }
             
             setStatuses(map);
+            
+            // Sync download status/URLs state with DB statuses,
+            // while preserving local active rendering states.
+            setDlStatus(prev => {
+                const merged = { ...prev };
+                for (const cid in newDlStatus) {
+                    if (prev[cid] !== 'rendering' || newDlStatus[cid] === 'completed') {
+                        merged[cid] = newDlStatus[cid];
+                    }
+                }
+                return merged;
+            });
+            
+            setDlUrls(prev => {
+                const merged = { ...prev };
+                for (const cid in newDlUrls) {
+                    merged[cid] = newDlUrls[cid];
+                }
+                return merged;
+            });
+            
             if (completedSome && onRefresh) {
                 onRefresh();
             }
@@ -254,6 +288,48 @@ function CourseChapters({ course, onRefresh }: Props) {
             setResettingAudio(p => ({ ...p, [chapterId]: false }));
         }
     }, [course?.courseId, fetchStatuses, onRefresh]);
+
+    const handleDeleteChapterRender = useCallback(async (chapterId: string) => {
+        const confirmDelete = window.confirm(
+            "⚠️ Are you sure you want to delete the rendered video for this chapter?\n\n" +
+            "This will delete the MP4 file and reset its render status, allowing you to trigger a fresh render."
+        );
+        if (!confirmDelete) return;
+
+        const tId = toast.loading("🧹 Deleting rendered video...");
+        try {
+            const res = await axios.delete(`/api/render-chapter?chapterId=${chapterId}`);
+            if (res.data?.success) {
+                // Reset local states
+                stopPoll(chapterId);
+                setDlStatus(p => {
+                    const merged = { ...p };
+                    delete merged[chapterId];
+                    return merged;
+                });
+                setDlProgress(p => {
+                    const merged = { ...p };
+                    delete merged[chapterId];
+                    return merged;
+                });
+                setDlUrls(p => {
+                    const merged = { ...p };
+                    delete merged[chapterId];
+                    return merged;
+                });
+                
+                toast.success("✅ Rendered video deleted successfully!", { id: tId });
+                
+                // Fetch updated statuses to sync with DB
+                fetchStatuses();
+            } else {
+                throw new Error(res.data?.error || "Failed to delete rendered video.");
+            }
+        } catch (err: any) {
+            console.error("❌ Deletion failed:", err);
+            toast.error(err.message || "Failed to delete rendered video.", { id: tId });
+        }
+    }, [fetchStatuses]);
 
     // Triggers generation event for a single chapter
     const handleGenerateChapter = async (chapter: any, index: number) => {
@@ -645,13 +721,23 @@ function CourseChapters({ course, onRefresh }: Props) {
                                                      </div>
                                                  );
                                                  if (ds === 'completed') return (
-                                                     <button
-                                                         onClick={() => handleDownloadChapter(chapter, chapterSlides, chapterDurations)}
-                                                         className='cursor-pointer flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-bold shadow-[0_4px_16px_rgba(16,185,129,0.35)] transition-all hover:scale-105 active:scale-95'
-                                                     >
-                                                         <Download className='h-3.5 w-3.5' />
-                                                         Download MP4
-                                                     </button>
+                                                     <>
+                                                         <button
+                                                             onClick={() => handleDownloadChapter(chapter, chapterSlides, chapterDurations)}
+                                                             className='cursor-pointer flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-bold shadow-[0_4px_16px_rgba(16,185,129,0.35)] transition-all hover:scale-105 active:scale-95'
+                                                         >
+                                                             <Download className='h-3.5 w-3.5' />
+                                                             Download MP4
+                                                         </button>
+                                                         <button
+                                                             onClick={() => handleDeleteChapterRender(chapter.chapterId)}
+                                                             className='cursor-pointer flex items-center gap-1.5 px-3 py-1.5 bg-rose-950/40 hover:bg-rose-900/40 hover:text-rose-200 border border-rose-800/50 hover:border-rose-500/50 text-rose-300 rounded-xl text-xs font-semibold transition-all hover:scale-105 active:scale-95 group'
+                                                             title="Delete rendered video to reset status"
+                                                         >
+                                                             <Trash2 className='h-3.5 w-3.5 group-hover:text-rose-400 transition-colors' />
+                                                             <span className='hidden sm:inline'>Delete Video</span>
+                                                         </button>
+                                                     </>
                                                  );
                                                  if (ds === 'failed') return (
                                                      <button
@@ -803,7 +889,7 @@ function CourseChapters({ course, onRefresh }: Props) {
                                                         ref={pRef}
                                                         component={CourseComposition}
                                                         durationInFrames={totalFrames}
-                                                        compositionWidth={1280}
+                                                        compositionWidth={1440}
                                                         compositionHeight={720}
                                                         fps={fps}
                                                         playbackRate={playbackSpeed}

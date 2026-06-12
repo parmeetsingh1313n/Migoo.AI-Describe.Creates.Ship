@@ -14,7 +14,8 @@ import path from "path";
 import fs from "fs";
 
 function getFFmpegPath(): string {
-    let ffmpegBin = require('ffmpeg-static') as string;
+    const pkg = 'ffmpeg-static';
+    let ffmpegBin = require(pkg) as string;
     if (!fs.existsSync(ffmpegBin)) {
         ffmpegBin = path.join(process.cwd(), 'node_modules', 'ffmpeg-static', process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg');
     }
