@@ -500,7 +500,55 @@ async function render() {
   console.log(`   ✅ Concat complete: ${concatMb} MB (clips already encoded at CRF 28, skipping re-encode)`);
 
   const mb = fs.existsSync(outFile) ? (fs.statSync(outFile).size / 1024 / 1024).toFixed(1) : '?';
-  console.log(`\n🏁 DONE — ${mb} MB → ${outFile} (single upload, no manual chunking to preserve MP4 container structure)`);
+  console.log(`\n🏁 DONE — ${mb} MB → ${outFile}`);
+
+  // ── Raw binary split for Appwrite upload (preserves MP4 container integrity) ──
+  // IMPORTANT: We do NOT use FFmpeg segment muxer here because that creates
+  // independent playable MP4 containers each with their own duration header.
+  // Instead we split raw bytes — like splitting a zip into parts.
+  // On download, the server streams parts back-to-back → browser gets exact
+  // original bytes → reads the ONE correct 42-minute header → plays in full.
+  const CHUNK_SIZE_BYTES = 44 * 1024 * 1024; // 44 MB raw chunks (stays under Appwrite 50MB limit)
+  const finalSizeBytes = fs.existsSync(outFile) ? fs.statSync(outFile).size : 0;
+
+  if (finalSizeBytes > CHUNK_SIZE_BYTES) {
+    const chunksDir = path.join(path.dirname(outFile), `chapter-${chapterId}-chunks`);
+    fs.mkdirSync(chunksDir, { recursive: true });
+
+    const totalChunks = Math.ceil(finalSizeBytes / CHUNK_SIZE_BYTES);
+    console.log(`\n✂️  Raw-binary splitting ${(finalSizeBytes / 1024 / 1024).toFixed(1)} MB → ${totalChunks} raw chunks of ≤44 MB...`);
+
+    const inFd = fs.openSync(outFile, 'r');
+    const chunkFiles = [];
+    const BUF_SIZE = 8 * 1024 * 1024; // 8 MB read buffer
+    const buf = Buffer.allocUnsafe(BUF_SIZE);
+
+    for (let i = 0; i < totalChunks; i++) {
+      const chunkName = `chunk-${String(i).padStart(3, '0')}.bin`;
+      const chunkPath = path.join(chunksDir, chunkName);
+      const outFd = fs.openSync(chunkPath, 'w');
+      let bytesWritten = 0;
+
+      while (bytesWritten < CHUNK_SIZE_BYTES) {
+        const toRead = Math.min(BUF_SIZE, CHUNK_SIZE_BYTES - bytesWritten);
+        const bytesRead = fs.readSync(inFd, buf, 0, toRead, null);
+        if (bytesRead === 0) break;
+        fs.writeSync(outFd, buf, 0, bytesRead);
+        bytesWritten += bytesRead;
+      }
+      fs.closeSync(outFd);
+      const chunkMb = (fs.statSync(chunkPath).size / 1024 / 1024).toFixed(1);
+      console.log(`   ✅ chunk-${i}: ${chunkMb} MB`);
+      chunkFiles.push(chunkName);
+    }
+    fs.closeSync(inFd);
+
+    const sidecarPath = outFile.replace('.mp4', '-chunks.json');
+    fs.writeFileSync(sidecarPath, JSON.stringify({ chunksDir, chunkFiles, rawBinary: true, totalBytes: finalSizeBytes }));
+    console.log(`   ✅ Split into ${chunkFiles.length} raw binary chunks — original MP4 header intact`);
+  } else {
+    console.log(`   File is ${(finalSizeBytes / 1024 / 1024).toFixed(1)} MB — single upload (no chunking needed)`);
+  }
 
   // Clean up work dir
   try { fs.rmSync(workDir, { recursive: true, force: true }); } catch {}

@@ -70,14 +70,20 @@ export async function GET(
       try {
         const metadata = JSON.parse(videoUrlStr);
         if (metadata.chunked && Array.isArray(metadata.ids)) {
-          const { ids, bucketId, endpoint, projectId } = metadata;
+          const { ids, bucketId, endpoint, projectId, rawBinary } = metadata;
           const apiKey = process.env.APPWRITE_VIDEO_API_KEY || process.env.APPWRITE_API_KEY;
 
-          // Stream chunks sequentially on-the-fly to the browser
+          // Stream chunks sequentially on-the-fly to the browser.
+          // If rawBinary=true: chunks are raw byte splits of the original MP4.
+          // Streaming them sequentially gives the browser the exact original bytes
+          // → original header with correct full duration is preserved!
+          // If rawBinary=false (old FFmpeg segment mode): same stream but
+          // duration will be wrong since chunks have independent headers.
           const stream = new ReadableStream({
             async start(controller) {
               try {
                 for (const fileId of ids) {
+                  // Always use /download (not /view) to get raw bytes from Appwrite
                   const url = `${endpoint}/storage/buckets/${bucketId}/files/${fileId}/download?project=${projectId}`;
                   const res = await fetch(url, {
                     headers: {
@@ -103,7 +109,7 @@ export async function GET(
                 }
                 controller.close();
               } catch (err: any) {
-                console.error(`Error streaming chunked video for ${chapterId}:`, err);
+                console.error(`Error streaming ${rawBinary ? 'raw-binary' : 'mp4'} chunks for ${chapterId}:`, err);
                 controller.error(err);
               }
             },

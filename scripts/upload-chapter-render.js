@@ -120,6 +120,7 @@ async function upload() {
 
       const videoUrl = JSON.stringify({
         chunked: true,
+        rawBinary: true,   // raw byte split — NOT independent MP4 containers
         count: chunkFiles.length,
         ids: chunkIds,
         bucketId,
@@ -127,7 +128,7 @@ async function upload() {
         projectId,
       });
 
-      console.log('✅ Chunked upload complete. videoUrl metadata:', videoUrl);
+      console.log('✅ Raw-binary chunked upload complete. videoUrl metadata:', videoUrl);
       await notify(webhookUrl, chapterId, videoUrl, 'completed', null);
       console.log('🎉 Done!');
       process.exit(0);
