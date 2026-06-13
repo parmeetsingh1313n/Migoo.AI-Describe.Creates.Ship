@@ -480,7 +480,7 @@ async function startLocalRender(chapterId: string, slides: any[], durationsBySli
     const ff = getFFmpeg();
     const rawMb = fs.existsSync(rawOutputPath) ? (fs.statSync(rawOutputPath).size / 1024 / 1024).toFixed(1) : '?';
     log(chapterId, `  Raw size: ${rawMb} MB`);
-    const compressCmd = `"${ff}" -y -i "${rawOutputPath}" -c:v libx264 -preset slow -crf 35 -c:a aac -b:a 96k -ar 44100 -movflags +faststart "${outputPath}"`;
+    const compressCmd = `"${ff}" -y -i "${rawOutputPath}" -c:v libx264 -preset fast -crf 35 -c:a aac -b:a 96k -ar 44100 -movflags +faststart "${outputPath}"`;
     await execAsync(compressCmd, { maxBuffer: 500 * 1024 * 1024, timeout: 60 * 60 * 1000 });
     try { fs.unlinkSync(rawOutputPath); } catch {}
     const compMb = fs.existsSync(outputPath) ? (fs.statSync(outputPath).size / 1024 / 1024).toFixed(1) : '?';
