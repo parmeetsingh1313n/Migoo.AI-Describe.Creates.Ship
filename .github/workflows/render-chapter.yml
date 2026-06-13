@@ -17,6 +17,8 @@ jobs:
   render:
     runs-on: ubuntu-latest
     timeout-minutes: 120  # Chapter renders can take 30-60 min for long courses
+    permissions:
+      contents: write
 
     steps:
       # ── 1. Checkout ──────────────────────────────────────────────────────────
@@ -73,6 +75,7 @@ jobs:
       # ── 7. Upload MP4 to Appwrite + call webhook ──────────────────────────────
       - name: Upload rendered video & notify app
         env:
+          GITHUB_TOKEN:        ${{ secrets.GITHUB_TOKEN }}
           APPWRITE_ENDPOINT:   ${{ secrets.APPWRITE_ENDPOINT }}
           APPWRITE_PROJECT_ID: ${{ secrets.APPWRITE_VIDEO_PROJECT_ID || secrets.APPWRITE_PROJECT_ID }}
           APPWRITE_API_KEY:    ${{ secrets.APPWRITE_VIDEO_API_KEY || secrets.APPWRITE_API_KEY }}

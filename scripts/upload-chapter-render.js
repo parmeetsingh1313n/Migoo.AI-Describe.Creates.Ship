@@ -48,6 +48,38 @@ async function upload() {
   }
 
   // ── Upload ───────────────────────────────────────────────────────────────
+  const repo = process.env.GITHUB_REPOSITORY;
+  const ghToken = process.env.GITHUB_TOKEN;
+
+  if (ghToken && repo) {
+    console.log(`🐙 Uploading to GitHub Release 'renders' in ${repo}...`);
+    try {
+      const { execSync } = require('child_process');
+      
+      // Ensure the 'renders' release exists
+      try {
+        execSync(`gh release view renders --repo "${repo}"`, { env: { ...process.env, GITHUB_TOKEN: ghToken } });
+      } catch {
+        console.log(`   Release 'renders' not found. Creating it...`);
+        execSync(`gh release create renders --title "Rendered Videos" --notes "Rendered chapter videos for course generator" --repo "${repo}"`, { env: { ...process.env, GITHUB_TOKEN: ghToken } });
+      }
+
+      // Upload file using gh CLI (supports up to 2GB files)
+      console.log(`   Uploading ${path.basename(filePath)}...`);
+      execSync(`gh release upload renders "${filePath}" --clobber --repo "${repo}"`, { env: { ...process.env, GITHUB_TOKEN: ghToken } });
+
+      const videoUrl = `https://github.com/${repo}/releases/download/renders/chapter-${chapterId}.mp4`;
+      console.log('✅ GitHub Upload complete:', videoUrl);
+
+      await notify(webhookUrl, chapterId, videoUrl, 'completed', null);
+      console.log('🎉 Done!');
+      process.exit(0);
+    } catch (err) {
+      console.error('❌ GitHub upload failed:', err?.message ?? err);
+      console.log('⚠️ Falling back to Appwrite upload...');
+    }
+  }
+
   const client  = new sdk.Client().setEndpoint(endpoint).setProject(projectId).setKey(apiKey);
   const storage = new sdk.Storage(client);
 
