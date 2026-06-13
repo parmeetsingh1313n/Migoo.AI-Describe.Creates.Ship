@@ -499,33 +499,8 @@ async function render() {
   const concatMb = fs.existsSync(outFile) ? (fs.statSync(outFile).size / 1024 / 1024).toFixed(1) : '?';
   console.log(`   ✅ Concat complete: ${concatMb} MB (clips already encoded at CRF 28, skipping re-encode)`);
 
-  // ── Split into 45 MB chunks for Appwrite upload ─────────────────────────────
-  const CHUNK_SIZE_BYTES = 45 * 1024 * 1024; // 45 MB
-  const finalSizeBytes = fs.existsSync(outFile) ? fs.statSync(outFile).size : 0;
-  const chunksDir = path.join(path.dirname(outFile), `chapter-${chapterId}-chunks`);
-  const ff = getFFmpeg();
-
-  if (finalSizeBytes > CHUNK_SIZE_BYTES) {
-    console.log(`\n✂️  Splitting ${(finalSizeBytes / 1024 / 1024).toFixed(1)} MB video into 45 MB chunks...`);
-    fs.mkdirSync(chunksDir, { recursive: true });
-    const chunkPattern = path.join(chunksDir, 'chunk-%03d.mp4');
-
-    // Estimate segment time based on duration and file size ratio
-    const segmentTime = Math.max(5, Math.floor((CHUNK_SIZE_BYTES / finalSizeBytes) * totalDurationSec) - 5);
-    console.log(`   Estimated segment duration: ${segmentTime}s`);
-
-    const splitCmd = `"${ff}" -y -i "${outFile}" -c copy -f segment -segment_time ${segmentTime} -reset_timestamps 1 -segment_format mp4 "${chunkPattern}"`;
-    await execAsync(splitCmd, { maxBuffer: 200 * 1024 * 1024, timeout: 20 * 60 * 1000 });
-    const chunkFiles = fs.readdirSync(chunksDir).filter(f => f.startsWith('chunk-') && f.endsWith('.mp4')).sort();
-    console.log(`   ✅ Split into ${chunkFiles.length} chunks`);
-    const sidecarPath = outFile.replace('.mp4', '-chunks.json');
-    fs.writeFileSync(sidecarPath, JSON.stringify({ chunksDir, chunkFiles }));
-  } else {
-    console.log(`   File is ${(finalSizeBytes / 1024 / 1024).toFixed(1)} MB — single upload (no chunking needed)`);
-  }
-
   const mb = fs.existsSync(outFile) ? (fs.statSync(outFile).size / 1024 / 1024).toFixed(1) : '?';
-  console.log(`\n🏁 DONE — ${mb} MB → ${outFile}`);
+  console.log(`\n🏁 DONE — ${mb} MB → ${outFile} (single upload, no manual chunking to preserve MP4 container structure)`);
 
   // Clean up work dir
   try { fs.rmSync(workDir, { recursive: true, force: true }); } catch {}
