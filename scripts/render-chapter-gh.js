@@ -449,11 +449,13 @@ async function render() {
 
   const slideClips  = [];
   const totalSlides = slides.length;
+  let totalDurationSec = 0;
 
   for (let i = 0; i < totalSlides; i++) {
     const slide         = slides[i];
     const durationFrames = (durationsBySlideId ?? {})[slide.slideId] ?? (6 * fps);
     const totalSec      = durationFrames / fps;
+    totalDurationSec += totalSec;
 
     console.log(`\n📽  Slide ${i + 1}/${totalSlides} — ${totalSec.toFixed(1)}s (${slide.slideId})`);
 
@@ -539,8 +541,14 @@ async function render() {
     console.log(`\n✂️  Splitting ${(finalSizeBytes / 1024 / 1024).toFixed(1)} MB video into 45 MB chunks...`);
     fs.mkdirSync(chunksDir, { recursive: true });
     const chunkPattern = path.join(chunksDir, 'chunk-%03d.mp4');
+    
+    // Estimate segment time based on duration and file size ratio
+    // Subtract 5 seconds as safety margin so chunks stay under 45 MB
+    const segmentTime = Math.max(5, Math.floor((CHUNK_SIZE_BYTES / finalSizeBytes) * totalDurationSec) - 5);
+    console.log(`   Estimated segment duration: ${segmentTime}s`);
+
     // Use segment muxer — each segment is an independently playable MP4
-    const splitCmd = `"${ff}" -y -i "${outFile}" -c copy -f segment -segment_size ${CHUNK_SIZE_BYTES} -reset_timestamps 1 -segment_format mp4 "${chunkPattern}"`;
+    const splitCmd = `"${ff}" -y -i "${outFile}" -c copy -f segment -segment_time ${segmentTime} -reset_timestamps 1 -segment_format mp4 "${chunkPattern}"`;
     await execAsync(splitCmd, { maxBuffer: 200 * 1024 * 1024, timeout: 20 * 60 * 1000 });
     const chunkFiles = fs.readdirSync(chunksDir).filter(f => f.startsWith('chunk-') && f.endsWith('.mp4')).sort();
     console.log(`   ✅ Split into ${chunkFiles.length} chunks`);

@@ -412,11 +412,13 @@ async function startLocalRender(chapterId: string, slides: any[], durationsBySli
   log(chapterId, `🚀 Started. ${slides.length} slides, FFmpeg+Puppeteer mode`);
   const slideClips: string[] = [];
   const totalSlides = slides.length;
+  let totalDurationSec = 0;
 
   for (let i = 0; i < totalSlides; i++) {
     const slide          = slides[i];
     const durationFrames = durationsBySlideId[slide.slideId] ?? Math.ceil(6 * fps);
     const totalSec       = durationFrames / fps;
+    totalDurationSec += totalSec;
     const baseProgress   = Math.round((i / totalSlides) * 90);
     renderJobs.set(chapterId, { status: 'rendering', progress: baseProgress });
 
@@ -501,8 +503,14 @@ async function startLocalRender(chapterId: string, slides: any[], durationsBySli
     fs.mkdirSync(chunksDir, { recursive: true });
     const chunkPattern = path.join(chunksDir, 'chunk-%03d.mp4');
     const ff = getFFmpeg();
+    
+    // Estimate segment time based on duration and file size ratio
+    // Subtract 5 seconds as safety margin so chunks stay under 45 MB
+    const segmentTime = Math.max(5, Math.floor((CHUNK_SIZE_BYTES / finalSizeBytes) * totalDurationSec) - 5);
+    log(chapterId, `   Estimated segment duration: ${segmentTime}s`);
+
     // Use segment muxer — each segment is an independently playable MP4
-    const splitCmd = `"${ff}" -y -i "${outputPath}" -c copy -f segment -segment_size ${CHUNK_SIZE_BYTES} -reset_timestamps 1 -segment_format mp4 "${chunkPattern}"`;
+    const splitCmd = `"${ff}" -y -i "${outputPath}" -c copy -f segment -segment_time ${segmentTime} -reset_timestamps 1 -segment_format mp4 "${chunkPattern}"`;
     await execAsync(splitCmd, { maxBuffer: 200 * 1024 * 1024, timeout: 20 * 60 * 1000 });
     const chunkFiles = fs.readdirSync(chunksDir).filter(f => f.startsWith('chunk-') && f.endsWith('.mp4')).sort();
     log(chapterId, `   Split into ${chunkFiles.length} chunks`);
