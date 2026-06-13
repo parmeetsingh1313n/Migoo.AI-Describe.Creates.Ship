@@ -1,6 +1,6 @@
 /**
  * OpenRouter API Configuration
- * Primary: openrouter/owl-alpha  |  Fallback: z-ai/glm-4.5-air:free
+ * Primary: openrouter/owl-alpha  |  Fallback: nex-agi/nex-n2-pro:free
  * Enhanced JSON parsing with HTML quote handling
  */
 
@@ -22,7 +22,7 @@ interface OpenRouterResponse {
 class OpenRouterClient {
     private baseUrl: string = 'https://openrouter.ai/api/v1';
     private model: string = 'openrouter/owl-alpha';
-    private fallbackModel: string = 'z-ai/glm-4.5-air:free';
+    private fallbackModel: string = 'nex-agi/nex-n2-pro:free';
 
     // Key rotation state (in-memory for this server session)
     private currentKeyIndex: number = 0;
@@ -229,7 +229,7 @@ CRITICAL STRUCTURAL & DESIGN MANDATES (override defaults):
             for (let keyAttempt = 0; keyAttempt < allKeys.length; keyAttempt++) {
                 const apiKey = this.getActiveKey();
                 // Model-specific token caps — use max supported to avoid ANY truncation
-                const modelMaxTokens = model.includes('gpt-oss-120b') || model.includes('glm-4.5') || model.includes('cobuddy') || model.includes('owl-alpha')
+                const modelMaxTokens = model.includes('gpt-oss-120b') || model.includes('nex-n2-pro') || model.includes('cobuddy') || model.includes('owl-alpha')
                     ? 65536
                     : model.includes('gpt-oss-20b')
                         ? 32768

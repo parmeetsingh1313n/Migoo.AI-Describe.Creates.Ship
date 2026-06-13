@@ -1,6 +1,6 @@
 import { inngest } from "@/inngest/client";
 import { generateCourseImagesFn, generateCourseThumbnailFn, generateCourseVideoContentFn } from "@/inngest/course-functions";
-import { generateMotionGraphic, generateShortVideo, helloWorld } from "@/inngest/functions";
+import { generateMotionGraphic, generateShortVideo, helloWorld, renderMotionGraphicOnly } from "@/inngest/functions";
 import { serve } from "inngest/next";
 
 export const { GET, POST, PUT } = serve({
@@ -10,6 +10,7 @@ export const { GET, POST, PUT } = serve({
         helloWorld,
         generateShortVideo,
         generateMotionGraphic,
+        renderMotionGraphicOnly,
 
         // ── Course Generation ─────────────────────────────────────────────
         generateCourseThumbnailFn,

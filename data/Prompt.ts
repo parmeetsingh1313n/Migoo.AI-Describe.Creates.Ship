@@ -1,6 +1,6 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 // AI COURSE GENERATOR - PROMPT SYSTEM
-// Optimized for z-ai/glm-4.5-air:free (with reasoning enabled)
+// Optimized for openrouter/owl-alpha (primary) and nex-agi/nex-n2-pro:free (fallback) (with reasoning enabled)
 // Version: 2.1 - FIXED: Vertical Centering & Content Scaling to Prevent Overflow
 // ═══════════════════════════════════════════════════════════════════════════════
 

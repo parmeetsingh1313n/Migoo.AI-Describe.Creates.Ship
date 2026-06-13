@@ -1,0 +1,82 @@
+[2026-06-12T13:59:19.200Z] 🚀 Started. 7 slides, FFmpeg+Puppeteer mode
+[2026-06-12T13:59:19.208Z] 📽 Slide 1/7 — 271.2s
+[2026-06-12T13:59:21.994Z]   🎵 Audio ready
+[2026-06-12T13:59:21.999Z]   🎞 6 reveal state(s)
+[2026-06-12T14:01:14.104Z]   ✅ Slide 1 done
+[2026-06-12T14:01:14.109Z] 📽 Slide 2/7 — 424.6s
+[2026-06-12T14:01:18.296Z]   🎵 Audio ready
+[2026-06-12T14:01:18.298Z]   🎞 8 reveal state(s)
+[2026-06-12T14:07:48.888Z]   ✅ Slide 2 done
+[2026-06-12T14:07:48.895Z] 📽 Slide 3/7 — 436.7s
+[2026-06-12T14:07:49.399Z]   ⚠️ Audio failed: HTTP 403 — making silent
+[2026-06-12T14:07:52.570Z]   🎞 8 reveal state(s)
+[2026-06-12T14:11:56.692Z]   ✅ Slide 3 done
+[2026-06-12T14:11:56.738Z] 📽 Slide 4/7 — 399.6s
+[2026-06-12T14:12:01.642Z]   🎵 Audio ready
+[2026-06-12T14:12:01.649Z]   🎞 8 reveal state(s)
+[2026-06-12T14:17:22.613Z]   ✅ Slide 4 done
+[2026-06-12T14:17:22.620Z] 📽 Slide 5/7 — 321.4s
+[2026-06-12T14:17:26.662Z]   🎵 Audio ready
+[2026-06-12T14:17:26.669Z]   🎞 7 reveal state(s)
+[2026-06-12T14:22:01.030Z] 🚀 Started. 7 slides, FFmpeg+Puppeteer mode
+[2026-06-12T14:22:01.042Z] 📽 Slide 1/7 — 271.2s
+[2026-06-12T14:22:01.052Z]   🎵 Audio ready
+[2026-06-12T14:22:01.055Z]   🎞 6 reveal state(s)
+[2026-06-12T14:24:29.489Z]   ✅ Slide 1 done
+[2026-06-12T14:24:29.493Z] 📽 Slide 2/7 — 424.6s
+[2026-06-12T14:24:29.497Z]   🎵 Audio ready
+[2026-06-12T14:24:29.498Z]   🎞 8 reveal state(s)
+[2026-06-12T14:26:55.211Z]   ✅ Slide 2 done
+[2026-06-12T14:26:55.213Z] 📽 Slide 3/7 — 436.7s
+[2026-06-12T14:26:55.215Z]   🎵 Audio ready
+[2026-06-12T14:26:55.216Z]   🎞 8 reveal state(s)
+[2026-06-12T14:29:32.800Z]   ✅ Slide 3 done
+[2026-06-12T14:29:32.805Z] 📽 Slide 4/7 — 399.6s
+[2026-06-12T14:29:32.807Z]   🎵 Audio ready
+[2026-06-12T14:29:32.809Z]   🎞 8 reveal state(s)
+[2026-06-12T14:33:39.088Z]   ✅ Slide 4 done
+[2026-06-12T14:33:39.095Z] 📽 Slide 5/7 — 321.4s
+[2026-06-12T14:33:39.098Z]   🎵 Audio ready
+[2026-06-12T14:33:39.100Z]   🎞 7 reveal state(s)
+[2026-06-12T14:37:09.626Z]   ✅ Slide 5 done
+[2026-06-12T14:37:09.638Z] 📽 Slide 6/7 — 453.0s
+[2026-06-12T14:37:13.947Z]   🎵 Audio ready
+[2026-06-12T14:37:13.950Z]   🎞 7 reveal state(s)
+[2026-06-12T14:39:59.446Z]   ✅ Slide 6 done
+[2026-06-12T14:39:59.450Z] 📽 Slide 7/7 — 416.1s
+[2026-06-12T14:40:06.237Z]   🎵 Audio ready
+[2026-06-12T14:40:06.241Z]   🎞 7 reveal state(s)
+[2026-06-12T14:42:09.659Z]   ✅ Slide 7 done
+[2026-06-12T14:42:09.666Z] 🔗 Concatenating 7 slides...
+[2026-06-12T14:42:12.172Z] 🏁 DONE! 99.0 MB → A:\React Projects\9. AI Video Course Generator\ai-video-course-generator\public\renders\chapter-component-lifecycle-effects.mp4
+[2026-06-12T16:33:41.606Z] 🚀 Started. 7 slides, FFmpeg+Puppeteer mode
+[2026-06-12T16:33:41.624Z] 📽 Slide 1/7 — 271.2s
+[2026-06-12T16:33:54.983Z]   🎵 Audio ready
+[2026-06-12T16:33:54.988Z]   🎞 6 reveal state(s)
+[2026-06-12T16:35:50.276Z]   ✅ Slide 1 done
+[2026-06-12T16:35:50.281Z] 📽 Slide 2/7 — 424.6s
+[2026-06-12T16:36:19.425Z]   🎵 Audio ready
+[2026-06-12T16:36:19.430Z]   🎞 8 reveal state(s)
+[2026-06-12T16:40:30.822Z]   ✅ Slide 2 done
+[2026-06-12T16:40:30.856Z] 📽 Slide 3/7 — 436.7s
+[2026-06-12T16:40:31.597Z]   ⚠️ Audio failed: HTTP 403 — making silent
+[2026-06-12T16:40:37.495Z]   🎞 8 reveal state(s)
+[2026-06-12T16:43:53.513Z]   ✅ Slide 3 done
+[2026-06-12T16:43:53.528Z] 📽 Slide 4/7 — 399.6s
+[2026-06-12T16:44:29.882Z]   🎵 Audio ready
+[2026-06-12T16:44:29.900Z]   🎞 8 reveal state(s)
+[2026-06-12T16:48:03.183Z]   ✅ Slide 4 done
+[2026-06-12T16:48:03.190Z] 📽 Slide 5/7 — 321.4s
+[2026-06-12T16:48:06.264Z]   🎵 Audio ready
+[2026-06-12T16:48:06.269Z]   🎞 7 reveal state(s)
+[2026-06-12T16:49:53.548Z]   ✅ Slide 5 done
+[2026-06-12T16:49:53.552Z] 📽 Slide 6/7 — 453.0s
+[2026-06-12T16:50:20.946Z]   🎵 Audio ready
+[2026-06-12T16:50:20.948Z]   🎞 7 reveal state(s)
+[2026-06-12T16:52:26.574Z]   ✅ Slide 6 done
+[2026-06-12T16:52:26.581Z] 📽 Slide 7/7 — 416.1s
+[2026-06-12T16:52:32.192Z]   🎵 Audio ready
+[2026-06-12T16:52:32.196Z]   🎞 7 reveal state(s)
+[2026-06-12T16:54:36.764Z]   ✅ Slide 7 done
+[2026-06-12T16:54:36.779Z] 🔗 Concatenating 7 slides...
+[2026-06-12T16:54:41.236Z] 🏁 DONE! 65.0 MB → A:\React Projects\9. AI Video Course Generator\ai-video-course-generator\public\renders\chapter-component-lifecycle-effects.mp4

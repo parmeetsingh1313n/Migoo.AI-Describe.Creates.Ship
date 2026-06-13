@@ -406,7 +406,8 @@ Extract 30-45 specific facts grouped into 5-7 chronological/thematic categories.
             maxTokens: 4000, // raised to capture more facts
         });
 
-        console.log(`✅ Fact sheet distilled: ${factSheet.length} chars, ~${factSheet.split('\n').filter(l => l.startsWith('•')).length} facts`);
+        const factCount = factSheet.split('\n').filter(l => /^[•\-\*]/.test(l.trim())).length;
+        console.log(`✅ Fact sheet distilled: ${factSheet.length} chars, ~${factCount} facts`);
         return factSheet.trim();
     } catch (err: any) {
         console.error('❌ Fact sheet distillation failed:', err.message);

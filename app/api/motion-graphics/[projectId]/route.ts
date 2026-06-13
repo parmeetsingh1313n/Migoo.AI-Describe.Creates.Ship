@@ -87,6 +87,37 @@ export async function PATCH(
         const { projectId } = await params;
         const body = await req.json();
 
+        // ── Full reset: clear all generated data and messages ────────────────
+        if (body.reset === true) {
+            // Delete all chat messages so auto-send can re-trigger
+            await db
+                .delete(motionGraphicMessages)
+                .where(eq(motionGraphicMessages.projectId, projectId));
+
+            const [reset] = await db
+                .update(motionGraphicProjects)
+                .set({
+                    sceneData:       null,
+                    videoUrl:        null,
+                    remotionProps:   null,
+                    voiceoverScript: null,
+                    audioUrl:        null,
+                    audioDuration:   null,
+                    status:          "draft",
+                    updatedAt:       new Date(),
+                })
+                .where(
+                    and(
+                        eq(motionGraphicProjects.projectId, projectId),
+                        eq(motionGraphicProjects.userId, user.primaryEmailAddress.emailAddress)
+                    )
+                )
+                .returning();
+
+            if (!reset) return NextResponse.json({ error: "Project not found" }, { status: 404 });
+            return NextResponse.json({ success: true, project: reset, reset: true });
+        }
+
         // Only allow updating safe fields
         const allowedFields: Record<string, any> = {};
         if (body.theme !== undefined) allowedFields.theme = body.theme;

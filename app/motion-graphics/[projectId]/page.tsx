@@ -9,6 +9,7 @@ import {
     Palette,
     Play,
     RefreshCw,
+    RotateCcw,
     Send,
     Sparkles,
     MessageSquare,
@@ -276,10 +277,9 @@ export default function MotionGraphicProjectPage() {
         const tempMsg: Message = { id: Date.now(), role: 'user', content: displayText + imageIndicator, createdAt: new Date().toISOString() }
         setMessages(prev => [...prev, tempMsg])
         try {
-            // Send to API: user text + image context combined internally
-            const messageForAI = imageContext
-                ? `${userText}\n\n${imageContext}`
-                : userText || `I've uploaded reference images. Please use them in relevant scenes.`
+            // Assets are already stored in DB by the upload endpoint.
+            // Just send the user's text — the chat API reads assets from DB separately.
+            const messageForAI = userText || `I've uploaded ${uploadedImages.length} reference image(s). Please use them in the most relevant scenes.`;
 
             const res = await fetch(`/api/motion-graphics/${projectId}/chat`, {
                 method: 'POST',
@@ -342,6 +342,30 @@ export default function MotionGraphicProjectPage() {
             toast.success('Generation cancelled')
         } catch {
             toast.error('Failed to cancel')
+        }
+    }
+
+    const handleStartFromScratch = async () => {
+        if (!confirm('Start from scratch? This will clear all scenes, messages, and generated video for this project.')) return
+        try {
+            const res = await fetch(`/api/motion-graphics/${projectId}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ reset: true }),
+            })
+            const data = await res.json()
+            if (data.success) {
+                // Reset all local state so the auto-send fires again with the project prompt
+                autoSentRef.current = false
+                setMessages([])
+                setProject(data.project)
+                setActiveTab('chat')
+                toast.success('Project reset! Describe your new scene vision below.')
+            } else {
+                toast.error(data.error || 'Failed to reset project')
+            }
+        } catch {
+            toast.error('Failed to reset project')
         }
     }
 
@@ -463,9 +487,29 @@ export default function MotionGraphicProjectPage() {
                                                 // Strip [UPLOADED IMAGE: ...] blocks from display
                                                 const cleaned = msg.content.replace(/\[UPLOADED IMAGE:[\s\S]*?\]/g, '').trim()
                                                 const hadImages = cleaned !== msg.content.trim()
+
+                                                // Detect a numbered scene spec (e.g. "1. logo_reveal ... 24. call_to_action")
+                                                // These are always user-sent and look terrible as raw text
+                                                const sceneNums = [...cleaned.matchAll(/^(\d+)\./gm)].map(m => parseInt(m[1], 10))
+                                                const isSceneSpec = sceneNums.length > 3
+                                                const sceneCount = isSceneSpec ? Math.max(...sceneNums) : 0
+
+                                                // Very long messages get truncated with a "show more" style collapse
+                                                const MAX_CHARS = 200
+                                                const displayText = isSceneSpec
+                                                    ? cleaned.split('\n')[0]?.substring(0, 120) || 'Scene specification'
+                                                    : cleaned.length > MAX_CHARS
+                                                        ? cleaned.substring(0, MAX_CHARS) + '…'
+                                                        : cleaned
+
                                                 return (
                                                     <>
-                                                        {cleaned || 'Sent reference images'}
+                                                        {displayText || 'Sent reference images'}
+                                                        {isSceneSpec && (
+                                                            <span className={`block mt-1.5 text-[11px] font-semibold ${msg.role === 'user' ? 'text-white/80' : 'text-primary'} flex items-center gap-1`}>
+                                                                📋 {sceneCount} scenes specified
+                                                            </span>
+                                                        )}
                                                         {hadImages && (
                                                             <span className={`block mt-1 text-[11px] ${msg.role === 'user' ? 'text-white/70' : 'text-muted-foreground'}`}>
                                                                 📎 Images attached
@@ -690,6 +734,12 @@ export default function MotionGraphicProjectPage() {
                                         >
                                             <RefreshCw className="w-4 h-4" /> Regenerate
                                         </button>
+                                        <button
+                                            onClick={handleStartFromScratch}
+                                            className="px-4 py-2.5 rounded-xl border border-destructive/40 text-sm text-destructive hover:bg-destructive/5 transition-colors cursor-pointer flex items-center gap-2"
+                                        >
+                                            <RotateCcw className="w-4 h-4" /> Start from Scratch
+                                        </button>
                                     </div>
                                 </>
                             ) : (
@@ -761,6 +811,12 @@ export default function MotionGraphicProjectPage() {
                                 <div className="absolute inset-0 bg-white/20 translate-y-[-100%] group-hover:translate-y-[100%] transition-transform duration-700 pointer-events-none" />
                                 {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
                                 Generate Video
+                            </button>
+                            <button
+                                onClick={handleStartFromScratch}
+                                className="w-full py-2.5 rounded-2xl border border-border text-sm text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors cursor-pointer flex items-center justify-center gap-2 mt-2"
+                            >
+                                <RotateCcw className="w-3.5 h-3.5" /> Start from Scratch
                             </button>
                             <p className="text-center text-[11px] text-muted-foreground/60 mt-2">
                                 You can keep chatting to refine scenes before generating

@@ -1,13 +1,17 @@
 /**
  * Script Translation Utility
  * Generates scripts in English then translates narrations + title
- * to the target language via OpenRouter (openai/gpt-oss-120b:free).
+ * to the target language.
  *
- * gpt-oss-120b supports 100+ languages natively — no TPM throttling.
- * Translates SCENE BY SCENE for reliability and better output quality.
+ * PIPELINE ORDER:
+ * 1. Try openai/gpt-oss-120b:free via OpenRouter.
+ * 2. If it fails (due to 403 moderation filter, 429 rate limit, etc.),
+ *    immediately fall back to Groq Llama 3.3 70B (llama-3.3-70b-versatile)
+ *    for a fast, high-quality, and robust translation.
  */
 
 import { shortsLLM } from '@/lib/shorts-llm';
+import { groq } from '@/config/groq';
 
 interface TranslationInput {
     videoTitle: string;
@@ -35,45 +39,60 @@ const LANGUAGE_NAMES: Record<string, string> = {
 
 /**
  * Translate a single text from English to the target language.
- * Uses shortsLLM.text() — no Groq TPM cap, supports 100+ languages.
+ * First tries OpenAI, falls back directly to Groq Llama-3.3-70B on error.
  */
 async function translateSingleText(
     text: string,
     langName: string,
     context: string = 'narration'
 ): Promise<string> {
-    const MAX_RETRIES = 2;
+    const systemPrompt = `You are a professional ${langName} translator. Translate the given English text to natural, conversational ${langName}. Output ONLY the translated text, nothing else. No quotes, no labels, no explanations.`;
+    const userPrompt = `Translate this English ${context} to ${langName}. Keep proper nouns, dates, and numbers intact. IMPORTANT: Always preserve respectful honorifics for spiritual/religious figures (e.g. "Ji", "Sahib", "PBUH", "AS") — never drop them. Output ONLY the translation:\n\n${text}`;
 
-    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-        try {
-            const result = await shortsLLM.text(
-                `You are a professional ${langName} translator. Translate the given English text to natural, conversational ${langName}. Output ONLY the translated text, nothing else. No quotes, no labels, no explanations.`,
-                `Translate this English ${context} to ${langName}. Keep proper nouns, dates, and numbers intact. Use respectful honorifics where culturally appropriate. Output ONLY the translation:\n\n${text}`,
-                {
-                    temperature: 0.3,
-                    maxTokens: 1024,
-                }
-            );
-
-            const translated = result?.trim();
-            if (translated && translated.length > 0) {
-                return translated;
+    // 1. Try OpenAI (gpt-oss-120b:free) via OpenRouter first
+    try {
+        console.log(`🤖 [translate] Trying OpenAI gpt-oss-120b:free for ${context}...`);
+        const result = await shortsLLM.translate(
+            systemPrompt,
+            userPrompt,
+            {
+                temperature: 0.3,
+                maxTokens: 1024,
             }
-            return text; // fallback to original
-        } catch (error: any) {
-            const isRateLimit = error.message?.includes('429') || error.message?.includes('RATE_LIMIT');
+        );
 
-            if (isRateLimit && attempt < MAX_RETRIES) {
-                console.warn(`⏳ Rate limited translating ${context}, retrying in 5s...`);
-                await new Promise(resolve => setTimeout(resolve, 5000));
-                continue;
-            }
-
-            console.error(`❌ Failed to translate ${context}: ${error.message}`);
-            return text; // fallback to original
+        const translated = result?.trim();
+        if (translated && translated.length > 0) {
+            console.log(`✅ [translate] Success with OpenAI gpt-oss-120b:free`);
+            return translated;
         }
+    } catch (error: any) {
+        console.warn(`⚠️ [translate] OpenAI gpt-oss-120b:free failed: ${error.message}. Shifting to Groq...`);
     }
 
+    // 2. Fallback: Shift directly to Groq Llama 3.3 70B!
+    try {
+        console.log(`⚡ [translate] Falling back to Groq llama-3.3-70b-versatile for ${context}...`);
+        const result = await groq.text(
+            systemPrompt,
+            userPrompt,
+            {
+                model: 'llama-3.3-70b-versatile',
+                temperature: 0.3,
+                maxTokens: 1024,
+            }
+        );
+
+        const translated = result?.trim();
+        if (translated && translated.length > 0) {
+            console.log(`✅ [translate] Success with Groq Llama 3.3 70B`);
+            return translated;
+        }
+    } catch (groqError: any) {
+        console.error(`❌ [translate] Groq fallback also failed: ${groqError.message}`);
+    }
+
+    // Ultimate safety fallback: return original English text
     return text;
 }
 

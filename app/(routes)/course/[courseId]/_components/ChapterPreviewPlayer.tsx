@@ -56,7 +56,7 @@ const SlideIFrame = memo(({
         style={{
             position: 'absolute',
             top: 0, left: 0,
-            width: '1280px', height: '720px',
+            width: '1440px', height: '720px',
             border: 'none',
             transform: `translate(${offsetX}px, ${offsetY}px) scale(${scale})`,
             transformOrigin: 'top left',
@@ -134,22 +134,22 @@ export function ChapterPreviewPlayer({ slides, durationsBySlideId, fps = 30 }: P
     const playbackSpeedRef  = useRef(1);
 
     /* ── Dimensions & scale ── */
-    const [dimensions, setDimensions] = useState({ width: 1280, height: 720 });
+    const [dimensions, setDimensions] = useState({ width: 1440, height: 720 });
     useEffect(() => {
         const el = wrapperRef.current;
         if (!el) return;
         const ro = new ResizeObserver(entries => {
             for (const e of entries) {
                 const { width, height } = e.contentRect;
-                setDimensions({ width: width || 1280, height: height || 720 });
+                setDimensions({ width: width || 1440, height: height || 720 });
             }
         });
         ro.observe(el);
         return () => ro.disconnect();
     }, []);
 
-    const scale   = useMemo(() => Math.min(dimensions.width / 1280, dimensions.height / 720), [dimensions]);
-    const offsetX = useMemo(() => (dimensions.width  - 1280 * scale) / 2, [dimensions, scale]);
+    const scale   = useMemo(() => Math.min(dimensions.width / 1440, dimensions.height / 720), [dimensions]);
+    const offsetX = useMemo(() => (dimensions.width  - 1440 * scale) / 2, [dimensions, scale]);
     const offsetY = useMemo(() => (dimensions.height -  720 * scale) / 2, [dimensions, scale]);
 
     /* ── Pre-compute runtime HTML once per slide ── */

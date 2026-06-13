@@ -153,14 +153,14 @@ Cover every major chapter from the source document.
 
 OUTPUT STRUCTURE:
 - "cueColumn": 8-10 key questions/terms for the left sidebar
-- "mainNotes": exactly 10-12 sections (no more, no fewer)
+- "mainNotes": as many sections as needed (minimum 10 sections) to thoroughly cover the content, adjusting dynamically based on the source document length and complexity.
 - "summary": 3-4 sentence summary
 - "keyTerms": 8 items, each { "term": string, "definition": string }
 - "imagePosition": 0-based index of where to embed an uploaded image (if any)
 
 Each section: { "heading": string, "type": <one of 13 types below>, ...type-specific fields }
 
-SECTION TYPES — rotate through all 13, use each at most twice:
+SECTION TYPES — rotate through all 13:
 1. "bullets" — { "bullets": string[] } — 4-6 items, full sentences
 2. "numbered" — { "bullets": string[] } — 4-6 numbered items
 3. "table" — { "table": { "headers": string[], "rows": string[][] } } — min 3 cols, 3 rows of real data
@@ -179,11 +179,12 @@ ICON KEYS: chart-line, chart-bar, code, laptop-code, terminal, database, server,
 gears, briefcase, users, shield, rocket, bolt, clock, network, cloud, book, graduation-cap, tools, key
 
 RULES:
-1. Produce exactly 10-12 sections — not more
+1. Produce as many sections as needed (minimum 10 sections) to fully cover all topics in the content.
 2. Use "table" for comparisons/metrics, "step-cards" for methodology, "horizontal-flowchart" for pipelines
 3. Use "radial-list" for system components, "circular-map" for concept groups
 4. Each bullet/detail: one clear, informative sentence — no empty strings
-5. VARY types — do not repeat the same type more than twice`,
+5. VARY types — do not repeat the same type consecutively
+6. DO NOT prefix headings, titles, steps, or labels with numbers or indices (e.g. use "Methodology and Development Process" instead of "11. Methodology and Development Process"). The UI numbers these elements dynamically. Any heading with numbers (like "1. Introduction") is invalid.`,
 
             mindmap: `Use Mind Map format:
 - "centralTopic": the main topic string
@@ -192,7 +193,7 @@ RULES:
 
             flashcard: `Use Flashcard Grid format:
 - "cards": array of { "front": string (term/question), "back": string (answer/definition), "category": string, "difficulty": "easy"|"medium"|"hard" }
-- Aim for 12-20 cards covering all key concepts`,
+- Aim for 12-40 cards depending on document length, covering all key concepts`,
 
             infographic: `Use Infographic format:
 - "headline": main title string

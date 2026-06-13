@@ -615,7 +615,33 @@ async function generateGeminiImage(
 function enhanceForRealism(prompt: string): string {
     const alreadyEnhanced = /photorealistic|ultra realistic|8k|RAW photo|DSLR|cinematic|hyperrealistic/i.test(prompt);
     if (alreadyEnhanced) return prompt;
-    return `${prompt}, photorealistic, ultra detailed, cinematic lighting, sharp focus, 8k resolution, professional photography`;
+
+    // Rich suffix covering all quality axes Nano Banana 2 responds to best:
+    // subject fidelity, optics, lighting, post-processing, and negative guards.
+    const suffix = [
+        "ultra photorealistic",
+        "hyperrealistic",
+        "8K UHD resolution",
+        "RAW photo",
+        "shot on Sony A7R IV",
+        "50mm prime lens",
+        "sharp focus",
+        "bokeh background",
+        "golden-hour cinematic lighting",
+        "volumetric god rays",
+        "HDR tone mapping",
+        "rich vibrant colors",
+        "professional color grading",
+        "high dynamic range",
+        "intricate fine detail",
+        "award-winning photography",
+        "no text",
+        "no watermarks",
+        "no words",
+        "no blurry areas",
+    ].join(", ");
+
+    return `${prompt}, ${suffix}`;
 }
 /**
  * submitLeonardoJobV2

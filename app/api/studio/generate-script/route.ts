@@ -1,4 +1,4 @@
-import { aiFallback } from "@/config/ai-fallback";
+import { shortsLLM } from "@/lib/shorts-llm";
 import { translateScript } from "@/lib/translate";
 import { searchWeb, WebSource } from "@/lib/web-search";
 import { NextRequest, NextResponse } from "next/server";
@@ -157,30 +157,28 @@ Write a complete 6-scene viral script in ENGLISH. You MUST write 310-350 words t
                     },
                     required: ['narration', 'imagePrompt', 'videoPrompt', 'sceneCategory', 'duration', 'wordCount'],
                 };
-                const result = await aiFallback.json(systemPrompt, userPrompt, {
+                const result = await shortsLLM.json(systemPrompt, userPrompt, {
                     temperature: attempt === 1 ? 0.7 : 0.8,
-                    maxOutputTokens: 8192,
-                    schema: {
-                        type: 'object',
-                        properties: {
-                            videoTitle: { type: 'string' },
-                            thumbnailPrompt: { type: 'string' },
-                            totalScenes: { type: 'number' },
-                            totalWordCount: { type: 'number' },
-                            scenes: {
-                                type: 'array',
-                                items: sceneSchema
-                            }
-                        },
-                        required: ['videoTitle', 'thumbnailPrompt', 'totalScenes', 'totalWordCount', 'scenes'],
-                    },
+                    maxTokens: 8192,
                 });
 
-                // Set scene numbers if missing
+                // ── Normalize AI field names (models sometimes return snake_case) ──
+                // videoTitle fallback: never let it be undefined or "undefined"
+                if (!result.videoTitle || result.videoTitle === 'undefined') {
+                    result.videoTitle = topic || 'Untitled Video';
+                }
+                // thumbnailPrompt: handle both flat and nested { thumbnail: { prompt } }
+                if (!result.thumbnailPrompt && result.thumbnail?.prompt) {
+                    result.thumbnailPrompt = result.thumbnail.prompt;
+                }
+                // Normalize scene fields: snake_case → camelCase
                 if (result.scenes && Array.isArray(result.scenes)) {
                     result.scenes = result.scenes.map((s: any, idx: number) => ({
                         ...s,
-                        sceneNumber: idx + 1
+                        sceneNumber:   s.sceneNumber   ?? idx + 1,
+                        sceneCategory: s.sceneCategory ?? s.category ?? 'general',
+                        imagePrompt:   s.imagePrompt   ?? s.image_prompt ?? '',
+                        videoPrompt:   s.videoPrompt   ?? s.video_prompt ?? '',
                     }));
                 }
 

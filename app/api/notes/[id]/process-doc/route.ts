@@ -23,10 +23,27 @@ import JSZip from "jszip";
 const SARVAM_BASE = "https://api.sarvam.ai";
 const MAX_PAGES_PER_JOB = 10;
 
-function getSarvamKey(): string {
-    const key = process.env.SARVAM_API_KEY;
-    if (!key) throw new Error("SARVAM_API_KEY not set in .env");
-    return key;
+// ─── Key Pool ────────────────────────────────────────────────
+// Reads SARVAM_API_KEY, SARVAM_API_KEY_2, SARVAM_API_KEY_3 … from .env.
+// Keys are tried in order; when one is credit-exhausted the next is used.
+
+function getSarvamKeys(): string[] {
+    const keys: string[] = [];
+    const primary = process.env.SARVAM_API_KEY;
+    if (primary) keys.push(primary);
+    for (let i = 2; i <= 10; i++) {
+        const k = process.env[`SARVAM_API_KEY_${i}`];
+        if (k) keys.push(k);
+        else break;
+    }
+    if (keys.length === 0) throw new Error("No SARVAM_API_KEY configured in .env");
+    return keys;
+}
+
+function isCreditExhausted(errMsg: string): boolean {
+    return errMsg.includes("Insufficient credits") ||
+           errMsg.includes("insufficient_credits") ||
+           errMsg.includes("add more credits");
 }
 
 // ─── PDF Splitting ───────────────────────────────────────────
@@ -66,11 +83,11 @@ async function splitPdf(pdfBytes: Uint8Array): Promise<{ chunk: Uint8Array; star
 
 // ─── Sarvam API Helpers ──────────────────────────────────────
 
-async function sarvamCreateJob() {
+async function sarvamCreateJob(key: string) {
     const res = await fetch(`${SARVAM_BASE}/doc-digitization/job/v1`, {
         method: "POST",
         headers: {
-            "api-subscription-key": getSarvamKey(),
+            "api-subscription-key": key,
             "Content-Type": "application/json",
         },
         body: JSON.stringify({
@@ -81,11 +98,11 @@ async function sarvamCreateJob() {
     return res.json();
 }
 
-async function sarvamGetUploadUrl(jobId: string, filename: string) {
+async function sarvamGetUploadUrl(jobId: string, filename: string, key: string) {
     const res = await fetch(`${SARVAM_BASE}/doc-digitization/job/v1/upload-files`, {
         method: "POST",
         headers: {
-            "api-subscription-key": getSarvamKey(),
+            "api-subscription-key": key,
             "Content-Type": "application/json",
         },
         body: JSON.stringify({ job_id: jobId, files: [filename] }),
@@ -106,11 +123,11 @@ async function sarvamUploadFile(presignedUrl: string, fileBytes: Uint8Array, con
     if (!res.ok) throw new Error(`upload failed (${res.status}): ${await res.text()}`);
 }
 
-async function sarvamStartJob(jobId: string) {
+async function sarvamStartJob(jobId: string, key: string) {
     const res = await fetch(`${SARVAM_BASE}/doc-digitization/job/v1/${jobId}/start`, {
         method: "POST",
         headers: {
-            "api-subscription-key": getSarvamKey(),
+            "api-subscription-key": key,
             "Content-Type": "application/json",
         },
     });
@@ -118,10 +135,10 @@ async function sarvamStartJob(jobId: string) {
     return res.json();
 }
 
-async function sarvamPollStatus(jobId: string, maxAttempts = 90): Promise<any> {
+async function sarvamPollStatus(jobId: string, key: string, maxAttempts = 90): Promise<any> {
     for (let i = 0; i < maxAttempts; i++) {
         const res = await fetch(`${SARVAM_BASE}/doc-digitization/job/v1/${jobId}/status`, {
-            headers: { "api-subscription-key": getSarvamKey() },
+            headers: { "api-subscription-key": key },
         });
         if (!res.ok) {
             await new Promise(r => setTimeout(r, 3000));
@@ -135,11 +152,11 @@ async function sarvamPollStatus(jobId: string, maxAttempts = 90): Promise<any> {
     throw new Error("Job timed out");
 }
 
-async function sarvamGetDownloadUrls(jobId: string) {
+async function sarvamGetDownloadUrls(jobId: string, key: string) {
     const res = await fetch(`${SARVAM_BASE}/doc-digitization/job/v1/${jobId}/download-files`, {
         method: "POST",
         headers: {
-            "api-subscription-key": getSarvamKey(),
+            "api-subscription-key": key,
             "Content-Type": "application/json",
         },
     });
@@ -200,36 +217,54 @@ async function processChunk(
         uploadContentType = "application/zip";
     }
 
-    console.log(`  🔧 [${chunkLabel}] Creating job...`);
-    const jobRes = await sarvamCreateJob();
-    const jobId = jobRes.job_id;
+    const keys = getSarvamKeys();
 
-    console.log(`  🔗 [${chunkLabel}] Getting upload URL...`);
-    const uploadUrlRes = await sarvamGetUploadUrl(jobId, uploadFilename);
-    const presignedUrl = uploadUrlRes.upload_urls?.[uploadFilename]?.file_url;
-    if (!presignedUrl) throw new Error(`No presigned URL for ${chunkLabel}`);
+    for (let ki = 0; ki < keys.length; ki++) {
+        const key = keys[ki];
+        const keyTag = keys.length > 1 ? ` [key_${ki + 1}/${keys.length}]` : "";
 
-    console.log(`  ⬆️ [${chunkLabel}] Uploading ${(uploadBytes.length / 1024).toFixed(0)}KB...`);
-    await sarvamUploadFile(presignedUrl, uploadBytes, uploadContentType);
+        try {
+            console.log(`  🔧 [${chunkLabel}]${keyTag} Creating job...`);
+            const jobRes = await sarvamCreateJob(key);
+            const jobId = jobRes.job_id;
 
-    console.log(`  ▶️ [${chunkLabel}] Starting job ${jobId}...`);
-    await sarvamStartJob(jobId);
+            console.log(`  🔗 [${chunkLabel}]${keyTag} Getting upload URL...`);
+            const uploadUrlRes = await sarvamGetUploadUrl(jobId, uploadFilename, key);
+            const presignedUrl = uploadUrlRes.upload_urls?.[uploadFilename]?.file_url;
+            if (!presignedUrl) throw new Error(`No presigned URL for ${chunkLabel}`);
 
-    console.log(`  ⏳ [${chunkLabel}] Polling...`);
-    await sarvamPollStatus(jobId);
+            console.log(`  ⬆️ [${chunkLabel}]${keyTag} Uploading ${(uploadBytes.length / 1024).toFixed(0)}KB...`);
+            await sarvamUploadFile(presignedUrl, uploadBytes, uploadContentType);
 
-    console.log(`  ⬇️ [${chunkLabel}] Downloading results...`);
-    const downloadRes = await sarvamGetDownloadUrls(jobId);
-    let outputUrl = "";
-    for (const [, details] of Object.entries(downloadRes.download_urls || {})) {
-        const d = details as any;
-        if (d?.file_url) { outputUrl = d.file_url; break; }
+            console.log(`  ▶️ [${chunkLabel}]${keyTag} Starting job ${jobId}...`);
+            await sarvamStartJob(jobId, key);
+
+            console.log(`  ⏳ [${chunkLabel}]${keyTag} Polling...`);
+            await sarvamPollStatus(jobId, key);
+
+            console.log(`  ⬇️ [${chunkLabel}]${keyTag} Downloading results...`);
+            const downloadRes = await sarvamGetDownloadUrls(jobId, key);
+            let outputUrl = "";
+            for (const [, details] of Object.entries(downloadRes.download_urls || {})) {
+                const d = details as any;
+                if (d?.file_url) { outputUrl = d.file_url; break; }
+            }
+            if (!outputUrl) throw new Error(`No download URL for ${chunkLabel}`);
+
+            const extracted = await downloadAndExtractZip(outputUrl);
+            console.log(`  ✅ [${chunkLabel}]${keyTag} Extracted ${extracted.length} chars`);
+            return extracted;
+
+        } catch (err: any) {
+            if (isCreditExhausted(err.message) && ki < keys.length - 1) {
+                console.warn(`  ⚠️ [${chunkLabel}] key_${ki + 1} credit exhausted — rotating to key_${ki + 2}...`);
+                continue;
+            }
+            throw err;
+        }
     }
-    if (!outputUrl) throw new Error(`No download URL for ${chunkLabel}`);
 
-    const extracted = await downloadAndExtractZip(outputUrl);
-    console.log(`  ✅ [${chunkLabel}] Extracted ${extracted.length} chars`);
-    return extracted;
+    throw new Error(`All ${keys.length} Sarvam key(s) exhausted for ${chunkLabel}`);
 }
 
 // ─── Main Handler ────────────────────────────────────────────

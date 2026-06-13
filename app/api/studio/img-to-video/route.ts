@@ -19,7 +19,25 @@ function getLeonardoKeys(): string[] {
     ];
     return names.map(n => process.env[n]).filter((k): k is string => !!k && k.length > 0);
 }
-const getSarvamKey  = () => process.env.SARVAM_API_KEY || "";
+function getSarvamKeys(): string[] {
+    const keys: string[] = [];
+    const primary = process.env.SARVAM_API_KEY;
+    if (primary) keys.push(primary);
+    for (let i = 2; i <= 10; i++) {
+        const k = process.env[`SARVAM_API_KEY_${i}`];
+        if (k) keys.push(k);
+        else break;
+    }
+    return keys;
+}
+
+function isSarvamCreditExhausted(errMsg: string): boolean {
+    return errMsg.includes("Insufficient credits") ||
+           errMsg.includes("insufficient_credits") ||
+           errMsg.includes("add more credits") ||
+           errMsg.includes("400") ||
+           errMsg.includes("402");
+}
 
 // ─── Minimal ZIP creator (single file, no compression) ────────────────────────
 function crc32(buf: Buffer): number {
@@ -93,121 +111,128 @@ function extractFirstFileFromZip(zipBuf: Buffer): string {
 
 // ─── Step 1a: Sarvam Vision (image caption) ───────────────────────────────────
 async function captionWithSarvam(imgBuf: Buffer, contentType: string): Promise<string> {
-    const key = getSarvamKey();
-    if (!key) throw new Error("No SARVAM_API_KEY");
+    const keys = getSarvamKeys();
+    if (keys.length === 0) throw new Error("No SARVAM_API_KEY configured");
 
     const ext         = contentType.includes("png") ? "png" : contentType.includes("webp") ? "webp" : "jpg";
     const imgFilename = `image.${ext}`;
     const zipFilename = "image.zip";
     const zipBuf      = createSingleFileZip(imgFilename, imgBuf);
 
-    const headers = { "api-subscription-key": key, "Content-Type": "application/json" };
+    for (let ki = 0; ki < keys.length; ki++) {
+        const key = keys[ki];
+        const keyTag = keys.length > 1 ? ` [key_${ki + 1}/${keys.length}]` : "";
+        const headers = { "api-subscription-key": key, "Content-Type": "application/json" };
 
-    // 1. Create job
-    const createRes = await fetch(`${SARVAM_BASE}/doc-digitization/job/v1`, {
-        method: "POST", headers,
-        body: JSON.stringify({ job_parameters: { language: "en-IN", output_format: "md" } }),
-    });
-    if (!createRes.ok) throw new Error(`Sarvam create job failed: ${createRes.status}`);
-    const { job_id } = await createRes.json();
-    console.log(`📄 [img-to-video] Sarvam job created: ${job_id}`);
+        try {
+            // 1. Create job
+            const createRes = await fetch(`${SARVAM_BASE}/doc-digitization/job/v1`, {
+                method: "POST", headers,
+                body: JSON.stringify({ job_parameters: { language: "en-IN", output_format: "md" } }),
+            });
+            if (!createRes.ok) throw new Error(`Sarvam create job failed (${createRes.status}): ${await createRes.text()}`);
+            const { job_id } = await createRes.json();
+            console.log(`📄 [img-to-video]${keyTag} Sarvam job created: ${job_id}`);
 
-    // 2. Get presigned upload URL
-    const uploadUrlRes = await fetch(`${SARVAM_BASE}/doc-digitization/job/v1/upload-files`, {
-        method: "POST", headers,
-        body: JSON.stringify({ job_id, files: [zipFilename] }),
-    });
-    if (!uploadUrlRes.ok) throw new Error(`Sarvam upload-files failed: ${uploadUrlRes.status}`);
-    const uploadData = await uploadUrlRes.json();
-    const fileUrlDetails = uploadData?.upload_urls?.[zipFilename];
-    const fileUrl        = fileUrlDetails?.file_url;
-    if (!fileUrl) throw new Error("No upload URL from Sarvam");
+            // 2. Get presigned upload URL
+            const uploadUrlRes = await fetch(`${SARVAM_BASE}/doc-digitization/job/v1/upload-files`, {
+                method: "POST", headers,
+                body: JSON.stringify({ job_id, files: [zipFilename] }),
+            });
+            if (!uploadUrlRes.ok) throw new Error(`Sarvam upload-files failed (${uploadUrlRes.status}): ${await uploadUrlRes.text()}`);
+            const uploadData = await uploadUrlRes.json();
+            const fileUrlDetails = uploadData?.upload_urls?.[zipFilename];
+            const fileUrl        = fileUrlDetails?.file_url;
+            if (!fileUrl) throw new Error("No upload URL from Sarvam");
 
-    // 3. PUT ZIP to the presigned URL
-    // ─────────────────────────────────────────────────────────────────────────
-    // Sarvam uses Azure Blob Storage (storage_container_type = "Azure").
-    // Azure SAS-URL PUTs REQUIRE the header `x-ms-blob-type: BlockBlob`.
-    // Without it Azure returns: 400 <?xml…><Error><Code>MissingRequiredHeader
-    // ─────────────────────────────────────────────────────────────────────────
-    const storageType: string = (uploadData?.storage_container_type ||"").toLowerCase();
-    const isAzure = storageType.startsWith("azure") || fileUrl.includes(".blob.core.windows.net");
+            // 3. PUT ZIP to the presigned URL
+            const storageType: string = (uploadData?.storage_container_type ||"").toLowerCase();
+            const isAzure = storageType.startsWith("azure") || fileUrl.includes(".blob.core.windows.net");
 
-    // file_metadata may carry additional required headers (some Sarvam backends)
-    const extraHeaders: Record<string, string> = {};
-    const fileMeta = fileUrlDetails?.file_metadata;
-    if (fileMeta && typeof fileMeta === "object") {
-        for (const [k, v] of Object.entries(fileMeta)) {
-            if (typeof v === "string") extraHeaders[k] = v;
+            const extraHeaders: Record<string, string> = {};
+            const fileMeta = fileUrlDetails?.file_metadata;
+            if (fileMeta && typeof fileMeta === "object") {
+                for (const [k, v] of Object.entries(fileMeta)) {
+                    if (typeof v === "string") extraHeaders[k] = v;
+                }
+            }
+
+            const putHeaders: Record<string, string> = {
+                "Content-Type": "application/zip",
+                ...extraHeaders,
+                ...(isAzure ? { "x-ms-blob-type": "BlockBlob" } : {}),
+            };
+
+            console.log(`☁️ [img-to-video]${keyTag} Storage: ${storageType || "unknown"}, Azure: ${isAzure}`);
+
+            const putRes = await fetch(fileUrl, { method: "PUT", headers: putHeaders, body: zipBuf as unknown as BodyInit });
+            if (!putRes.ok && putRes.status !== 201 && putRes.status !== 200) {
+                const errBody = await putRes.text().catch(() => "");
+                throw new Error(`Sarvam ZIP upload failed (${putRes.status}): ${errBody.slice(0, 200)}`);
+            }
+
+            // 4. Start job
+            const startRes = await fetch(`${SARVAM_BASE}/doc-digitization/job/v1/${job_id}/start`, {
+                method: "POST", headers, body: "{}",
+            });
+            if (!startRes.ok) throw new Error(`Sarvam start failed (${startRes.status}): ${await startRes.text()}`);
+            console.log(`🚀 [img-to-video]${keyTag} Sarvam job started`);
+
+            // 5. Poll status (max 15 × 3s = 45s)
+            let jobState = "Pending";
+            for (let i = 0; i < 15; i++) {
+                await new Promise(r => setTimeout(r, 3000));
+                const statusRes = await fetch(`${SARVAM_BASE}/doc-digitization/job/v1/${job_id}/status`, {
+                    headers: { "api-subscription-key": key },
+                });
+                if (!statusRes.ok) continue;
+                const sd = await statusRes.json();
+                jobState = sd.job_state;
+                console.log(`⏳ [img-to-video]${keyTag} Sarvam poll ${i + 1}/15: ${jobState}`);
+                if (jobState === "Completed" || jobState === "PartiallyCompleted") break;
+                if (jobState === "Failed") throw new Error(`Sarvam job failed: ${sd.error_message}`);
+            }
+            if (jobState !== "Completed" && jobState !== "PartiallyCompleted") {
+                throw new Error(`Sarvam timed out (state: ${jobState})`);
+            }
+
+            // 6. Get download URLs
+            const dlRes = await fetch(`${SARVAM_BASE}/doc-digitization/job/v1/${job_id}/download-files`, {
+                method: "POST", headers, body: "{}",
+            });
+            if (!dlRes.ok) throw new Error(`Sarvam download-files failed (${dlRes.status}): ${await dlRes.text()}`);
+            const dlData        = await dlRes.json();
+            const downloadUrls  = dlData?.download_urls || {};
+            const firstKey      = Object.keys(downloadUrls)[0];
+            if (!firstKey) throw new Error("No download URLs from Sarvam");
+
+            // 7. Download output
+            const dlFileUrl  = downloadUrls[firstKey]?.file_url || firstKey;
+            const contentRes = await fetch(dlFileUrl);
+            if (!contentRes.ok) throw new Error(`Sarvam output download failed: ${contentRes.status}`);
+            const contentBuf = Buffer.from(await contentRes.arrayBuffer());
+
+            let markdown = "";
+            if (contentBuf[0] === 0x50 && contentBuf[1] === 0x4B) {
+                markdown = extractFirstFileFromZip(contentBuf);
+            } else {
+                markdown = contentBuf.toString("utf-8");
+            }
+
+            const result = markdown.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 2000);
+            console.log(`✅ [img-to-video]${keyTag} Sarvam caption: "${result.slice(0, 100)}..."`);
+            return result;
+
+        } catch (err: any) {
+            if (isSarvamCreditExhausted(err.message) && ki < keys.length - 1) {
+                console.warn(`⚠️ [img-to-video] key_${ki + 1} credit exhausted — rotating to key_${ki + 2}...`);
+                continue;
+            }
+            throw err;
         }
     }
 
-    const putHeaders: Record<string, string> = {
-        "Content-Type": "application/zip",
-        ...extraHeaders,
-        ...(isAzure ? { "x-ms-blob-type": "BlockBlob" } : {}),
-    };
-
-    console.log(`☁️ [img-to-video] Storage: ${storageType || "unknown"}, Azure: ${isAzure}`);
-
-    const putRes = await fetch(fileUrl, { method: "PUT", headers: putHeaders, body: zipBuf as unknown as BodyInit });
-    if (!putRes.ok && putRes.status !== 201 && putRes.status !== 200) {
-        const errBody = await putRes.text().catch(() => "");
-        throw new Error(`Sarvam ZIP upload failed: ${putRes.status} — ${errBody.slice(0, 200)}`);
-    }
-
-    // 4. Start job
-    const startRes = await fetch(`${SARVAM_BASE}/doc-digitization/job/v1/${job_id}/start`, {
-        method: "POST", headers, body: "{}",
-    });
-    if (!startRes.ok) throw new Error(`Sarvam start failed: ${startRes.status}`);
-    console.log(`🚀 [img-to-video] Sarvam job started`);
-
-    // 5. Poll status (max 15 × 3s = 45s)
-    let jobState = "Pending";
-    for (let i = 0; i < 15; i++) {
-        await new Promise(r => setTimeout(r, 3000));
-        const statusRes = await fetch(`${SARVAM_BASE}/doc-digitization/job/v1/${job_id}/status`, {
-            headers: { "api-subscription-key": key },
-        });
-        if (!statusRes.ok) continue;
-        const sd = await statusRes.json();
-        jobState = sd.job_state;
-        console.log(`⏳ [img-to-video] Sarvam poll ${i + 1}/15: ${jobState}`);
-        if (jobState === "Completed" || jobState === "PartiallyCompleted") break;
-        if (jobState === "Failed") throw new Error(`Sarvam job failed: ${sd.error_message}`);
-    }
-    if (jobState !== "Completed" && jobState !== "PartiallyCompleted") {
-        throw new Error(`Sarvam timed out (state: ${jobState})`);
-    }
-
-    // 6. Get download URLs
-    const dlRes = await fetch(`${SARVAM_BASE}/doc-digitization/job/v1/${job_id}/download-files`, {
-        method: "POST", headers, body: "{}",
-    });
-    if (!dlRes.ok) throw new Error(`Sarvam download-files failed: ${dlRes.status}`);
-    const dlData        = await dlRes.json();
-    const downloadUrls  = dlData?.download_urls || {};
-    const firstKey      = Object.keys(downloadUrls)[0];
-    if (!firstKey) throw new Error("No download URLs from Sarvam");
-
-    // 7. Download output
-    const dlFileUrl  = downloadUrls[firstKey]?.file_url || firstKey;
-    const contentRes = await fetch(dlFileUrl);
-    if (!contentRes.ok) throw new Error(`Sarvam output download failed: ${contentRes.status}`);
-    const contentBuf = Buffer.from(await contentRes.arrayBuffer());
-
-    // Output can be a ZIP or plain markdown
-    let markdown = "";
-    if (contentBuf[0] === 0x50 && contentBuf[1] === 0x4B) {
-        // It's a ZIP
-        markdown = extractFirstFileFromZip(contentBuf);
-    } else {
-        markdown = contentBuf.toString("utf-8");
-    }
-
-    const result = markdown.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 2000);
-    console.log(`✅ [img-to-video] Sarvam caption: "${result.slice(0, 100)}..."`);
-    return result;
+    throw new Error(`All ${keys.length} Sarvam key(s) exhausted for image captioning`);
 }
 
 // ─── Step 1b: Groq Vision (fallback caption) ──────────────────────────────────
