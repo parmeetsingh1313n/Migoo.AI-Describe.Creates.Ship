@@ -521,7 +521,7 @@ async function render() {
   const rawMb = fs.existsSync(rawOutFile) ? (fs.statSync(rawOutFile).size / 1024 / 1024).toFixed(1) : '?';
   console.log(`\n🗜  Compressing video (CRF 35)... raw size: ${rawMb} MB`);
   try {
-    const compressCmd = `"${ff}" -y -i "${rawOutFile}" -c:v libx264 -preset fast -crf 35 -c:a aac -b:a 96k -ar 44100 -movflags +faststart "${outFile}"`;
+    const compressCmd = `"${ff}" -y -i "${rawOutFile}" -c:v libx264 -preset fast -crf 38 -tune stillimage -c:a aac -b:a 48k -ar 32000 -movflags +faststart "${outFile}"`;
     await execAsync(compressCmd, { maxBuffer: 500 * 1024 * 1024, timeout: 90 * 60 * 1000 });
     try { fs.unlinkSync(rawOutFile); } catch {}
     const compMb = fs.existsSync(outFile) ? (fs.statSync(outFile).size / 1024 / 1024).toFixed(1) : '?';
