@@ -74,8 +74,8 @@ jobs:
       - name: Upload rendered video & notify app
         env:
           APPWRITE_ENDPOINT:   ${{ secrets.APPWRITE_ENDPOINT }}
-          APPWRITE_PROJECT_ID: ${{ secrets.APPWRITE_PROJECT_ID }}
-          APPWRITE_API_KEY:    ${{ secrets.APPWRITE_API_KEY }}
+          APPWRITE_PROJECT_ID: ${{ secrets.APPWRITE_VIDEO_PROJECT_ID || secrets.APPWRITE_PROJECT_ID }}
+          APPWRITE_API_KEY:    ${{ secrets.APPWRITE_VIDEO_API_KEY || secrets.APPWRITE_API_KEY }}
           # Use a dedicated bucket for rendered chapter videos
           APPWRITE_BUCKET_ID:  ${{ secrets.APPWRITE_VIDEO_BUCKET_ID }}
           CHAPTER_ID:          ${{ github.event.client_payload.chapterId }}

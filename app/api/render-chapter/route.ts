@@ -750,25 +750,28 @@ export async function DELETE(req: NextRequest) {
   // 4. Delete file based on mode / videoUrl format
   if (isGitHubActionsMode()) {
     const endpoint = (process.env.APPWRITE_ENDPOINT ?? '').replace(/\/$/, '');
-    const projectId = process.env.APPWRITE_PROJECT_ID;
-    const apiKey = process.env.APPWRITE_API_KEY;
-    const bucketId = process.env.APPWRITE_BUCKET_ID;
+    const projectId = process.env.APPWRITE_VIDEO_PROJECT_ID || process.env.APPWRITE_PROJECT_ID;
+    const apiKey = process.env.APPWRITE_VIDEO_API_KEY || process.env.APPWRITE_API_KEY;
+    const bucketId = process.env.APPWRITE_VIDEO_BUCKET_ID || process.env.APPWRITE_BUCKET_ID;
 
     if (endpoint && projectId && apiKey && bucketId) {
       try {
         const { Client, Storage } = require('node-appwrite');
-        const client = new Client().setEndpoint(endpoint).setProject(projectId).setKey(apiKey);
-        const storage = new Storage(client);
-
+        
         // Check if chunked JSON
         if (currentVideoUrl && currentVideoUrl.startsWith('{')) {
           try {
             const parsed = JSON.parse(currentVideoUrl);
             if (parsed.chunked && Array.isArray(parsed.ids)) {
               console.log(`☁️ Deleting ${parsed.ids.length} chunks from Appwrite storage...`);
+              const deleteProjectId = parsed.projectId || projectId;
+              const deleteBucketId = parsed.bucketId || bucketId;
+              const deleteClient = new Client().setEndpoint(endpoint).setProject(deleteProjectId).setKey(apiKey);
+              const deleteStorage = new Storage(deleteClient);
+              
               for (const fid of parsed.ids) {
                 try {
-                  await storage.deleteFile(bucketId, fid);
+                  await deleteStorage.deleteFile(deleteBucketId, fid);
                   console.log(`✅ Appwrite chunk file deleted: ${fid}`);
                 } catch (chDelErr: any) {
                   console.warn(`⚠️ Failed to delete chunk ${fid}:`, chDelErr.message);
@@ -780,6 +783,8 @@ export async function DELETE(req: NextRequest) {
           }
         } else {
           // Normal file ID
+          const client = new Client().setEndpoint(endpoint).setProject(projectId).setKey(apiKey);
+          const storage = new Storage(client);
           const fileId = `chapter-${chapterId}`.replace(/[^a-zA-Z0-9._-]/g, '-').slice(0, 36);
           console.log(`☁️ Deleting Appwrite file ${fileId} from bucket ${bucketId}`);
           await storage.deleteFile(bucketId, fileId);

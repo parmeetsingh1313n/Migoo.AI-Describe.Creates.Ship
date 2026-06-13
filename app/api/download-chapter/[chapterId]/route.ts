@@ -71,7 +71,7 @@ export async function GET(
         const metadata = JSON.parse(videoUrlStr);
         if (metadata.chunked && Array.isArray(metadata.ids)) {
           const { ids, bucketId, endpoint, projectId } = metadata;
-          const apiKey = process.env.APPWRITE_API_KEY;
+          const apiKey = process.env.APPWRITE_VIDEO_API_KEY || process.env.APPWRITE_API_KEY;
 
           // Stream chunks sequentially on-the-fly to the browser
           const stream = new ReadableStream({
