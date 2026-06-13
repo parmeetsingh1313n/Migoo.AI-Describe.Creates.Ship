@@ -353,35 +353,189 @@ ${content}
 </body></html>`;
 }
 
-// ── Screenshot via Puppeteer ─────────────────────────────────────────────────
-async function screenshot(html, outPath) {
+// ── Shared Puppeteer browser pool (one browser per parallel slide worker) ────
+// Each slide gets its own browser instance to allow true parallelism.
+// Browser is launched once per slide render, kept open for all states, then closed.
+async function screenshotWithBrowser(browser, html, outPath) {
+  const page = await browser.newPage();
+  try {
+    await page.setViewport({ width: 1440, height: 720, deviceScaleFactor: 1 });
+    // Option 3: use 'domcontentloaded' + short sleep instead of slow networkidle0
+    // This saves ~1-2s per screenshot while still getting fonts loaded
+    await page.setContent(html, { waitUntil: 'domcontentloaded', timeout: 15000 });
+    await page.evaluateHandle(() => document.fonts.ready);
+    // Option 3: reduced from 800ms to 300ms — enough for layout reflow
+    await new Promise(r => setTimeout(r, 300));
+    await page.screenshot({ path: outPath, type: 'png', clip: { x: 0, y: 0, width: 1440, height: 720 } });
+  } finally {
+    await page.close();
+  }
+}
+
+// ── Option 1: Render a single slide (called in parallel for all slides) ───────
+async function renderSlide(i, slide, totalSlides) {
   const puppeteer = require('puppeteer');
-  const browser   = await puppeteer.launch({
+  const durationFrames = (durationsBySlideId ?? {})[slide.slideId] ?? (6 * fps);
+  const totalSec = durationFrames / fps;
+
+  console.log(`\n📽  Slide ${i + 1}/${totalSlides} — ${totalSec.toFixed(1)}s (${slide.slideId})`);
+
+  // Download audio
+  const ext = (slide.audioFileUrl ?? '').match(/\.(mp3|wav|ogg|aac)/i)?.[1] ?? 'mp3';
+  const audioPath = path.join(workDir, `audio-${i}.${ext}`);
+  try {
+    await downloadAudioToDisk(slide.audioFileUrl, audioPath);
+  } catch (e) {
+    console.warn(`  ⚠️  Audio failed: ${e.message} — using silence`);
+    await makeSilent(audioPath, totalSec);
+  }
+
+  // Build reveal intervals
+  const intervals = buildRevealIntervals(slide, totalSec);
+  console.log(`  🎞  ${intervals.length} reveal state(s)`);
+
+  // Launch ONE browser per slide (kept open for all states of this slide)
+  const browser = await puppeteer.launch({
     headless: true,
     args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-gpu',
-      '--disable-dev-shm-usage',
-      '--window-size=1440,720',
-      '--font-render-hinting=none',          // consistent font rendering across systems
-      '--disable-font-subpixel-positioning', // no subpixel shifts
+      '--no-sandbox', '--disable-setuid-sandbox', '--disable-gpu',
+      '--disable-dev-shm-usage', '--window-size=1440,720',
+      '--font-render-hinting=none', '--disable-font-subpixel-positioning',
     ],
   });
+
+  const intervalClips = [];
   try {
-    const page = await browser.newPage();
-    await page.setViewport({ width: 1440, height: 720, deviceScaleFactor: 1 });
-    // networkidle0 waits for ALL network requests to finish (fonts, images, CSS)
-    await page.setContent(html, { waitUntil: 'networkidle0', timeout: 25000 });
-    // Explicitly wait for fonts to load and layout to reflow with real font metrics
-    await page.evaluateHandle(() => document.fonts.ready);
-    // Safety sleep for any deferred style recalculations after font load
-    await new Promise(r => setTimeout(r, 800));
-    await page.screenshot({ path: outPath, type: 'png', clip: { x: 0, y: 0, width: 1440, height: 720 } });
+    for (let j = 0; j < intervals.length; j++) {
+      const iv = intervals[j];
+      const clipDur = iv.endSec - iv.startSec;
+      if (clipDur < 0.05) continue;
+
+      // Screenshot
+      const imgPath = path.join(workDir, `s${i}-state${j}.png`);
+      try {
+        const revealHtml = buildRevealHtml(slide.html, iv, baseUrl);
+        await screenshotWithBrowser(browser, revealHtml, imgPath);
+        console.log(`  📸 Slide ${i + 1} state ${j} OK`);
+      } catch (e) {
+        console.warn(`  ⚠️  Screenshot failed: ${e.message} — black frame`);
+        await execAsync(`"${getFFmpeg()}" -y -f lavfi -i color=c=black:s=1440x720:r=1:d=1 -frames:v 1 "${imgPath}"`).catch(() => {});
+      }
+
+      // Clip
+      const clipPath = path.join(workDir, `s${i}-clip${j}.mp4`);
+      const prevImgPath = j > 0 ? path.join(workDir, `s${i}-state${j - 1}.png`) : undefined;
+      await makeClip(imgPath, audioPath, iv.startSec, clipDur, clipPath, prevImgPath);
+      intervalClips.push(clipPath);
+    }
   } finally {
     await browser.close();
   }
+
+  // Merge interval clips → slide clip
+  const slideClip = path.join(workDir, `slide-${i}.mp4`);
+  if (intervalClips.length === 1) {
+    fs.renameSync(intervalClips[0], slideClip);
+  } else if (intervalClips.length > 1) {
+    await concat(intervalClips, slideClip);
+  } else {
+    await execAsync(`"${getFFmpeg()}" -y -f lavfi -i color=c=black:s=1440x720:r=30:d=${totalSec.toFixed(3)} -f lavfi -i anullsrc=r=44100:cl=stereo -c:v libx264 -c:a aac -t ${totalSec.toFixed(3)} "${slideClip}"`).catch(() => {});
+  }
+
+  console.log(`  ✅ Slide ${i + 1} complete`);
+  return { index: i, slideClip, durationSec: totalSec };
 }
+
+// ── Main render pipeline ─────────────────────────────────────────────────────
+async function render() {
+  if (fetchUrl) {
+    console.log(`📡 Fetching chapter slides from Vercel: ${fetchUrl}`);
+    const res = await fetch(fetchUrl, {
+      headers: {
+        'x-appwrite-key': process.env.APPWRITE_API_KEY || ''
+      }
+    });
+    if (!res.ok) {
+      throw new Error(`Failed to fetch slides data: HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    slides = data.slides;
+    durationsBySlideId = data.durationsBySlideId;
+    baseUrl = data.baseUrl || '';
+    console.log(`   Fetched ${slides.length} slides successfully. (Base URL: ${baseUrl})`);
+  }
+
+  if (!Array.isArray(slides) || slides.length === 0) {
+    throw new Error('No slides found to render');
+  }
+
+  const totalSlides = slides.length;
+  console.log(`🎬 render-chapter-gh: chapterId=${chapterId}, slides=${totalSlides}`);
+  console.log(`⚡ Rendering all ${totalSlides} slides IN PARALLEL...`);
+
+  // Option 1: PARALLEL slide rendering — all slides processed simultaneously
+  // Each slide gets its own Puppeteer browser + FFmpeg processes
+  const CONCURRENCY = Math.min(totalSlides, 4); // cap at 4 to avoid OOM on 7GB runners
+  const results = [];
+
+  // Process in batches of CONCURRENCY
+  for (let batch = 0; batch < totalSlides; batch += CONCURRENCY) {
+    const batchSlides = slides.slice(batch, batch + CONCURRENCY);
+    const batchResults = await Promise.all(
+      batchSlides.map((slide, idx) => renderSlide(batch + idx, slide, totalSlides))
+    );
+    results.push(...batchResults);
+  }
+
+  // Sort results back in order (parallel may complete out of order)
+  results.sort((a, b) => a.index - b.index);
+  const slideClips = results.map(r => r.slideClip);
+  const totalDurationSec = results.reduce((sum, r) => sum + r.durationSec, 0);
+
+  // Final concat → output file directly (no extra compression pass — clips already at CRF 28)
+  // Option 2: Skip redundant compression pass — saves 3-5 minutes!
+  console.log(`\n🔗 Concatenating ${slideClips.length} slides...`);
+  await concat(slideClips, outFile);
+  const concatMb = fs.existsSync(outFile) ? (fs.statSync(outFile).size / 1024 / 1024).toFixed(1) : '?';
+  console.log(`   ✅ Concat complete: ${concatMb} MB (clips already encoded at CRF 28, skipping re-encode)`);
+
+  // ── Split into 45 MB chunks for Appwrite upload ─────────────────────────────
+  const CHUNK_SIZE_BYTES = 45 * 1024 * 1024; // 45 MB
+  const finalSizeBytes = fs.existsSync(outFile) ? fs.statSync(outFile).size : 0;
+  const chunksDir = path.join(path.dirname(outFile), `chapter-${chapterId}-chunks`);
+  const ff = getFFmpeg();
+
+  if (finalSizeBytes > CHUNK_SIZE_BYTES) {
+    console.log(`\n✂️  Splitting ${(finalSizeBytes / 1024 / 1024).toFixed(1)} MB video into 45 MB chunks...`);
+    fs.mkdirSync(chunksDir, { recursive: true });
+    const chunkPattern = path.join(chunksDir, 'chunk-%03d.mp4');
+
+    // Estimate segment time based on duration and file size ratio
+    const segmentTime = Math.max(5, Math.floor((CHUNK_SIZE_BYTES / finalSizeBytes) * totalDurationSec) - 5);
+    console.log(`   Estimated segment duration: ${segmentTime}s`);
+
+    const splitCmd = `"${ff}" -y -i "${outFile}" -c copy -f segment -segment_time ${segmentTime} -reset_timestamps 1 -segment_format mp4 "${chunkPattern}"`;
+    await execAsync(splitCmd, { maxBuffer: 200 * 1024 * 1024, timeout: 20 * 60 * 1000 });
+    const chunkFiles = fs.readdirSync(chunksDir).filter(f => f.startsWith('chunk-') && f.endsWith('.mp4')).sort();
+    console.log(`   ✅ Split into ${chunkFiles.length} chunks`);
+    const sidecarPath = outFile.replace('.mp4', '-chunks.json');
+    fs.writeFileSync(sidecarPath, JSON.stringify({ chunksDir, chunkFiles }));
+  } else {
+    console.log(`   File is ${(finalSizeBytes / 1024 / 1024).toFixed(1)} MB — single upload (no chunking needed)`);
+  }
+
+  const mb = fs.existsSync(outFile) ? (fs.statSync(outFile).size / 1024 / 1024).toFixed(1) : '?';
+  console.log(`\n🏁 DONE — ${mb} MB → ${outFile}`);
+
+  // Clean up work dir
+  try { fs.rmSync(workDir, { recursive: true, force: true }); } catch {}
+}
+
+// ── Entry point ──────────────────────────────────────────────────────────────
+render().catch(err => {
+  console.error('❌ Render failed:', err.message ?? err);
+  process.exit(1);
+});
 
 // ── FFmpeg: image loop + audio slice → mp4 ──────────────────────────────────
 async function makeClip(imgPath, audioPath, audioStart, duration, out, prevImgPath) {
@@ -422,152 +576,4 @@ async function makeSilent(dest, durationSec) {
   await execAsync(`"${ff}" -y -f lavfi -i anullsrc=r=44100:cl=stereo -t ${durationSec.toFixed(3)} "${dest}"`).catch(() => {});
 }
 
-// ── Main render pipeline ─────────────────────────────────────────────────────
-async function render() {
-  if (fetchUrl) {
-    console.log(`📡 Fetching chapter slides from Vercel: ${fetchUrl}`);
-    const res = await fetch(fetchUrl, {
-      headers: {
-        'x-appwrite-key': process.env.APPWRITE_API_KEY || ''
-      }
-    });
-    if (!res.ok) {
-      throw new Error(`Failed to fetch slides data: HTTP ${res.status}`);
-    }
-    const data = await res.json();
-    slides = data.slides;
-    durationsBySlideId = data.durationsBySlideId;
-    baseUrl = data.baseUrl || '';
-    console.log(`   Fetched ${slides.length} slides successfully. (Base URL: ${baseUrl})`);
-  }
 
-  if (!Array.isArray(slides) || slides.length === 0) {
-    throw new Error('No slides found to render');
-  }
-
-  console.log(`🎬 render-chapter-gh: chapterId=${chapterId}, slides=${slides.length}`);
-
-  const slideClips  = [];
-  const totalSlides = slides.length;
-  let totalDurationSec = 0;
-
-  for (let i = 0; i < totalSlides; i++) {
-    const slide         = slides[i];
-    const durationFrames = (durationsBySlideId ?? {})[slide.slideId] ?? (6 * fps);
-    const totalSec      = durationFrames / fps;
-    totalDurationSec += totalSec;
-
-    console.log(`\n📽  Slide ${i + 1}/${totalSlides} — ${totalSec.toFixed(1)}s (${slide.slideId})`);
-
-    // Download audio
-    const ext       = (slide.audioFileUrl ?? '').match(/\.(mp3|wav|ogg|aac)/i)?.[1] ?? 'mp3';
-    const audioPath = path.join(workDir, `audio-${i}.${ext}`);
-    try {
-      await downloadAudioToDisk(slide.audioFileUrl, audioPath);
-    } catch (e) {
-      console.warn(`  ⚠️  Audio failed: ${e.message} — using silence`);
-      await makeSilent(audioPath, totalSec);
-    }
-
-    // Build reveal intervals
-    const intervals = buildRevealIntervals(slide, totalSec);
-    console.log(`  🎞  ${intervals.length} reveal state(s)`);
-
-    const intervalClips = [];
-    for (let j = 0; j < intervals.length; j++) {
-      const iv      = intervals[j];
-      const clipDur = iv.endSec - iv.startSec;
-      if (clipDur < 0.05) continue;
-
-      // Screenshot
-      const imgPath = path.join(workDir, `s${i}-state${j}.png`);
-      try {
-        const revealHtml = buildRevealHtml(slide.html, iv, baseUrl);
-        await screenshot(revealHtml, imgPath);
-        console.log(`  📸 State ${j} screenshot OK`);
-      } catch (e) {
-        console.warn(`  ⚠️  Screenshot failed: ${e.message} — black frame`);
-        await execAsync(`"${getFFmpeg()}" -y -f lavfi -i color=c=black:s=1440x720:r=1:d=1 -frames:v 1 "${imgPath}"`).catch(() => {});
-      }
-
-      // Clip
-      const clipPath   = path.join(workDir, `s${i}-clip${j}.mp4`);
-      const prevImgPath = j > 0 ? path.join(workDir, `s${i}-state${j - 1}.png`) : undefined;
-      await makeClip(imgPath, audioPath, iv.startSec, clipDur, clipPath, prevImgPath);
-      intervalClips.push(clipPath);
-    }
-
-    // Merge interval clips → slide clip
-    const slideClip = path.join(workDir, `slide-${i}.mp4`);
-    if (intervalClips.length === 1) {
-      fs.renameSync(intervalClips[0], slideClip);
-    } else if (intervalClips.length > 1) {
-      await concat(intervalClips, slideClip);
-    } else {
-      // Fallback: black silent clip
-      await execAsync(`"${getFFmpeg()}" -y -f lavfi -i color=c=black:s=1440x720:r=30:d=${totalSec.toFixed(3)} -f lavfi -i anullsrc=r=44100:cl=stereo -c:v libx264 -c:a aac -t ${totalSec.toFixed(3)} "${slideClip}"`).catch(() => {});
-    }
-
-    slideClips.push(slideClip);
-    console.log(`  ✅ Slide ${i + 1} complete`);
-  }
-
-  // Final concat → raw file, then compress
-  console.log(`\n🔗 Concatenating ${slideClips.length} slides...`);
-  const rawOutFile = outFile.replace('.mp4', '_raw.mp4');
-  await concat(slideClips, rawOutFile);
-
-  // ── Post-concat compression pass (CRF 28 - good quality) ───────────────────
-  const ff = getFFmpeg();
-  const rawMb = fs.existsSync(rawOutFile) ? (fs.statSync(rawOutFile).size / 1024 / 1024).toFixed(1) : '?';
-  console.log(`\n🗜  Compressing video (CRF 28 — good quality)... raw size: ${rawMb} MB`);
-  try {
-    const compressCmd = `"${ff}" -y -i "${rawOutFile}" -c:v libx264 -preset fast -crf 28 -c:a aac -b:a 128k -ar 44100 -movflags +faststart "${outFile}"`;
-    await execAsync(compressCmd, { maxBuffer: 500 * 1024 * 1024, timeout: 90 * 60 * 1000 });
-    try { fs.unlinkSync(rawOutFile); } catch {}
-    const compMb = fs.existsSync(outFile) ? (fs.statSync(outFile).size / 1024 / 1024).toFixed(1) : '?';
-    console.log(`   ✅ Compressed: ${compMb} MB`);
-  } catch (compErr) {
-    console.warn(`  ⚠️  Compression failed: ${compErr.message} — using raw file`);
-    try { if (fs.existsSync(rawOutFile)) fs.renameSync(rawOutFile, outFile); } catch {}
-  }
-
-  // ── Split into 45 MB chunks for Appwrite upload ─────────────────────────────
-  const CHUNK_SIZE_BYTES = 45 * 1024 * 1024; // 45 MB
-  const finalSizeBytes = fs.existsSync(outFile) ? fs.statSync(outFile).size : 0;
-  const chunksDir = path.join(path.dirname(outFile), `chapter-${chapterId}-chunks`);
-
-  if (finalSizeBytes > CHUNK_SIZE_BYTES) {
-    console.log(`\n✂️  Splitting ${(finalSizeBytes / 1024 / 1024).toFixed(1)} MB video into 45 MB chunks...`);
-    fs.mkdirSync(chunksDir, { recursive: true });
-    const chunkPattern = path.join(chunksDir, 'chunk-%03d.mp4');
-    
-    // Estimate segment time based on duration and file size ratio
-    // Subtract 5 seconds as safety margin so chunks stay under 45 MB
-    const segmentTime = Math.max(5, Math.floor((CHUNK_SIZE_BYTES / finalSizeBytes) * totalDurationSec) - 5);
-    console.log(`   Estimated segment duration: ${segmentTime}s`);
-
-    // Use segment muxer — each segment is an independently playable MP4
-    const splitCmd = `"${ff}" -y -i "${outFile}" -c copy -f segment -segment_time ${segmentTime} -reset_timestamps 1 -segment_format mp4 "${chunkPattern}"`;
-    await execAsync(splitCmd, { maxBuffer: 200 * 1024 * 1024, timeout: 20 * 60 * 1000 });
-    const chunkFiles = fs.readdirSync(chunksDir).filter(f => f.startsWith('chunk-') && f.endsWith('.mp4')).sort();
-    console.log(`   ✅ Split into ${chunkFiles.length} chunks`);
-    // Store chunks dir path in a sidecar file so the upload script knows to use chunked mode
-    const sidecarPath = outFile.replace('.mp4', '-chunks.json');
-    fs.writeFileSync(sidecarPath, JSON.stringify({ chunksDir, chunkFiles }));
-  } else {
-    console.log(`   File is ${(finalSizeBytes / 1024 / 1024).toFixed(1)} MB — single upload (no chunking needed)`);
-  }
-
-  const mb = fs.existsSync(outFile) ? (fs.statSync(outFile).size / 1024 / 1024).toFixed(1) : '?';
-  console.log(`\n🏁 DONE — ${mb} MB → ${outFile}`);
-
-  // Clean up work dir
-  try { fs.rmSync(workDir, { recursive: true, force: true }); } catch {}
-}
-
-// ── Entry point ──────────────────────────────────────────────────────────────
-render().catch(err => {
-  console.error('❌ Render failed:', err.message ?? err);
-  process.exit(1);
-});
