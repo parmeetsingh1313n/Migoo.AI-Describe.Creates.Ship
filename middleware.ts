@@ -10,7 +10,9 @@ const isPublicRoute = createRouteMatcher([
     '/api/webhooks(.*)',
     '/api/inngest(.*)',
     '/api/user',
-    '/proxy(.*)'  // Remotion asset proxy
+    '/proxy(.*)',  // Remotion asset proxy
+    '/api/render-chapter(.*)',
+    '/api/render-chapter-callback(.*)'
 ])
 
 // Rate limiting store for middleware-level protection
