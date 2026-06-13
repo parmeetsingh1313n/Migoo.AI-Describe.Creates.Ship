@@ -1,7 +1,7 @@
 /**
  * Course Chapter Notes Generator
  * POST: Generate structured cornell-style notes from chapter slide HTML
- * Uses OpenRouter (Owl Alpha + GLM fallback) via the shared client
+ * Uses OpenRouter (Owl Alpha + Nex N2 Pro fallback) via the shared client
  */
 
 import { db } from "@/config/db";
@@ -234,7 +234,7 @@ Return ONLY the raw JSON object.`;
             return text;
         }
 
-        // ── Helper to call OpenRouter (GLM fallback) to plan beautiful image prompts ──
+        // ── Helper to call OpenRouter (fallback model) to plan beautiful image prompts ──
         async function callOpenRouterForPrompts(
             model: string,
             chapterTitle: string,
@@ -306,7 +306,7 @@ Return ONLY the raw JSON array of strings.`;
                     return arr.slice(0, 4);
                 }
             } catch (e) {
-                console.error("Failed to parse GLM prompts array:", e);
+                console.error("Failed to parse prompts array:", e);
             }
             
             // Safe fallback prompts
@@ -318,35 +318,40 @@ Return ONLY the raw JSON array of strings.`;
             ];
         }
 
-        // ── Phase 1: Parallel content generation (GLM) and prompt generation (GLM) ──
-        console.log(`🚀 Starting simultaneous generation: Notes (GLM-4.5) + Prompts (GLM-4.5)`);
+        // ── Phase 1: Parallel content generation (primary) and prompt generation (primary) ──
+        console.log(`🚀 Starting simultaneous generation: Notes + Prompts`);
         
         let notesRawText = "";
         let promptsList: string[] = [];
 
         try {
             const [notesResult, promptsResult] = await Promise.all([
-                // 1. Notes Content Generation (GLM with Owl fallback)
+                // 1. Notes Content Generation (Owl Alpha with Nex N2 Pro fallback)
                 (async () => {
                     try {
-                        return await callOpenRouter('z-ai/glm-4.5-air:free');
-                    } catch (primaryErr) {
-                        console.warn('⚠️ GLM-4.5 failed, falling back to Owl for notes:', primaryErr);
                         return await callOpenRouter('openrouter/owl-alpha');
+                    } catch (primaryErr) {
+                        console.warn('⚠️ Owl Alpha failed, falling back to Nex N2 Pro for notes:', primaryErr);
+                        return await callOpenRouter('nex-agi/nex-n2-pro:free');
                     }
                 })(),
-                // 2. Prompts Generation via GLM directly
+                // 2. Prompts Generation via Owl Alpha with Nex N2 Pro fallback
                 (async () => {
                     try {
-                        return await callOpenRouterForPrompts('z-ai/glm-4.5-air:free', chapterTitle, slideContents);
+                        return await callOpenRouterForPrompts('openrouter/owl-alpha', chapterTitle, slideContents);
                     } catch (err) {
-                        console.error('⚠️ GLM prompts generation failed, using defaults:', err);
-                        return [
-                            `Flat design educational infographic representing ${chapterTitle}, modern minimal, soft colors, white background, vector quality, no text`,
-                            `Concept map showing components of ${chapterTitle}, clean flat design vector, pastel harmonious color palette, light background, no text`,
-                            `Isometric 2D textbook diagram illustrating ${chapterTitle}, modern minimal, dusty teal and lavender colors, soft lighting, no text`,
-                            `Annotated abstract schematic of ${chapterTitle} systems, flat style vector illustration, clean lines, white background, no text`
-                        ];
+                        console.warn('⚠️ Owl Alpha prompts generation failed, trying Nex N2 Pro:', err);
+                        try {
+                            return await callOpenRouterForPrompts('nex-agi/nex-n2-pro:free', chapterTitle, slideContents);
+                        } catch (fallbackErr) {
+                            console.error('⚠️ Fallback prompts generation failed, using defaults:', fallbackErr);
+                            return [
+                                `Flat design educational infographic representing ${chapterTitle}, modern minimal, soft colors, white background, vector quality, no text`,
+                                `Concept map showing components of ${chapterTitle}, clean flat design vector, pastel harmonious color palette, light background, no text`,
+                                `Isometric 2D textbook diagram illustrating ${chapterTitle}, modern minimal, dusty teal and lavender colors, soft lighting, no text`,
+                                `Annotated abstract schematic of ${chapterTitle} systems, flat style vector illustration, clean lines, white background, no text`
+                            ];
+                        }
                     }
                 })()
             ]);

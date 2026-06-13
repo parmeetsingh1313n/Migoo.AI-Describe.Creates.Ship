@@ -29,6 +29,7 @@
 
 # Remotion transient build artifacts
 /remotion-public/
+/remotion-assets-mg/
 /public/tmp/
 
 # debug

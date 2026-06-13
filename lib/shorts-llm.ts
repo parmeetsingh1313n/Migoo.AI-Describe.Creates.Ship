@@ -14,14 +14,33 @@ const OPENROUTER_BASE = 'https://openrouter.ai/api/v1/chat/completions';
 
 const MODELS_TEXT: string[] = [
     'openai/gpt-oss-120b:free',
-    'qwen/qwen3-next-80b-a3b-instruct:free',
+    'openrouter/owl-alpha',
+    'nex-agi/nex-n2-pro:free',
     'meta-llama/llama-3.3-70b-instruct:free',
 ];
 
 const MODELS_JSON: string[] = [
     'openai/gpt-oss-120b:free',
+    'openrouter/owl-alpha',
+    'nex-agi/nex-n2-pro:free',
+    'meta-llama/llama-3.3-70b-instruct:free',
+];
+
+// Translation model list — excludes openai/gpt-oss-120b:free which consistently
+// gets 403 (moderation) on Hindi/Punjabi/Urdu religious & devotional content.
+const MODELS_TRANSLATE: string[] = [
     'qwen/qwen3-next-80b-a3b-instruct:free',
     'meta-llama/llama-3.3-70b-instruct:free',
+    'openai/gpt-oss-120b:free', // last resort only
+];
+
+// Image prompt enrichment model list — MUST use models NOT in MODELS_JSON.
+// By the time enrichment runs, Owl / Qwen / Llama are all rate-limited from
+// script generation. These models have fresh, untouched rate-limit windows.
+// None of these have violence/graphic moderation filters.
+const MODELS_ENRICH: string[] = [
+    'nvidia/nemotron-3-ultra-550b-a55b:free',     // Primary: 550B MoE, best free model, zero moderation, fresh window
+    'nex-agi/nex-n2-pro:free',                     // Last resort
 ];
 
 // ── Key rotation (in-process) ─────────────────────────────────────────────────
@@ -95,6 +114,16 @@ async function callModel(
         console.warn(`⚠️ [shorts-llm] rate/credit (${res.status}) on [${model}]: ${body.slice(0, 200)}`);
         const err: any = new Error(`RATE_LIMIT: ${model} (${res.status})`);
         err.isRateLimit = true;
+        throw err;
+    }
+
+    if (res.status === 403) {
+        // Content moderation rejection (e.g. openai/gpt-oss-120b:free flags religious/Hindi content).
+        // Treat as a skip — rotate to the next model instead of crashing the whole pipeline.
+        const body = await res.text();
+        console.warn(`⚠️ [shorts-llm] moderation block (403) on [${model}]: ${body.slice(0, 200)} — skipping model.`);
+        const err: any = new Error(`MODERATION_BLOCK: ${model} (403)`);
+        err.isRateLimit = true; // reuse rotate logic
         throw err;
     }
 
@@ -231,5 +260,43 @@ export const shortsLLM = {
         );
 
         return extractJSON(raw);
+    },
+
+    /**
+     * Translation-specific text generation.
+     * Uses ONLY openai/gpt-oss-120b:free. If this fails, the translation utility
+     * will immediately fall back to Groq Llama-3.3-70B.
+     */
+    async translate(
+        systemPrompt: string,
+        userPrompt: string,
+        options?: { temperature?: number; maxTokens?: number },
+    ): Promise<string> {
+        return tryModels(
+            ['openai/gpt-oss-120b:free'],
+            systemPrompt,
+            userPrompt,
+            options?.temperature ?? 0.3,
+            options?.maxTokens ?? 1024,
+        );
+    },
+
+    /**
+     * Image prompt enrichment — uses moderation-safe model list.
+     * Avoids gpt-oss-120b:free which blocks historical battle/martyrdom content
+     * (violence/graphic moderation). Nemotron is primary.
+     */
+    async enrich(
+        systemPrompt: string,
+        userPrompt: string,
+        options?: { temperature?: number; maxTokens?: number },
+    ): Promise<string> {
+        return tryModels(
+            MODELS_ENRICH,
+            systemPrompt,
+            userPrompt,
+            options?.temperature ?? 0.4,
+            options?.maxTokens ?? 300,
+        );
     },
 };

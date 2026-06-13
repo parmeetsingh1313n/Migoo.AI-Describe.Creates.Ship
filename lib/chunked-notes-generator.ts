@@ -33,22 +33,22 @@ interface ModelTier {
 
 const TIERS: ModelTier[] = [
     {
-        // Tier 1: High-quality 70B — safe for free tier (≤12K TPM)
-        model: "llama-3.3-70b-versatile",
-        maxContentChars: 16_000,
-        maxOutputTokens: 5_500,
-        headChars: 2_500,
-        tailChars: 1_200,
-        minCharsPerSection: 500,
+        // Tier 1: openrouter/owl-alpha (1M context)
+        model: "openrouter/owl-alpha",
+        maxContentChars: 1_200_000,
+        maxOutputTokens: 12_000,
+        headChars: 10_000,
+        tailChars: 5_000,
+        minCharsPerSection: 2_000,
     },
     {
-        // Tier 2: Fast 8B — 250K TPM, handles large docs easily
-        model: "llama-3.1-8b-instant",
-        maxContentChars: 55_000,
-        maxOutputTokens: 6_500,
-        headChars: 5_000,
-        tailChars: 2_500,
-        minCharsPerSection: 1_000,
+        // Tier 2: nex-agi/nex-n2-pro:free (fallback, 262K context)
+        model: "nex-agi/nex-n2-pro:free",
+        maxContentChars: 350_000, // SiliconFlow rejects ~480K chars as >262K tokens, so 350K is safe
+        maxOutputTokens: 12_000,
+        headChars: 10_000,
+        tailChars: 5_000,
+        minCharsPerSection: 2_000,
     },
 ];
 
@@ -138,33 +138,45 @@ function smartSample(content: string, tier: ModelTier): string {
     return sampled;
 }
 
-// ─── Groq Direct Call ─────────────────────────────────────────────────────────
+// ─── OpenRouter Direct Call ───────────────────────────────────────────────────
 
-async function callGroqDirect(
+function getOpenRouterKeys(): string[] {
+    const keys: string[] = [];
+    const base = process.env.OPENROUTER_API_KEY;
+    if (base) keys.push(base);
+    for (let i = 1; i <= 9; i++) {
+        const k = process.env[`OPENROUTER_API_KEY${i}`];
+        if (k) keys.push(k);
+    }
+    return keys;
+}
+
+async function callOpenRouterDirect(
     systemPrompt: string,
     userInput: string,
     model: string,
     maxTokens: number,
     retries = 3,
-    preferredKeyIndex = 0,
 ): Promise<any> {
-    const apiKeys = (process.env.GROQ_API_KEYS || process.env.GROQ_API_KEY || "")
-        .split(",").map(k => k.trim()).filter(Boolean);
+    const apiKeys = getOpenRouterKeys();
+    if (apiKeys.length === 0) throw new Error("No OPENROUTER_API_KEY configured");
 
-    if (apiKeys.length === 0) throw new Error("No GROQ API keys configured");
-
-    let keyIndex = preferredKeyIndex % apiKeys.length;
+    let keyIndex = 0;
     let lastError: any = null;
 
     for (let attempt = 0; attempt < retries; attempt++) {
         const apiKey = apiKeys[keyIndex % apiKeys.length];
+        const keyTag = apiKeys.length > 1 ? ` [key_${(keyIndex % apiKeys.length) + 1}/${apiKeys.length}]` : "";
 
         try {
-            const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+            console.log(`🤖 Querying OpenRouter (${model})${keyTag} (attempt ${attempt + 1}/${retries})...`);
+            const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
                 method: "POST",
                 headers: {
                     "Authorization": `Bearer ${apiKey}`,
                     "Content-Type": "application/json",
+                    "HTTP-Referer": "https://ai-video-course-generator.vercel.app",
+                    "X-Title": "AI Video Course Generator",
                 },
                 body: JSON.stringify({
                     model,
@@ -175,44 +187,38 @@ async function callGroqDirect(
                     temperature: 0.55,
                     max_tokens: maxTokens,
                     response_format: { type: "json_object" },
-                    stream: false,
                 }),
                 signal: AbortSignal.timeout(180_000),
             });
 
             if (!response.ok) {
                 const errText = await response.text();
-                const isRateLimit = response.status === 429 ||
+                const isRateLimit = response.status === 429 || response.status === 402 ||
                     errText.includes("rate_limit") ||
-                    errText.includes("tokens per minute");
+                    errText.includes("credit") ||
+                    errText.includes("payment");
                 const isTooLarge = response.status === 413 ||
-                    errText.includes("too large") ||
-                    errText.includes("Request too large");
+                    errText.includes("too large");
 
                 if ((isRateLimit || isTooLarge) && attempt < retries - 1) {
                     if (isTooLarge) {
-                        // Signal caller to try next tier — throw a special error
                         throw Object.assign(
                             new Error(`TOO_LARGE: ${errText}`),
                             { isTooLarge: true }
                         );
                     }
-                    const retryMatch = errText.match(/try again in ([\d.]+)s/i);
-                    const waitMs = retryMatch
-                        ? Math.ceil(parseFloat(retryMatch[1]) * 1000) + 1000
-                        : 12_000;
-                    keyIndex = (keyIndex + 1) % apiKeys.length;
-                    console.log(`  🔄 Rate limit → key ${keyIndex + 1}, waiting ${Math.ceil(waitMs / 1000)}s...`);
-                    await new Promise(r => setTimeout(r, waitMs));
+                    keyIndex++;
+                    console.log(`  🔄 Rate/Credit limit → key ${keyIndex + 1}...`);
+                    await new Promise(r => setTimeout(r, 3000));
                     continue;
                 }
 
-                throw new Error(`Groq API error (${response.status}): ${errText}`);
+                throw new Error(`OpenRouter API error (${response.status}): ${errText}`);
             }
 
             const data = await response.json();
             const content = data.choices?.[0]?.message?.content?.trim() || "";
-            if (!content) throw new Error("Empty response from Groq");
+            if (!content) throw new Error("Empty response from OpenRouter");
 
             const jsonStart = content.search(/[{[]/);
             if (jsonStart === -1) throw new Error("No JSON in response");
@@ -220,32 +226,19 @@ async function callGroqDirect(
             try {
                 return JSON.parse(content.substring(jsonStart));
             } catch {
-                // Try to fix trailing commas
                 const fixed = content.substring(jsonStart).replace(/,(\s*[}\]])/g, "$1");
                 return JSON.parse(fixed);
             }
 
         } catch (err: any) {
             lastError = err;
-
-            // Bubble up TOO_LARGE immediately — caller will switch tiers
             if (err.isTooLarge) throw err;
-
-            const isRateLimit = err.message?.includes("rate_limit") ||
-                err.message?.includes("429") ||
-                err.message?.includes("tokens per minute");
-
-            if (attempt < retries - 1) {
-                keyIndex = (keyIndex + 1) % apiKeys.length;
-                const wait = isRateLimit ? 12_000 : 3_000;
-                console.log(`  🔄 Error (attempt ${attempt + 1}), rotating to key ${keyIndex + 1}, waiting ${wait / 1000}s...`);
-                await new Promise(r => setTimeout(r, wait));
-                continue;
-            }
+            keyIndex++;
+            await new Promise(r => setTimeout(r, 2000));
         }
     }
 
-    throw lastError || new Error("All retries exhausted");
+    throw lastError || new Error("All OpenRouter retries exhausted");
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
@@ -272,6 +265,9 @@ Also include at the top level:
 - "readingTime": estimated reading time in minutes
 ${assetEmbedInstructions ? '- "embeddedAssets": array of { "assetIndex": number, "placement": string, "caption": string }' : ""}
 
+CRITICAL HEADING RULE:
+Do NOT prefix any headings, section titles, steps, or names with numbers or indices (e.g. use "Introduction" instead of "1. Introduction" or "Section 1: Introduction"). Keep all heading/title strings clean.
+
 IMPORTANT: The content below is sampled from a larger document. Generate COMPREHENSIVE notes that cover ALL major topics visible in the excerpts. Be detailed — every section should have rich, full-sentence content.
 
 Return ONLY valid JSON. No markdown. Start with { and end with }.`;
@@ -294,7 +290,7 @@ ${assetEmbedInstructions}`;
 
         try {
             const { systemPrompt, userInput } = buildPrompts(sampledContent);
-            const result = await callGroqDirect(
+            const result = await callOpenRouterDirect(
                 systemPrompt,
                 userInput,
                 tier.model,

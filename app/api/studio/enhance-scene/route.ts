@@ -1,4 +1,4 @@
-import { groq } from "@/config/groq";
+import { shortsLLM } from "@/lib/shorts-llm";
 import { NextRequest, NextResponse } from "next/server";
 
 export async function POST(req: NextRequest) {
@@ -73,13 +73,13 @@ ${nextBlock}
 
 Rewrite ONLY the current scene's narration following the instruction, maintaining narrative continuity with the surrounding scenes.`;
 
-        const result = await groq.json(systemPrompt, userPrompt, {
+        const result = await shortsLLM.json(systemPrompt, userPrompt, {
             temperature: 0.7,
             maxTokens: 4096,
         });
 
         const rawText = typeof result === 'string' ? result : JSON.stringify(result);
-        console.log("📤 Groq rawText (first 300):", JSON.stringify(rawText.slice(0, 300)));
+        console.log("📤 OpenRouter rawText (first 300):", JSON.stringify(rawText.slice(0, 300)));
 
         // ── Extraction pipeline ────────────────────────────────────────────────
         let narration: string | null = null;

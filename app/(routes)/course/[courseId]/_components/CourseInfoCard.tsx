@@ -284,7 +284,7 @@ function CourseInfoCard({ course }: Props) {
                                     ref={playerRef}
                                     component={CourseComposition}
                                     durationInFrames={totalFrames || 30}
-                                    compositionWidth={1280}
+                                    compositionWidth={1440}
                                     compositionHeight={720}
                                     fps={fps}
                                     playbackRate={playbackSpeed}

@@ -35,7 +35,7 @@ type Slide = {
 const AUTO_SCALE_SCRIPT = `
 <script>
 (function() {
-  var VIEWPORT_W = 1280;
+  var VIEWPORT_W = 1440;
   var VIEWPORT_H = 720;
   var MIN_SCALE = 0.25;
   var MAX_SCALE = 1.5;
@@ -120,37 +120,34 @@ const AUTO_SCALE_SCRIPT = `
     var naturalH = wrapper.scrollHeight;
     var naturalW = wrapper.scrollWidth;
 
-    // Baseline slide dimensions are 1280x720. If content is smaller or collapses due to
-    // absolutely positioned or floated elements, treat the baseline as 720px/1280px.
-    // This resolves layout collapses and prevents sparse slides from scaling up excessively.
-    if (naturalH < VIEWPORT_H) naturalH = VIEWPORT_H;
-    if (naturalW < VIEWPORT_W) naturalW = VIEWPORT_W;
+    // Baseline slide dimensions are 1280x720. If content collapses (e.g. < 100px),
+    // treat the baseline as 720px/1280px.
+    var measureH = naturalH;
+    if (measureH < 100) measureH = VIEWPORT_H;
+    var measureW = naturalW;
+    if (measureW < 100) measureW = VIEWPORT_W;
 
-    // ── OVERFLOW PREVENTION: Never zoom out below scale = 1.0 ──────────────────
-    // If content overflows 720px/1280px, it is CLIPPED by the CSS on <section>
-    // (overflow:hidden; height:720px). We do NOT zoom out — that makes text tiny
-    // and unreadable. Cap naturalH/W to viewport so scale never drops below 1.
-    if (naturalH > VIEWPORT_H) naturalH = VIEWPORT_H;
-    if (naturalW > VIEWPORT_W) naturalW = VIEWPORT_W;
-
-    var scaleY = VIEWPORT_H / Math.max(naturalH, 1);
-    var scaleX = VIEWPORT_W / Math.max(naturalW, 1);
+    var scaleY = VIEWPORT_H / Math.max(measureH, 1);
+    var scaleX = VIEWPORT_W / Math.max(measureW, 1);
     scale = Math.min(scaleX, scaleY);
-    scale = Math.min(scale, MAX_SCALE);
+    
+    // We want to scale DOWN overflowing content, but NEVER scale UP sparse content beyond 1.0
+    // to keep layout clean and readable.
+    scale = Math.min(scale, 1.0);
     scale = Math.max(scale, MIN_SCALE);
 
     if (Math.abs(scale - lastScale) < 0.002) return;
     lastScale = scale;
 
-    var scaledH = naturalH * scale;
+    var scaledH = measureH * scale;
     var offsetY = Math.max(0, (VIEWPORT_H - scaledH) / 2);
-    var scaledW = naturalW * scale;
+    var scaledW = measureW * scale;
     var offsetX = Math.max(0, (VIEWPORT_W - scaledW) / 2);
 
     wrapper.style.transformOrigin = 'top left';
     wrapper.style.transform = 'translate(' + offsetX + 'px, ' + offsetY + 'px) scale(' + scale + ')';
     wrapper.style.width = VIEWPORT_W + 'px';
-    wrapper.style.height = naturalH + 'px';
+    wrapper.style.height = measureH + 'px';
     wrapper.style.overflow = 'visible';
   }
 
@@ -918,21 +915,27 @@ export const injectRuntime = (html: string): string => {
       margin-bottom: 8px !important; display: block !important;
     }
 
-    /* ── HARD HEIGHT CLAMP: clips overflow, PREVENTS zoom-out ───────────────── */
-    /* The auto-scale script is patched to never zoom below scale=1.0.           */
-    /* Content that exceeds 720px is clipped here — not zoomed out or scrolled.  */
-    /* This guarantees slides always fill 1280×720 at full legible size.          */
+    /* ── DYNAMIC HEIGHT FOR MEASUREMENT & DYNAMIC AUTO-SCALE ────────────────── */
+    /* We remove hard height/max-height clamps so the script can measure the     */
+    /* natural height of overflowing slides. The transform fits content in        */
+    /* 1440×720.                                                                  */
     section {
-      width: 1280px !important;
-      height: 720px !important;
-      max-height: 720px !important;
-      overflow: hidden !important;
+      width: 1440px !important;
       box-sizing: border-box !important;
     }
-    /* Clip the primary content wrapper div inside section */
+    /*
+     * DO NOT set height: 100% on all section > div children.
+     * Slides can have multiple sibling divs directly inside <section>
+     * (decorative circles, badge fragments, main layout, footer, etc.).
+     * Forcing height: 100% on ALL of them makes fragment wrapper divs
+     * (e.g. the badges div with data-fragment-index='0') expand to 720px,
+     * pushing the title, subtitle and all main content below the fold.
+     *
+     * Only ensure width is 100% here; individual slides that need their
+     * inner wrapper to be 720px tall already declare that in inline styles.
+     */
     section > div {
-      max-height: 720px !important;
-      overflow: hidden !important;
+      width: 100% !important;
       box-sizing: border-box !important;
     }
     /* Full-bleed / watermark absolute containers must respect 720px */
@@ -943,7 +946,7 @@ export const injectRuntime = (html: string): string => {
     }
   </style>
 </head>
-<body${bodyAttrs} style="margin:0; padding:0; width:1280px; height:720px; overflow:hidden;">
+<body${bodyAttrs} style="margin:0; padding:0; width:1440px; height:720px; overflow:hidden;">
   ${content}
   ${AUTO_SCALE_SCRIPT}
   ${FRAGMENT_RUNTIME_SCRIPT}
@@ -979,7 +982,7 @@ const StaticSlideIFrame = memo(({
       onLoad={onLoad}
       sandbox="allow-scripts allow-same-origin"
       style={{
-        width: 1280,
+        width: 1440,
         height: 720,
         border: "none",
         display: "block",

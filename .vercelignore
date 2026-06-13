@@ -1,0 +1,32 @@
+# ── Puppeteer / Chromium (not needed at runtime — rendering runs in GitHub Actions) ──
+node_modules/puppeteer/.local-chromium/
+node_modules/puppeteer/.local-browsers/
+node_modules/puppeteer-core/.local-chromium/
+node_modules/puppeteer-core/.local-browsers/
+
+# ── ffmpeg-static binary ──────────────────────────────────────────────────────────
+node_modules/ffmpeg-static/ffmpeg
+node_modules/ffmpeg-static/ffmpeg.exe
+
+# ── Remotion compositor native binaries ──────────────────────────────────────────
+node_modules/@remotion/compositor-win32-x64-msvc/
+node_modules/@remotion/compositor-linux-x64-gnu/
+node_modules/@remotion/compositor-linux-x64-musl/
+node_modules/@remotion/compositor-linux-arm64-gnu/
+node_modules/@remotion/compositor-linux-arm64-musl/
+node_modules/@remotion/compositor-darwin-x64/
+node_modules/@remotion/compositor-darwin-arm64/
+node_modules/@remotion/renderer/
+node_modules/@remotion/bundler/
+node_modules/@remotion/cli/
+
+# ── Local build artifacts & render output ────────────────────────────────────────
+public/renders/
+public/tmp/
+tmp/
+out/
+
+# ── Dev / debug scripts ───────────────────────────────────────────────────────────
+check-slides.ts
+check-db.ts
+*.log

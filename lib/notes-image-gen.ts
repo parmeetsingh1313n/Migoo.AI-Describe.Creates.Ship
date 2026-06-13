@@ -40,7 +40,87 @@ function getFirstLeonardoKey(): string {
  * Uses llama-3.1-8b-instant (higher TPM) for this lightweight planning task
  * to avoid rate-limiting after the main note generation.
  */
-async function planImagesWithGroq(
+function getOpenRouterKeys(): string[] {
+    const keys: string[] = [];
+    const base = process.env.OPENROUTER_API_KEY;
+    if (base) keys.push(base);
+    for (let i = 1; i <= 9; i++) {
+        const k = process.env[`OPENROUTER_API_KEY${i}`];
+        if (k) keys.push(k);
+    }
+    return keys;
+}
+
+async function callOpenRouterDirect(
+    systemPrompt: string,
+    userInput: string,
+    model: string,
+    maxTokens: number,
+    retries = 3,
+): Promise<any> {
+    const apiKeys = getOpenRouterKeys();
+    if (apiKeys.length === 0) throw new Error("No OPENROUTER_API_KEY configured");
+
+    let keyIndex = 0;
+    let lastError: any = null;
+
+    for (let attempt = 0; attempt < retries; attempt++) {
+        const apiKey = apiKeys[keyIndex % apiKeys.length];
+        const keyTag = apiKeys.length > 1 ? ` [key_${(keyIndex % apiKeys.length) + 1}/${apiKeys.length}]` : "";
+
+        try {
+            console.log(`🤖 Querying OpenRouter (${model})${keyTag} (attempt ${attempt + 1}/${retries})...`);
+            const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+                method: "POST",
+                headers: {
+                    "Authorization": `Bearer ${apiKey}`,
+                    "Content-Type": "application/json",
+                    "HTTP-Referer": "https://ai-video-course-generator.vercel.app",
+                    "X-Title": "AI Video Course Generator",
+                },
+                body: JSON.stringify({
+                    model,
+                    messages: [
+                        { role: "system", content: systemPrompt },
+                        { role: "user", content: userInput },
+                    ],
+                    temperature: 0.6,
+                    max_tokens: maxTokens,
+                    response_format: { type: "json_object" },
+                }),
+                signal: AbortSignal.timeout(180_000),
+            });
+
+            if (!response.ok) {
+                const errText = await response.text();
+                throw new Error(`OpenRouter API error (${response.status}): ${errText}`);
+            }
+
+            const data = await response.json();
+            const content = data.choices?.[0]?.message?.content?.trim() || "";
+            if (!content) throw new Error("Empty response from OpenRouter");
+
+            const jsonStart = content.search(/[{[]/);
+            if (jsonStart === -1) throw new Error("No JSON in response");
+
+            try {
+                return JSON.parse(content.substring(jsonStart));
+            } catch {
+                const fixed = content.substring(jsonStart).replace(/,(\s*[}\]])/g, "$1");
+                return JSON.parse(fixed);
+            }
+
+        } catch (err: any) {
+            lastError = err;
+            keyIndex++;
+            await new Promise(r => setTimeout(r, 2000));
+        }
+    }
+
+    throw lastError || new Error("All OpenRouter retries exhausted");
+}
+
+async function planImagesWithOpenRouter(
     title: string,
     sections: any[],
     totalPages: number,
@@ -72,40 +152,24 @@ Total pages: ${totalPages}
 Page breakdown:
 ${pagesSummary}`;
 
-    // Retry up to 3 times with increasing backoff to handle TPM rate limits
-    const MAX_RETRIES = 3;
-    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    const models = ["openrouter/owl-alpha", "nex-agi/nex-n2-pro:free"];
+    let lastError: any = null;
+
+    for (const model of models) {
         try {
-            // Wait before calling — the main note generation just consumed most of the TPM budget
-            const cooldownMs = attempt === 1 ? 3000 : attempt * 5000;
-            console.log(`⏳ Groq planning: waiting ${cooldownMs / 1000}s cooldown (attempt ${attempt}/${MAX_RETRIES})...`);
-            await new Promise((r) => setTimeout(r, cooldownMs));
-
-            const parsed = await groq.json(systemPrompt, userMsg, {
-                model: "llama-3.1-8b-instant", // Higher TPM (131K vs 12K) for this lightweight task
-                temperature: 0.6,
-                maxTokens: 1024,
-            });
-
+            console.log(`🧠 OpenRouter planning image placements using ${model}...`);
+            const parsed = await callOpenRouterDirect(systemPrompt, userMsg, model, 1024, 3);
             const images: Array<{ pageIndex: number; prompt: string }> = parsed?.images || [];
             return images
                 .filter((img) => typeof img.pageIndex === "number" && typeof img.prompt === "string" && img.prompt.length > 5)
                 .slice(0, totalPages * 2);
         } catch (err: any) {
-            const is429 = err?.message?.includes("429") || err?.message?.includes("rate_limit");
-            if (is429 && attempt < MAX_RETRIES) {
-                console.warn(`⚠️ Groq rate limited (attempt ${attempt}/${MAX_RETRIES}), retrying after backoff...`);
-                continue;
-            }
-            console.warn("⚠️ Groq image planning failed, using default 1-per-page:", err);
-            return Array.from({ length: totalPages }, (_, pi) => ({
-                pageIndex: pi,
-                prompt: `Clean flat educational illustration for study notes about "${title}". Page ${pi + 1} concept diagram with labeled elements, modern minimal style, white background, soft colors.`,
-            }));
+            console.warn(`⚠️ OpenRouter image planning failed on ${model}:`, err.message);
+            lastError = err;
         }
     }
 
-    // Fallback (shouldn't reach here, but just in case)
+    console.warn("⚠️ All OpenRouter models failed for image planning, using default 1-per-page:", lastError);
     return Array.from({ length: totalPages }, (_, pi) => ({
         pageIndex: pi,
         prompt: `Clean flat educational illustration for study notes about "${title}". Page ${pi + 1} concept diagram with labeled elements, modern minimal style, white background, soft colors.`,
@@ -164,9 +228,9 @@ export async function generateNotesImages(noteId: string): Promise<{
             }
         }
 
-        // ── Step 3: Plan images with Groq ────────────────────
-        console.log("🧠 Groq planning image placements...");
-        const imagePlan = await planImagesWithGroq(
+        // ── Step 3: Plan images with OpenRouter ──────────────
+        console.log("🧠 OpenRouter planning image placements...");
+        const imagePlan = await planImagesWithOpenRouter(
             project.title,
             sections,
             totalPages,

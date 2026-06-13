@@ -37,7 +37,32 @@ export default function StudioStageSource({ seriesList, seriesId, setSeriesId, n
     const [viralAngles, setViralAngles] = useState<string[]>(DEFAULT_ANGLES)
     const [loadingAngles, setLoadingAngles] = useState(false)
 
+    const [statusText, setStatusText] = useState("Initializing search...")
+
     const seriesTitle = seriesList.find(s => s.seriesId === seriesId)?.title || niche?.replace("custom:", "").trim() || "Your Niche"
+
+    // Rotate status messages when loading
+    useEffect(() => {
+        if (!loadingAngles) return
+
+        const messages = [
+            "🔍 Migoo AI is querying Wikipedia & Tavily...",
+            "📰 Crawling authority web sources...",
+            "🧠 Distilling key facts & untold secrets...",
+            "✨ Writing high-performing viral titles...",
+            "🚀 Polishing click-worthy hooks...",
+        ]
+
+        let idx = 0
+        setStatusText(messages[0])
+
+        const interval = setInterval(() => {
+            idx = (idx + 1) % messages.length
+            setStatusText(messages[idx])
+        }, 2200)
+
+        return () => clearInterval(interval)
+    }, [loadingAngles])
 
     useEffect(() => {
         if (!niche || tab !== "ai") return
@@ -144,8 +169,14 @@ export default function StudioStageSource({ seriesList, seriesId, setSeriesId, n
                             </p>
                             <div className="grid grid-cols-2 gap-2 relative">
                                 {loadingAngles && (
-                                    <div className="absolute inset-0 bg-white/60 backdrop-blur-[2px] z-10 flex items-center justify-center rounded-lg">
-                                        <div className="w-5 h-5 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
+                                    <div className="absolute inset-0 bg-white/70 dark:bg-black/60 backdrop-blur-[3px] z-10 flex flex-col items-center justify-center gap-3 rounded-lg border border-primary/10 transition-all duration-300">
+                                        <div className="relative flex items-center justify-center">
+                                            <div className="w-8 h-8 border-4 border-primary/20 border-t-primary rounded-full animate-spin" />
+                                            <div className="absolute w-4 h-4 bg-primary/25 rounded-full animate-pulse" />
+                                        </div>
+                                        <p className="text-[11px] font-bold text-primary/90 animate-pulse tracking-wide select-none uppercase">
+                                            {statusText}
+                                        </p>
                                     </div>
                                 )}
                                 {viralAngles.map((angle, i) => (

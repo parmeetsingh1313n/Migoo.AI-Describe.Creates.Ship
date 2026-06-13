@@ -1,0 +1,15 @@
+# Ignore large directories in the public folder to speed up bundling and prevent 404 errors during rendering
+public/renders
+public/renders/**
+public/uploads
+public/uploads/**
+public/thumbnails
+public/thumbnails/**
+
+# Ignore build artifacts and dependencies
+.next
+.next/**
+node_modules
+node_modules/**
+.venv
+.venv/**

@@ -986,8 +986,13 @@ export function resolveLocalUrl(url: string | undefined): string | undefined {
     // Strip stale /public/tmp/ and /public/avatars/ double-prefix
     cleanUrl = cleanUrl.replace(/\/public\/tmp\//g, '/tmp/');
     cleanUrl = cleanUrl.replace(/\/public\/avatars\//g, '/avatars/');
-    // Update port to the active window origin (browser only)
-    if (typeof window !== 'undefined' && window.location) {
+    // IMPORTANT: Do NOT rewrite URLs that are already on port 3000.
+    // Port 3000 is the Next.js dev server which always serves public/ and always
+    // has the dynamically downloaded scene assets (music, voiceover, images, videos).
+    // Rewriting :3000 → :3001 (Remotion's webpack server) causes 404 because
+    // Remotion's temp bundle dir never contains copies of these dynamic files.
+    const isNextJsAsset = cleanUrl.includes(':3000/');
+    if (!isNextJsAsset && typeof window !== 'undefined' && window.location) {
       cleanUrl = cleanUrl.replace(/^https?:\/\/[^\/]+/, window.location.origin);
     }
     return cleanUrl;

@@ -37,14 +37,19 @@ const nextConfig: NextConfig = {
     unoptimized: true,
   },
 
-  // ── Keep all Remotion packages out of webpack's bundle ─────────────────────
-  // @remotion/renderer and @remotion/bundler load platform-specific native
-  // compositor binaries at runtime. Webpack can't resolve the Linux paths on
-  // Windows (and vice-versa), causing "Module not found" build errors.
+  // ── Keep heavy server-only packages out of webpack's bundle ────────────────
+  // These packages load platform-specific native binaries at runtime.
+  // Webpack can't resolve Linux paths on Windows (and vice-versa).
   // Marking them as serverExternalPackages lets Node.js require() them directly.
+  // NOTE: @remotion/renderer, @remotion/bundler, ffmpeg-static, and puppeteer
+  // are in devDependencies so Vercel doesn't install them at all in production.
+  // They only run in GitHub Actions (render-chapter-gh.js) and local dev.
   serverExternalPackages: [
+    // Remotion (devDep on Vercel — still mark external in case local dev imports them)
+    'remotion',
     '@remotion/renderer',
     '@remotion/bundler',
+    '@remotion/cli',
     '@remotion/compositor-win32-x64-msvc',
     '@remotion/compositor-linux-x64-gnu',
     '@remotion/compositor-linux-x64-musl',

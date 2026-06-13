@@ -18,6 +18,7 @@ import {
     Sequence,
     interpolate,
     spring,
+    staticFile,
     useCurrentFrame,
     useVideoConfig,
 } from 'remotion';
@@ -56,13 +57,36 @@ const SmartIcon: React.FC<{ name?: string; color?: string; size?: number; style?
     return <ValidIcon color={color} size={size} strokeWidth={1.5} style={{ filter: `drop-shadow(0 0 15px ${color}80)`, ...style }} />;
 };
 
+// ─── Asset URL Resolver ─────────────────────────────────────────────────────
+// Relative paths (e.g. "tmp/assets_mg_.../scene_0.mp4") are stored in props
+// so they are port-agnostic. staticFile() maps them to the correct URL in
+// both browser preview and npx remotion render.
+const resolveAssetUrl = (url: string): string => {
+    if (!url) return '';
+
+    // Pre-formed absolute URL — sanitize /public/ prefix and return.
+    // Remotion on Windows sometimes generates http://localhost:PORT/public/tmp/...
+    // but Next.js serves public/ files at the root (no /public/ prefix in the URL).
+    if (url.startsWith('http') || url.startsWith('https') || url.startsWith('file:') || url.startsWith('blob:')) {
+        return url.replace(/\/public\//g, '/');
+    }
+
+    // Relative path — strip leading slash and any public/ prefix.
+    // staticFile() expects paths relative to the public/ directory, not including it.
+    let clean = url.replace(/^\//, '');
+    if (clean.startsWith('public/')) clean = clean.slice('public/'.length);
+
+    // staticFile() on Windows returns "http://localhost:PORT/public/tmp/..."
+    // Strip /public/ from the resolved URL so the correct path is used.
+    const resolved = staticFile(clean);
+    return resolved.replace(/\/public\//g, '/');
+};
+
+
 // ─── Smart Media Component ───────────────────────────────────────────────────
-// All MP4s served from /public/tmp/ are pre-transcoded to H.264 by ffmpeg-static
-// in the Inngest pipeline, so they are safe for OffthreadVideo.
-// Remote MP4 URLs (e.g. Pexels) are also safe H.264. 
-// Only raw Kling CDN URLs (fal.media, klingai) are blocked as a safety net.
 const Img: React.FC<React.ComponentProps<typeof RemotionImg>> = (props) => {
-    const src = props.src as string;
+    const raw = props.src as string;
+    const src = resolveAssetUrl(raw);
     if (!src) return null;
     const isVideo = src.endsWith('.mp4') || src.endsWith('.webm') || src.includes('video-files');
     if (isVideo) {

@@ -1,58 +1,72 @@
-import { aiFallback } from "@/config/ai-fallback";
+import { shortsLLM } from "@/lib/shorts-llm";
+import { searchWeb } from "@/lib/web-search";
 import { NextRequest, NextResponse } from "next/server";
 
 export async function POST(req: NextRequest) {
     try {
         const { niche, seriesTitle } = await req.json();
 
-        const systemPrompt = `You are an expert YouTube title creator. Given a channel's overarching niche and a specific Series Title, generate 8 highly compelling, click-worthy, and unique YouTube video titles explicitly tailored to the topic of that specific series.
-        For example, if the Series Title is "Amritsar Historical Facts", all 8 titles MUST specifically be about Amritsar history and not just generic world history. Focus entirely on the Series Title context.
-        The titles should be realistic, highly engaging, and look exactly like top-performing YouTube video titles.
-        Do NOT include emojis or bullet points.
+        const topic = seriesTitle || niche || "general content";
 
-        RULES:
-        1. Output ONLY a valid JSON object wrapped in <json> and </json> tags.
-        2. Create exactly 8 video titles.
-
-        JSON SCHEMA:
-        <json>
-        {
-            "titles": [
-                "I Tried The 7-Day Dopamine Detox (Here's What Happened)",
-                "The Hidden Truth Behind Ancient Rome's Collapse",
-                "Why 99% Of Startups Fail In Their First Year",
-                "How To Build Muscle Twice As Fast (Scientifically Proven)"
-            ]
+        // ── RAG: Fast web search (no deep crawl) to discover real, trending subtopics ──
+        let webContext = "";
+        try {
+            console.log(`🌐 [generate-angles] RAG search for topic ideas: "${topic}"`);
+            const research = await searchWeb(
+                `${topic} unique lesser known facts mysteries hidden history secrets`,
+                { deepCrawl: false }   // fast mode — just snippets, no full crawl
+            );
+            webContext = research.contextBlock || "";
+            console.log(`✅ [generate-angles] RAG done — ${research.sources.length} sources`);
+        } catch (err: any) {
+            console.warn(`⚠️ [generate-angles] RAG search failed, proceeding without context: ${err.message}`);
         }
-        </json>`;
 
-        const userPrompt = `Overarching Niche: "${niche || 'general content'}"
-        Specific Series Title: "${seriesTitle || 'general content'}"
-        Generate 8 unique viral video titles perfectly scoped to the Specific Series Title.`;
+        const systemPrompt = `You are an expert viral YouTube Shorts title creator. Given a channel niche and a specific Series Title, generate 8 highly compelling, click-worthy, and unique video titles explicitly tailored to the Series Title.
 
-        const result = await aiFallback.json(systemPrompt, userPrompt, {
-            temperature: 0.8,
-            maxOutputTokens: 1024,
-            // Structured output — Groq returns JSON via prompt instructions
-            schema: {
-                type: 'object',
-                properties: {
-                    titles: {
-                        type: 'array',
-                        items: { type: 'string' },
-                        minItems: 8,
-                        maxItems: 8,
-                    },
-                },
-                required: ['titles'],
-            },
+RULES:
+1. EVERY title MUST be specifically about "${topic}" — not generic world history, not other topics.
+2. Use the REAL-TIME WEB RESEARCH block below to discover NEW, SPECIFIC, and LESSER-KNOWN angles.
+3. Each title must target a DIFFERENT specific angle — no repetitive themes.
+4. Titles should feel like real top-performing YouTube Shorts titles: shocking, specific, and curiosity-driven.
+5. Do NOT include emojis or bullet points in the titles themselves.
+6. Output ONLY a valid JSON object. No markdown, no extra text. Start with { and end with }.
+
+JSON SCHEMA:
+{
+  "titles": [
+    "Title 1",
+    "Title 2",
+    "Title 3",
+    "Title 4",
+    "Title 5",
+    "Title 6",
+    "Title 7",
+    "Title 8"
+  ]
+}`;
+
+        const userPrompt = `Series Niche: "${niche || "general content"}"
+Specific Series Title: "${topic}"
+
+${webContext ? `REAL-TIME WEB RESEARCH (use these to discover fresh, specific angles):\n${webContext}` : ""}
+
+Generate 8 unique, viral, click-worthy video titles perfectly scoped to "${topic}".
+Each must focus on a DIFFERENT lesser-known, surprising, or controversial sub-angle of this topic.
+Output ONLY valid JSON.`;
+
+        const result = await shortsLLM.json(systemPrompt, userPrompt, {
+            temperature: 0.85,
+            maxTokens: 1024,
         });
 
-        if (!result.titles || !Array.isArray(result.titles) || result.titles.length === 0) {
-            throw new Error("Invalid format returned by AI");
+        const titles: string[] = Array.isArray(result?.titles) ? result.titles : [];
+
+        if (titles.length === 0) {
+            throw new Error("Invalid format returned by AI — no titles array");
         }
 
-        return NextResponse.json({ angles: result.titles.slice(0, 8) });
+        return NextResponse.json({ angles: titles.slice(0, 8) });
     } catch (err: any) {
         console.error("studio/generate-angles error:", err);
         return NextResponse.json({ error: err.message }, { status: 500 });
