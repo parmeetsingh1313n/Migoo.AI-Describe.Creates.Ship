@@ -55,16 +55,14 @@ async function upload() {
 
     const storage = new sdk.Storage(client);
 
-    // ── Upload ───────────────────────────────────────────────────────────────
     console.log(`☁️  Uploading ${filePath} → Appwrite Storage (bucket: ${bucketId})...`);
-    const fileBuffer = fs.readFileSync(filePath);
     const filename   = `${videoId}.mp4`;
 
     try {
         const result = await storage.createFile({
             bucketId,
             fileId: sdk.ID.unique(),
-            file: InputFile.fromBuffer(fileBuffer, filename, 'video/mp4'),
+            file: InputFile.fromPath(filePath, filename),
         });
 
         // Construct public view URL
