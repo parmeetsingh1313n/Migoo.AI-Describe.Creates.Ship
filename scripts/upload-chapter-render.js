@@ -55,13 +55,12 @@ async function upload() {
   console.log(`☁️  Uploading chapter-${chapterId}.mp4 (${fileSizeMB} MB) → Appwrite bucket ${bucketId}`);
 
   try {
-    const fileBuffer = fs.readFileSync(filePath);
     const filename   = `chapter-${chapterId}.mp4`;
 
     const result = await storage.createFile({
       bucketId,
       fileId: `chapter-${chapterId}`.replace(/[^a-zA-Z0-9._-]/g, '-').slice(0, 36),
-      file: InputFile.fromBuffer(fileBuffer, filename, 'video/mp4'),
+      file: InputFile.fromPath(filePath, filename),
     });
 
     const videoUrl = `${endpoint}/storage/buckets/${bucketId}/files/${result.$id}/view?project=${projectId}`;
