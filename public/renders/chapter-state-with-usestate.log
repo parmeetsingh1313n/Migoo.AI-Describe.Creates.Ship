@@ -84,3 +84,37 @@
 [2026-06-13T08:34:27.562Z] 🔗 Concatenating 7 slides...
 [2026-06-13T08:34:30.148Z] 🗜 Compressing video (CRF 35)...
 [2026-06-13T08:34:30.150Z]   Raw size: 77.9 MB
+[2026-06-13T08:44:44.722Z] 🚀 Started. 7 slides, FFmpeg+Puppeteer mode
+[2026-06-13T08:44:44.756Z] 📽 Slide 1/7 — 249.1s
+[2026-06-13T08:44:44.884Z]   🎵 Audio ready
+[2026-06-13T08:44:44.897Z]   🎞 6 reveal state(s)
+[2026-06-13T08:46:23.231Z]   ✅ Slide 1 done
+[2026-06-13T08:46:23.252Z] 📽 Slide 2/7 — 350.0s
+[2026-06-13T08:46:23.257Z]   🎵 Audio ready
+[2026-06-13T08:46:23.260Z]   🎞 9 reveal state(s)
+[2026-06-13T08:48:17.306Z]   ✅ Slide 2 done
+[2026-06-13T08:48:17.313Z] 📽 Slide 3/7 — 503.7s
+[2026-06-13T08:48:17.317Z]   🎵 Audio ready
+[2026-06-13T08:48:17.319Z]   🎞 11 reveal state(s)
+[2026-06-13T08:50:41.773Z]   ✅ Slide 3 done
+[2026-06-13T08:50:41.778Z] 📽 Slide 4/7 — 417.4s
+[2026-06-13T08:50:41.780Z]   🎵 Audio ready
+[2026-06-13T08:50:41.782Z]   🎞 10 reveal state(s)
+[2026-06-13T08:52:53.690Z]   ✅ Slide 4 done
+[2026-06-13T08:52:53.699Z] 📽 Slide 5/7 — 445.3s
+[2026-06-13T08:52:53.704Z]   🎵 Audio ready
+[2026-06-13T08:52:53.708Z]   🎞 13 reveal state(s)
+[2026-06-13T08:55:58.069Z]   ✅ Slide 5 done
+[2026-06-13T08:55:58.074Z] 📽 Slide 6/7 — 363.6s
+[2026-06-13T08:55:58.079Z]   🎵 Audio ready
+[2026-06-13T08:55:58.080Z]   🎞 6 reveal state(s)
+[2026-06-13T08:57:57.830Z]   ✅ Slide 6 done
+[2026-06-13T08:57:57.841Z] 📽 Slide 7/7 — 498.7s
+[2026-06-13T08:57:57.852Z]   🎵 Audio ready
+[2026-06-13T08:57:57.855Z]   🎞 8 reveal state(s)
+[2026-06-13T09:00:57.522Z]   ✅ Slide 7 done
+[2026-06-13T09:00:57.553Z] 🔗 Concatenating 7 slides...
+[2026-06-13T09:01:04.878Z] 🗜 Compressing video (CRF 35)...
+[2026-06-13T09:01:04.968Z]   Raw size: 78.4 MB
+[2026-06-13T09:05:33.642Z]   Compressed: 34.2 MB
+[2026-06-13T09:05:33.650Z] 🏁 DONE! 34.2 MB → A:\React Projects\9. AI Video Course Generator\ai-video-course-generator\public\renders\chapter-state-with-usestate.mp4

@@ -50,6 +50,10 @@ jobs:
       - name: Render chapter video
         run: node scripts/render-chapter-gh.js
         env:
+          # ── Your stable Vercel production URL ──────────────────────────────────
+          # Set this GitHub Secret to e.g. https://your-app.vercel.app
+          # so the render script fetches slide data from the correct deployment.
+          NEXT_PUBLIC_APP_URL:  ${{ secrets.NEXT_PUBLIC_APP_URL }}
           # Appwrite auth for downloading slide audio files
           APPWRITE_ENDPOINT:    ${{ secrets.APPWRITE_ENDPOINT }}
           APPWRITE_PROJECT_ID:  ${{ secrets.APPWRITE_PROJECT_ID }}

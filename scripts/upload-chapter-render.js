@@ -51,28 +51,83 @@ async function upload() {
   const client  = new sdk.Client().setEndpoint(endpoint).setProject(projectId).setKey(apiKey);
   const storage = new sdk.Storage(client);
 
-  const fileSizeMB = (fs.statSync(filePath).size / 1024 / 1024).toFixed(1);
-  console.log(`☁️  Uploading chapter-${chapterId}.mp4 (${fileSizeMB} MB) → Appwrite bucket ${bucketId}`);
+  const sidecarPath = filePath.replace('.mp4', '-chunks.json');
+  let useChunked = false;
+  let chunksDir = '';
+  let chunkFiles = [];
+  if (fs.existsSync(sidecarPath)) {
+    try {
+      const sidecar = JSON.parse(fs.readFileSync(sidecarPath, 'utf-8'));
+      chunksDir = path.join(path.dirname(filePath), `chapter-${chapterId}-chunks`);
+      chunkFiles = sidecar.chunkFiles || [];
+      if (chunkFiles.length > 0 && fs.existsSync(chunksDir)) {
+        useChunked = true;
+      }
+    } catch (err) {
+      console.warn('⚠️ Failed to parse chunk sidecar:', err.message);
+    }
+  }
 
-  try {
-    const filename   = `chapter-${chapterId}.mp4`;
+  if (useChunked) {
+    console.log(`☁️  Uploading ${chunkFiles.length} chunks from ${chunksDir} → Appwrite bucket ${bucketId}`);
+    try {
+      const chunkIds = [];
+      for (let i = 0; i < chunkFiles.length; i++) {
+        const chunkFile = chunkFiles[i];
+        const chunkPath = path.join(chunksDir, chunkFile);
+        const cleanChapterId = chapterId.replace(/[^a-zA-Z0-9._-]/g, '-');
+        const chunkFileId = `c-${cleanChapterId.slice(0, 28)}-${i}`.slice(0, 36);
+        console.log(`   [${i + 1}/${chunkFiles.length}] Uploading ${chunkFile} as ${chunkFileId}...`);
+        await storage.createFile({
+          bucketId,
+          fileId: chunkFileId,
+          file: InputFile.fromPath(chunkPath, chunkFile),
+        });
+        chunkIds.push(chunkFileId);
+      }
 
-    const result = await storage.createFile({
-      bucketId,
-      fileId: `chapter-${chapterId}`.replace(/[^a-zA-Z0-9._-]/g, '-').slice(0, 36),
-      file: InputFile.fromPath(filePath, filename),
-    });
+      const videoUrl = JSON.stringify({
+        chunked: true,
+        count: chunkFiles.length,
+        ids: chunkIds,
+        bucketId,
+        endpoint,
+        projectId,
+      });
 
-    const videoUrl = `${endpoint}/storage/buckets/${bucketId}/files/${result.$id}/view?project=${projectId}`;
-    console.log('✅ Upload complete:', videoUrl);
+      console.log('✅ Chunked upload complete. videoUrl metadata:', videoUrl);
+      await notify(webhookUrl, chapterId, videoUrl, 'completed', null);
+      console.log('🎉 Done!');
+      process.exit(0);
+    } catch (err) {
+      console.error('❌ Chunked upload failed:', err?.message ?? err);
+      await notify(webhookUrl, chapterId, null, 'failed', String(err?.message ?? err).slice(0, 300));
+      process.exit(1);
+    }
+  } else {
+    const fileSizeMB = (fs.statSync(filePath).size / 1024 / 1024).toFixed(1);
+    console.log(`☁️  Uploading chapter-${chapterId}.mp4 (${fileSizeMB} MB) → Appwrite bucket ${bucketId}`);
 
-    await notify(webhookUrl, chapterId, videoUrl, 'completed', null);
-    console.log('🎉 Done!');
-    process.exit(0);
-  } catch (err) {
-    console.error('❌ Upload failed:', err?.message ?? err);
-    await notify(webhookUrl, chapterId, null, 'failed', String(err?.message ?? err).slice(0, 300));
-    process.exit(1);
+    try {
+      const filename   = `chapter-${chapterId}.mp4`;
+
+      const result = await storage.createFile({
+        bucketId,
+        fileId: `chapter-${chapterId}`.replace(/[^a-zA-Z0-9._-]/g, '-').slice(0, 36),
+        file: InputFile.fromPath(filePath, filename),
+      });
+
+      const videoUrl = `${endpoint}/storage/buckets/${bucketId}/files/${result.$id}/view?project=${projectId}`;
+      console.log('✅ Upload complete:', videoUrl);
+
+      await notify(webhookUrl, chapterId, videoUrl, 'completed', null);
+      console.log('🎉 Done!');
+      process.exit(0);
+    } catch (err) {
+      console.error('❌ Upload failed:', err?.message ?? err);
+      await notify(webhookUrl, chapterId, null, 'failed', String(err?.message ?? err).slice(0, 300));
+      process.exit(1);
+    }
   }
 }
 

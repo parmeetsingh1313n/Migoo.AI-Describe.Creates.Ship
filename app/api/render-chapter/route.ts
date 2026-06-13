@@ -474,13 +474,13 @@ async function startLocalRender(chapterId: string, slides: any[], durationsBySli
   await concat(slideClips, rawOutputPath);
 
   // ── Compress final video to reduce file size for Appwrite upload ─────────────
-  log(chapterId, `🗜 Compressing video (CRF 35)...`);
+  log(chapterId, `🗜 Compressing video (CRF 28 — good quality)...`);
   renderJobs.set(chapterId, { status: 'rendering', progress: 96 });
   try {
     const ff = getFFmpeg();
     const rawMb = fs.existsSync(rawOutputPath) ? (fs.statSync(rawOutputPath).size / 1024 / 1024).toFixed(1) : '?';
     log(chapterId, `  Raw size: ${rawMb} MB`);
-    const compressCmd = `"${ff}" -y -i "${rawOutputPath}" -c:v libx264 -preset fast -crf 38 -tune stillimage -c:a aac -b:a 48k -ar 32000 -movflags +faststart "${outputPath}"`;
+    const compressCmd = `"${ff}" -y -i "${rawOutputPath}" -c:v libx264 -preset fast -crf 28 -c:a aac -b:a 128k -ar 44100 -movflags +faststart "${outputPath}"`;
     await execAsync(compressCmd, { maxBuffer: 500 * 1024 * 1024, timeout: 60 * 60 * 1000 });
     try { fs.unlinkSync(rawOutputPath); } catch {}
     const compMb = fs.existsSync(outputPath) ? (fs.statSync(outputPath).size / 1024 / 1024).toFixed(1) : '?';
@@ -488,6 +488,29 @@ async function startLocalRender(chapterId: string, slides: any[], durationsBySli
   } catch (compErr: any) {
     log(chapterId, `  ⚠️ Compression failed: ${compErr.message} — using raw`);
     try { if (fs.existsSync(rawOutputPath)) fs.renameSync(rawOutputPath, outputPath); } catch {}
+  }
+
+  // ── Split into 45 MB chunks for Appwrite upload ─────────────────────────────
+  // Each chunk is a self-contained MP4 (re-encoded to ensure proper keyframes)
+  const CHUNK_SIZE_BYTES = 45 * 1024 * 1024; // 45 MB
+  const finalSizeBytes = fs.existsSync(outputPath) ? fs.statSync(outputPath).size : 0;
+  const chunksDir = path.join(path.dirname(outputPath), `chapter-${chapterId}-chunks`);
+
+  if (finalSizeBytes > CHUNK_SIZE_BYTES) {
+    log(chapterId, `✂️  Splitting ${(finalSizeBytes / 1024 / 1024).toFixed(1)} MB video into 45 MB chunks...`);
+    fs.mkdirSync(chunksDir, { recursive: true });
+    const chunkPattern = path.join(chunksDir, 'chunk-%03d.mp4');
+    const ff = getFFmpeg();
+    // Use segment muxer — each segment is an independently playable MP4
+    const splitCmd = `"${ff}" -y -i "${outputPath}" -c copy -f segment -segment_size ${CHUNK_SIZE_BYTES} -reset_timestamps 1 -segment_format mp4 "${chunkPattern}"`;
+    await execAsync(splitCmd, { maxBuffer: 200 * 1024 * 1024, timeout: 20 * 60 * 1000 });
+    const chunkFiles = fs.readdirSync(chunksDir).filter(f => f.startsWith('chunk-') && f.endsWith('.mp4')).sort();
+    log(chapterId, `   Split into ${chunkFiles.length} chunks`);
+    // Store chunks dir path in a sidecar file so the upload script knows to use chunked mode
+    const sidecarPath = outputPath.replace('.mp4', '-chunks.json');
+    fs.writeFileSync(sidecarPath, JSON.stringify({ chunksDir, chunkFiles }));
+  } else {
+    log(chapterId, `   File is ${(finalSizeBytes / 1024 / 1024).toFixed(1)} MB — single upload (no chunking needed)`);
   }
 
   const mb = fs.existsSync(outputPath) ? (fs.statSync(outputPath).size / 1024 / 1024).toFixed(1) : '?';
@@ -539,7 +562,14 @@ export async function POST(req: NextRequest) {
   // ── GitHub Actions mode ───────────────────────────────────────────────────
   if (isGitHubActionsMode()) {
     const webhookUrl = buildCallbackUrl(req);
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL ? process.env.NEXT_PUBLIC_APP_URL.replace(/\/$/, '') : `${req.nextUrl.protocol}//${req.headers.get('host')}`;
+    // Priority: explicit env var → Vercel auto-set URL → request host (fallback)
+    // NEXT_PUBLIC_APP_URL must be set in GitHub Secrets AND Vercel env vars
+    // to the stable production URL (e.g. https://your-app.vercel.app)
+    const appUrl = (
+      process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, '') ||
+      (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : '') ||
+      `${req.nextUrl.protocol}//${req.headers.get('host')}`
+    );
     const fetchUrl = `${appUrl}/api/render-chapter?chapterId=${chapterId}&fetchData=true`;
 
     console.log(`🚀 Dispatching chapter render to GitHub Actions: ${chapterId}`);
@@ -677,7 +707,22 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ error: 'Missing chapterId' }, { status: 400 });
   }
 
-  // 1. Reset database state
+  // 1. Fetch current row to get videoUrl
+  let currentVideoUrl: string | null = null;
+  try {
+    const [row] = await db
+      .select({ videoUrl: chapterGenerationStatus.videoUrl })
+      .from(chapterGenerationStatus)
+      .where(eq(chapterGenerationStatus.chapterId, chapterId))
+      .limit(1);
+    if (row) {
+      currentVideoUrl = row.videoUrl;
+    }
+  } catch (err: any) {
+    console.warn('Failed to fetch current videoUrl for deletion:', err.message);
+  }
+
+  // 2. Reset database state
   try {
     await db
       .update(chapterGenerationStatus)
@@ -691,10 +736,10 @@ export async function DELETE(req: NextRequest) {
     console.error('Failed to update DB for chapter render reset:', dbErr.message);
   }
 
-  // 2. Remove job from local in-memory Map
+  // 3. Remove job from local in-memory Map
   renderJobs.delete(chapterId);
 
-  // 3. Delete file based on mode
+  // 4. Delete file based on mode / videoUrl format
   if (isGitHubActionsMode()) {
     const endpoint = (process.env.APPWRITE_ENDPOINT ?? '').replace(/\/$/, '');
     const projectId = process.env.APPWRITE_PROJECT_ID;
@@ -707,10 +752,31 @@ export async function DELETE(req: NextRequest) {
         const client = new Client().setEndpoint(endpoint).setProject(projectId).setKey(apiKey);
         const storage = new Storage(client);
 
-        const fileId = `chapter-${chapterId}`.replace(/[^a-zA-Z0-9._-]/g, '-').slice(0, 36);
-        console.log(`☁️ Deleting Appwrite file ${fileId} from bucket ${bucketId}`);
-        await storage.deleteFile(bucketId, fileId);
-        console.log(`✅ Appwrite file deleted: ${fileId}`);
+        // Check if chunked JSON
+        if (currentVideoUrl && currentVideoUrl.startsWith('{')) {
+          try {
+            const parsed = JSON.parse(currentVideoUrl);
+            if (parsed.chunked && Array.isArray(parsed.ids)) {
+              console.log(`☁️ Deleting ${parsed.ids.length} chunks from Appwrite storage...`);
+              for (const fid of parsed.ids) {
+                try {
+                  await storage.deleteFile(bucketId, fid);
+                  console.log(`✅ Appwrite chunk file deleted: ${fid}`);
+                } catch (chDelErr: any) {
+                  console.warn(`⚠️ Failed to delete chunk ${fid}:`, chDelErr.message);
+                }
+              }
+            }
+          } catch (jsonErr: any) {
+            console.warn('Failed to parse chunked videoUrl JSON for deletion:', jsonErr.message);
+          }
+        } else {
+          // Normal file ID
+          const fileId = `chapter-${chapterId}`.replace(/[^a-zA-Z0-9._-]/g, '-').slice(0, 36);
+          console.log(`☁️ Deleting Appwrite file ${fileId} from bucket ${bucketId}`);
+          await storage.deleteFile(bucketId, fileId);
+          console.log(`✅ Appwrite file deleted: ${fileId}`);
+        }
       } catch (err: any) {
         console.error('Failed to delete file from Appwrite Storage:', err?.message ?? err);
       }
@@ -725,7 +791,24 @@ export async function DELETE(req: NextRequest) {
         console.log(`✅ Local file deleted: ${localOutputPath}`);
       } catch (err: any) {
         console.error('Failed to delete local MP4 file:', err.message);
-        return NextResponse.json({ error: `Failed to delete local MP4 file: ${err.message}` }, { status: 500 });
+      }
+    }
+    const localChunksDir = path.join(process.cwd(), 'public', 'renders', `chapter-${chapterId}-chunks`);
+    if (fs.existsSync(localChunksDir)) {
+      try {
+        fs.rmSync(localChunksDir, { recursive: true, force: true });
+        console.log(`✅ Local chunks directory deleted: ${localChunksDir}`);
+      } catch (err: any) {
+        console.error('Failed to delete local chunks dir:', err.message);
+      }
+    }
+    const sidecarPath = localOutputPath.replace('.mp4', '-chunks.json');
+    if (fs.existsSync(sidecarPath)) {
+      try {
+        fs.unlinkSync(sidecarPath);
+        console.log(`✅ Local sidecar file deleted: ${sidecarPath}`);
+      } catch (err: any) {
+        console.error('Failed to delete local sidecar:', err.message);
       }
     }
   }

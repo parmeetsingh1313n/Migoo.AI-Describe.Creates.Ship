@@ -515,13 +515,12 @@ async function render() {
   const rawOutFile = outFile.replace('.mp4', '_raw.mp4');
   await concat(slideClips, rawOutFile);
 
-  // ── Post-concat compression pass (CRF 35) ──────────────────────────────────
-  // Reduces 300+ MB raw video to ~20-30 MB before uploading to Appwrite
+  // ── Post-concat compression pass (CRF 28 - good quality) ───────────────────
   const ff = getFFmpeg();
   const rawMb = fs.existsSync(rawOutFile) ? (fs.statSync(rawOutFile).size / 1024 / 1024).toFixed(1) : '?';
-  console.log(`\n🗜  Compressing video (CRF 35)... raw size: ${rawMb} MB`);
+  console.log(`\n🗜  Compressing video (CRF 28 — good quality)... raw size: ${rawMb} MB`);
   try {
-    const compressCmd = `"${ff}" -y -i "${rawOutFile}" -c:v libx264 -preset fast -crf 38 -tune stillimage -c:a aac -b:a 48k -ar 32000 -movflags +faststart "${outFile}"`;
+    const compressCmd = `"${ff}" -y -i "${rawOutFile}" -c:v libx264 -preset fast -crf 28 -c:a aac -b:a 128k -ar 44100 -movflags +faststart "${outFile}"`;
     await execAsync(compressCmd, { maxBuffer: 500 * 1024 * 1024, timeout: 90 * 60 * 1000 });
     try { fs.unlinkSync(rawOutFile); } catch {}
     const compMb = fs.existsSync(outFile) ? (fs.statSync(outFile).size / 1024 / 1024).toFixed(1) : '?';
@@ -529,6 +528,27 @@ async function render() {
   } catch (compErr) {
     console.warn(`  ⚠️  Compression failed: ${compErr.message} — using raw file`);
     try { if (fs.existsSync(rawOutFile)) fs.renameSync(rawOutFile, outFile); } catch {}
+  }
+
+  // ── Split into 45 MB chunks for Appwrite upload ─────────────────────────────
+  const CHUNK_SIZE_BYTES = 45 * 1024 * 1024; // 45 MB
+  const finalSizeBytes = fs.existsSync(outFile) ? fs.statSync(outFile).size : 0;
+  const chunksDir = path.join(path.dirname(outFile), `chapter-${chapterId}-chunks`);
+
+  if (finalSizeBytes > CHUNK_SIZE_BYTES) {
+    console.log(`\n✂️  Splitting ${(finalSizeBytes / 1024 / 1024).toFixed(1)} MB video into 45 MB chunks...`);
+    fs.mkdirSync(chunksDir, { recursive: true });
+    const chunkPattern = path.join(chunksDir, 'chunk-%03d.mp4');
+    // Use segment muxer — each segment is an independently playable MP4
+    const splitCmd = `"${ff}" -y -i "${outFile}" -c copy -f segment -segment_size ${CHUNK_SIZE_BYTES} -reset_timestamps 1 -segment_format mp4 "${chunkPattern}"`;
+    await execAsync(splitCmd, { maxBuffer: 200 * 1024 * 1024, timeout: 20 * 60 * 1000 });
+    const chunkFiles = fs.readdirSync(chunksDir).filter(f => f.startsWith('chunk-') && f.endsWith('.mp4')).sort();
+    console.log(`   ✅ Split into ${chunkFiles.length} chunks`);
+    // Store chunks dir path in a sidecar file so the upload script knows to use chunked mode
+    const sidecarPath = outFile.replace('.mp4', '-chunks.json');
+    fs.writeFileSync(sidecarPath, JSON.stringify({ chunksDir, chunkFiles }));
+  } else {
+    console.log(`   File is ${(finalSizeBytes / 1024 / 1024).toFixed(1)} MB — single upload (no chunking needed)`);
   }
 
   const mb = fs.existsSync(outFile) ? (fs.statSync(outFile).size / 1024 / 1024).toFixed(1) : '?';
