@@ -1,0 +1,54 @@
+[2026-06-13T07:26:49.039Z] 🚀 Started. 7 slides, FFmpeg+Puppeteer mode
+[2026-06-13T07:26:49.041Z] 📽 Slide 1/7 — 249.1s
+[2026-06-13T07:26:49.531Z]   ⚠️ Audio failed: HTTP 403 — making silent
+[2026-06-13T07:26:52.624Z]   🎞 6 reveal state(s)
+[2026-06-13T07:28:32.860Z]   ✅ Slide 1 done
+[2026-06-13T07:28:32.871Z] 📽 Slide 2/7 — 350.0s
+[2026-06-13T07:28:33.397Z]   ⚠️ Audio failed: HTTP 403 — making silent
+[2026-06-13T07:28:35.425Z]   🎞 9 reveal state(s)
+[2026-06-13T07:30:30.059Z]   ✅ Slide 2 done
+[2026-06-13T07:30:30.062Z] 📽 Slide 3/7 — 503.7s
+[2026-06-13T07:30:30.387Z]   ⚠️ Audio failed: HTTP 403 — making silent
+[2026-06-13T07:30:32.889Z]   🎞 11 reveal state(s)
+[2026-06-13T07:33:25.971Z]   ✅ Slide 3 done
+[2026-06-13T07:33:25.998Z] 📽 Slide 4/7 — 417.4s
+[2026-06-13T07:33:26.685Z]   ⚠️ Audio failed: HTTP 403 — making silent
+[2026-06-13T07:33:29.428Z]   🎞 10 reveal state(s)
+[2026-06-13T07:36:03.641Z]   ✅ Slide 4 done
+[2026-06-13T07:36:03.645Z] 📽 Slide 5/7 — 445.3s
+[2026-06-13T07:36:03.990Z]   ⚠️ Audio failed: HTTP 403 — making silent
+[2026-06-13T07:36:06.026Z]   🎞 13 reveal state(s)
+[2026-06-13T07:39:12.757Z]   ✅ Slide 5 done
+[2026-06-13T07:39:12.773Z] 📽 Slide 6/7 — 363.6s
+[2026-06-13T07:39:13.375Z]   ⚠️ Audio failed: HTTP 403 — making silent
+[2026-06-13T07:39:15.243Z]   🎞 6 reveal state(s)
+[2026-06-13T07:41:36.200Z]   ✅ Slide 6 done
+[2026-06-13T07:41:36.207Z] 📽 Slide 7/7 — 498.7s
+[2026-06-13T07:41:36.792Z]   ⚠️ Audio failed: HTTP 403 — making silent
+[2026-06-13T07:41:39.479Z]   🎞 8 reveal state(s)
+[2026-06-13T07:44:27.848Z]   ✅ Slide 7 done
+[2026-06-13T07:44:27.869Z] 🔗 Concatenating 7 slides...
+[2026-06-13T07:44:30.508Z] 🗜 Compressing video (CRF 35)...
+[2026-06-13T07:44:30.523Z]   Raw size: 31.6 MB
+[2026-06-13T07:49:09.339Z]   Compressed: 19.7 MB
+[2026-06-13T07:49:09.372Z] 🏁 DONE! 19.7 MB → A:\React Projects\9. AI Video Course Generator\ai-video-course-generator\public\renders\chapter-state-with-usestate.mp4
+[2026-06-13T08:00:03.180Z] 🚀 Started. 7 slides, FFmpeg+Puppeteer mode
+[2026-06-13T08:00:03.187Z] 📽 Slide 1/7 — 249.1s
+[2026-06-13T08:00:07.149Z]   🎵 Audio ready
+[2026-06-13T08:00:07.151Z]   🎞 6 reveal state(s)
+[2026-06-13T08:01:53.782Z]   ✅ Slide 1 done
+[2026-06-13T08:01:53.797Z] 📽 Slide 2/7 — 350.0s
+[2026-06-13T08:01:58.434Z]   🎵 Audio ready
+[2026-06-13T08:01:58.438Z]   🎞 9 reveal state(s)
+[2026-06-13T08:04:44.745Z]   ✅ Slide 2 done
+[2026-06-13T08:04:44.754Z] 📽 Slide 3/7 — 503.7s
+[2026-06-13T08:04:51.478Z]   🎵 Audio ready
+[2026-06-13T08:04:51.482Z]   🎞 11 reveal state(s)
+[2026-06-13T08:07:49.921Z]   ✅ Slide 3 done
+[2026-06-13T08:07:49.926Z] 📽 Slide 4/7 — 417.4s
+[2026-06-13T08:07:54.539Z]   🎵 Audio ready
+[2026-06-13T08:07:54.540Z]   🎞 10 reveal state(s)
+[2026-06-13T08:10:27.410Z]   ✅ Slide 4 done
+[2026-06-13T08:10:27.417Z] 📽 Slide 5/7 — 445.3s
+[2026-06-13T08:10:34.953Z]   🎵 Audio ready
+[2026-06-13T08:10:34.955Z]   🎞 13 reveal state(s)

@@ -69,6 +69,27 @@ const nextConfig: NextConfig = {
       bodySizeLimit: "200mb",
     },
   },
+  outputFileTracingExcludes: {
+    '*': [
+      'node_modules/ffmpeg-static/**/*',
+      'node_modules/puppeteer/**/*',
+      'node_modules/puppeteer-core/**/*',
+      'node_modules/@remotion/**/*',
+      'public/landing-page-images/**/*',
+      'public/avatars/**/*',
+      'public/background-music/**/*',
+      'public/renders/**/*',
+      'public/tmp/**/*',
+      'public/video-style/**/*',
+      'public/reference_video.mp4',
+      'public/notes-design/**/*',
+      'Project Logo Migoo/**/*',
+      '**/node_modules/ffmpeg-static/**/*',
+      '**/node_modules/puppeteer/**/*',
+      '**/node_modules/puppeteer-core/**/*',
+      '**/node_modules/@remotion/**/*',
+    ],
+  },
   async headers() {
     return [
       {
