@@ -247,12 +247,27 @@ function clampDuration(durationSec: number): 5 | 10 {
 }
 
 function getFFmpegPath(): string {
-    const pkg = 'ffmpeg-static';
-    let ffmpegBin = require(pkg) as string;
-    if (!fs.existsSync(ffmpegBin)) {
-        ffmpegBin = path.join(process.cwd(), 'node_modules', 'ffmpeg-static', process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg');
+    // Try ffmpeg-static first (string literal so bundler can externalize it properly)
+    try {
+        const bin = require('ffmpeg-static') as string | null;
+        if (bin && fs.existsSync(bin)) return bin;
+    } catch { /* not available in this environment */ }
+
+    // Fallback 1: direct node_modules path (local dev, or when require() returns wrong path)
+    const localBin = path.join(
+        process.cwd(), 'node_modules', 'ffmpeg-static',
+        process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg'
+    );
+    if (fs.existsSync(localBin)) return localBin;
+
+    // Fallback 2: system ffmpeg — Vercel Lambda (Amazon Linux 2) has ffmpeg at /usr/bin/ffmpeg
+    const systemPaths = ['/usr/bin/ffmpeg', '/usr/local/bin/ffmpeg'];
+    for (const p of systemPaths) {
+        if (fs.existsSync(p)) return p;
     }
-    return ffmpegBin;
+
+    // Last resort: rely on PATH (works if ffmpeg is installed system-wide)
+    return 'ffmpeg';
 }
 
 async function stretchVideo(videoBuffer: Buffer, targetDuration: number, providedActualDuration: number): Promise<Buffer> {

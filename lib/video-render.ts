@@ -489,8 +489,8 @@ async function downloadToLocal(url: string | undefined, destAbsPath: string): Pr
 
             // Fallback to default if no match found
             if (!matchedKey) {
-                matchedKey = process.env.APPWRITE_API_KEY;
-                matchedProject = process.env.APPWRITE_PROJECT_ID;
+                matchedKey = process.env.APPWRITE_VIDEO_API_KEY || process.env.APPWRITE_API_KEY;
+                matchedProject = process.env.APPWRITE_VIDEO_PROJECT_ID || process.env.APPWRITE_PROJECT_ID;
                 console.warn(`⚠️ No specific APPWRITE_API_KEY for project ${urlProjectId}, using default`);
             } else {
                 console.log(`🔑 Appwrite Auth matched for project: ${urlProjectId}`);

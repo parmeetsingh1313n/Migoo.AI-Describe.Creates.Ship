@@ -41,9 +41,10 @@ const nextConfig: NextConfig = {
   // These packages load platform-specific native binaries at runtime.
   // Webpack can't resolve Linux paths on Windows (and vice-versa).
   // Marking them as serverExternalPackages lets Node.js require() them directly.
-  // NOTE: @remotion/renderer, @remotion/bundler, ffmpeg-static, and puppeteer
+  // NOTE: @remotion/renderer, @remotion/bundler, and puppeteer
   // are in devDependencies so Vercel doesn't install them at all in production.
   // They only run in GitHub Actions (render-chapter-gh.js) and local dev.
+  // ffmpeg-static is now a production dependency so it's available on Vercel.
   serverExternalPackages: [
     // Remotion (devDep on Vercel — still mark external in case local dev imports them)
     'remotion',
@@ -71,7 +72,6 @@ const nextConfig: NextConfig = {
   },
   outputFileTracingExcludes: {
     '*': [
-      'node_modules/ffmpeg-static/**/*',
       'node_modules/puppeteer/**/*',
       'node_modules/puppeteer-core/**/*',
       'node_modules/@remotion/**/*',
@@ -84,7 +84,6 @@ const nextConfig: NextConfig = {
       'public/reference_video.mp4',
       'public/notes-design/**/*',
       'Project Logo Migoo/**/*',
-      '**/node_modules/ffmpeg-static/**/*',
       '**/node_modules/puppeteer/**/*',
       '**/node_modules/puppeteer-core/**/*',
       '**/node_modules/@remotion/**/*',

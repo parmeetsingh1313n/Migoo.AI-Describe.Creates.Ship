@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const APPWRITE_ENDPOINT = process.env.APPWRITE_ENDPOINT!;
-const APPWRITE_PROJECT  = process.env.APPWRITE_PROJECT_ID!;
-const APPWRITE_API_KEY  = process.env.APPWRITE_API_KEY!;
-const APPWRITE_BUCKET   = process.env.APPWRITE_BUCKET_ID!;
+const APPWRITE_ENDPOINT = (process.env.APPWRITE_VIDEO_ENDPOINT || process.env.APPWRITE_ENDPOINT)!;
+const APPWRITE_PROJECT  = (process.env.APPWRITE_VIDEO_PROJECT_ID || process.env.APPWRITE_PROJECT_ID)!;
+const APPWRITE_API_KEY  = (process.env.APPWRITE_VIDEO_API_KEY || process.env.APPWRITE_API_KEY)!;
+const APPWRITE_BUCKET   = (process.env.APPWRITE_VIDEO_BUCKET_ID || process.env.APPWRITE_BUCKET_ID)!;
 
 export async function POST(req: NextRequest) {
     try {
