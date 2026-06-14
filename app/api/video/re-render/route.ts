@@ -39,16 +39,19 @@ export async function POST(req: Request) {
 
         // 3. Clean up any existing rendered video files/chunks from Appwrite storage
         const currentVideoUrl = video.videoUrl;
-        if (currentVideoUrl) {
-            const endpoint = (process.env.APPWRITE_VIDEO_ENDPOINT || process.env.APPWRITE_ENDPOINT || '').replace(/\/$/, '');
-            const projectId = process.env.APPWRITE_VIDEO_PROJECT_ID || process.env.APPWRITE_PROJECT_ID;
-            const apiKey = process.env.APPWRITE_VIDEO_API_KEY || process.env.APPWRITE_API_KEY;
-            const bucketId = process.env.APPWRITE_VIDEO_BUCKET_ID || process.env.APPWRITE_BUCKET_ID;
+        const endpoint = (process.env.APPWRITE_VIDEO_ENDPOINT || process.env.APPWRITE_ENDPOINT || '').replace(/\/$/, '');
+        const projectId = process.env.APPWRITE_VIDEO_PROJECT_ID || process.env.APPWRITE_PROJECT_ID;
+        const apiKey = process.env.APPWRITE_VIDEO_API_KEY || process.env.APPWRITE_API_KEY;
+        const bucketId = process.env.APPWRITE_VIDEO_BUCKET_ID || process.env.APPWRITE_BUCKET_ID;
 
-            if (endpoint && projectId && apiKey && bucketId) {
-                try {
-                    const { Client, Storage } = require('node-appwrite');
-                    
+        if (endpoint && projectId && apiKey && bucketId) {
+            try {
+                const { Client, Storage } = require('node-appwrite');
+                const client = new Client().setEndpoint(endpoint).setProject(projectId).setKey(apiKey);
+                const storage = new Storage(client);
+
+                // A. URL-based cleanup (when DB has a videoUrl)
+                if (currentVideoUrl) {
                     if (currentVideoUrl.startsWith('{')) {
                         try {
                             const parsed = JSON.parse(currentVideoUrl);
@@ -58,7 +61,7 @@ export async function POST(req: Request) {
                                 const deleteBucketId = parsed.bucketId || bucketId;
                                 const deleteClient = new Client().setEndpoint(endpoint).setProject(deleteProjectId).setKey(apiKey);
                                 const deleteStorage = new Storage(deleteClient);
-                                
+
                                 for (const fid of parsed.ids) {
                                     try {
                                         await deleteStorage.deleteFile(deleteBucketId, fid);
@@ -74,8 +77,6 @@ export async function POST(req: Request) {
                     } else {
                         // Normal file deletion
                         const cleanVideoId = videoId.replace(/[^a-zA-Z0-9._-]/g, '-').slice(0, 36);
-                        const client = new Client().setEndpoint(endpoint).setProject(projectId).setKey(apiKey);
-                        const storage = new Storage(client);
                         try {
                             console.log(`☁️ Deleting Appwrite file ${cleanVideoId} from bucket ${bucketId}`);
                             await storage.deleteFile(bucketId, cleanVideoId);
@@ -84,9 +85,21 @@ export async function POST(req: Request) {
                             console.warn(`⚠️ Failed to delete video file ${cleanVideoId}:`, delErr.message);
                         }
                     }
-                } catch (err: any) {
-                    console.error('❌ Failed to delete file from Appwrite Storage during re-render reset:', err?.message ?? err);
                 }
+
+                // B. Proactive cleanup: always try to delete expected IDs even if videoUrl is null
+                //    (handles stuck renders where chunks were uploaded but webhook never fired)
+                const cleanVideoId = videoId.replace(/[^a-zA-Z0-9._-]/g, '-');
+                // Single-file ID
+                try { await storage.deleteFile(bucketId, cleanVideoId.slice(0, 36)); } catch { /* not found — fine */ }
+                // Chunk IDs (try up to 20 potential chunks)
+                for (let i = 0; i < 20; i++) {
+                    const chunkId = `v-${cleanVideoId.slice(0, 28)}-${i}`.slice(0, 36);
+                    try { await storage.deleteFile(bucketId, chunkId); } catch { break; /* no more chunks */ }
+                }
+                console.log(`✅ Proactive Appwrite cleanup done for ${videoId}`);
+            } catch (err: any) {
+                console.error('❌ Failed to delete file from Appwrite Storage during re-render reset:', err?.message ?? err);
             }
         }
 

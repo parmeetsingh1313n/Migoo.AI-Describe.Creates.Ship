@@ -96,6 +96,9 @@ async function upload() {
                     const cleanVideoId = videoId.replace(/[^a-zA-Z0-9._-]/g, '-');
                     const chunkFileId = `v-${cleanVideoId.slice(0, 28)}-${i}`.slice(0, 36);
 
+                    // Delete stale file if it already exists (idempotent retry support)
+                    try { await storage.deleteFile({ bucketId, fileId: chunkFileId }); } catch { /* not found — fine */ }
+
                     console.log(`   [${i + 1}/${totalChunks}] Uploading ${chunkName} as ${chunkFileId}...`);
                     await storage.createFile({
                         bucketId,
@@ -136,6 +139,9 @@ async function upload() {
             console.log(`☁️  Uploading single file ${filePath} (${fileSizeMB} MB) → Appwrite Storage (bucket: ${bucketId})...`);
             const filename = `${videoId}.mp4`;
             const cleanVideoId = videoId.replace(/[^a-zA-Z0-9._-]/g, '-').slice(0, 36);
+
+            // Delete stale file if it already exists (idempotent retry support)
+            try { await storage.deleteFile({ bucketId, fileId: cleanVideoId }); } catch { /* not found — fine */ }
 
             const result = await storage.createFile({
                 bucketId,
