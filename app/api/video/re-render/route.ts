@@ -37,7 +37,60 @@ export async function POST(req: Request) {
         const [series] = await db.select().from(shortVideoSeries).where(eq(shortVideoSeries.seriesId, video.seriesId));
         const musicUrl = series?.music ? getMusicUrl(series.music) : '';
 
-        // 3. Reset video status — critical to bypass triggerRender's "already rendered" guard
+        // 3. Clean up any existing rendered video files/chunks from Appwrite storage
+        const currentVideoUrl = video.videoUrl;
+        if (currentVideoUrl) {
+            const endpoint = (process.env.APPWRITE_VIDEO_ENDPOINT || process.env.APPWRITE_ENDPOINT || '').replace(/\/$/, '');
+            const projectId = process.env.APPWRITE_VIDEO_PROJECT_ID || process.env.APPWRITE_PROJECT_ID;
+            const apiKey = process.env.APPWRITE_VIDEO_API_KEY || process.env.APPWRITE_API_KEY;
+            const bucketId = process.env.APPWRITE_VIDEO_BUCKET_ID || process.env.APPWRITE_BUCKET_ID;
+
+            if (endpoint && projectId && apiKey && bucketId) {
+                try {
+                    const { Client, Storage } = require('node-appwrite');
+                    
+                    if (currentVideoUrl.startsWith('{')) {
+                        try {
+                            const parsed = JSON.parse(currentVideoUrl);
+                            if (parsed.chunked && Array.isArray(parsed.ids)) {
+                                console.log(`☁️ Deleting ${parsed.ids.length} old video chunks from Appwrite storage...`);
+                                const deleteProjectId = parsed.projectId || projectId;
+                                const deleteBucketId = parsed.bucketId || bucketId;
+                                const deleteClient = new Client().setEndpoint(endpoint).setProject(deleteProjectId).setKey(apiKey);
+                                const deleteStorage = new Storage(deleteClient);
+                                
+                                for (const fid of parsed.ids) {
+                                    try {
+                                        await deleteStorage.deleteFile(deleteBucketId, fid);
+                                        console.log(`   ✅ Appwrite chunk file deleted: ${fid}`);
+                                    } catch (chDelErr: any) {
+                                        console.warn(`   ⚠️ Failed to delete chunk ${fid}:`, chDelErr.message);
+                                    }
+                                }
+                            }
+                        } catch (jsonErr: any) {
+                            console.warn('⚠️ Failed to parse chunked videoUrl JSON for deletion:', jsonErr.message);
+                        }
+                    } else {
+                        // Normal file deletion
+                        const cleanVideoId = videoId.replace(/[^a-zA-Z0-9._-]/g, '-').slice(0, 36);
+                        const client = new Client().setEndpoint(endpoint).setProject(projectId).setKey(apiKey);
+                        const storage = new Storage(client);
+                        try {
+                            console.log(`☁️ Deleting Appwrite file ${cleanVideoId} from bucket ${bucketId}`);
+                            await storage.deleteFile(bucketId, cleanVideoId);
+                            console.log(`✅ Appwrite file deleted: ${cleanVideoId}`);
+                        } catch (delErr: any) {
+                            console.warn(`⚠️ Failed to delete video file ${cleanVideoId}:`, delErr.message);
+                        }
+                    }
+                } catch (err: any) {
+                    console.error('❌ Failed to delete file from Appwrite Storage during re-render reset:', err?.message ?? err);
+                }
+            }
+        }
+
+        // 3.5. Reset video status — critical to bypass triggerRender's "already rendered" guard
         await db.update(shortVideoAssets).set({
             status: 'pending',
             videoUrl: null,
