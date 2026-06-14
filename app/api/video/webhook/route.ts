@@ -5,6 +5,18 @@ import { NextResponse } from "next/server";
 
 export async function PATCH(req: Request) {
     try {
+        // ── Shared-secret guard ────────────────────────────────────────────────
+        // The route is intentionally public (no Clerk session) so GitHub Actions
+        // can call it. We validate a shared secret header instead.
+        const expectedSecret = process.env.WEBHOOK_SECRET;
+        if (expectedSecret) {
+            const authHeader = req.headers.get("authorization") ?? "";
+            const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : authHeader;
+            if (token !== expectedSecret) {
+                return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
+            }
+        }
+
         const { videoId, videoUrl, status } = await req.json();
 
         if (!videoId) {

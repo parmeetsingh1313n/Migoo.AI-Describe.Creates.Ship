@@ -12,7 +12,8 @@ const isPublicRoute = createRouteMatcher([
     '/api/user',
     '/proxy(.*)',  // Remotion asset proxy
     '/api/render-chapter(.*)',
-    '/api/render-chapter-callback(.*)'
+    '/api/render-chapter-callback(.*)',
+    '/api/video/webhook',   // GitHub Actions upload callback (secured by WEBHOOK_SECRET header)
 ])
 
 // Rate limiting store for middleware-level protection

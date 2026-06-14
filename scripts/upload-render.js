@@ -164,9 +164,12 @@ async function upload() {
 async function notifyWebhook(webhookUrl, videoId, videoUrl, status) {
     try {
         console.log(`📡 Calling webhook: ${webhookUrl} (status: ${status})`);
+        const secret = process.env.WEBHOOK_SECRET;
+        const headers = { 'Content-Type': 'application/json' };
+        if (secret) headers['Authorization'] = `Bearer ${secret}`;
         const response = await fetch(webhookUrl, {
             method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
+            headers,
             body: JSON.stringify({ videoId, videoUrl, status }),
         });
 
