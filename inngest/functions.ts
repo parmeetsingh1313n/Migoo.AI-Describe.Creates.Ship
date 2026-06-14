@@ -215,12 +215,25 @@ async function generateEnglishTTS(
             const path = require('path');
             const fs = require('fs');
             const { exec } = require('child_process');
-            const pkg = 'ffmpeg-static';
-            let ffmpegBin = require(pkg) as string;
-            // Webpack/Next.js can bundle this to a non-existent \ROOT\... virtual path
-            if (!fs.existsSync(ffmpegBin)) {
-                ffmpegBin = path.join(process.cwd(), 'node_modules', 'ffmpeg-static', process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg');
+
+            // Resolve ffmpeg binary with fallbacks
+            // Must use a string literal (not a variable) so bundler can externalize properly
+            let ffmpegBin: string = '';
+            try {
+                const bin = require('ffmpeg-static') as string | null;
+                if (bin && fs.existsSync(bin)) ffmpegBin = bin;
+            } catch { /* not bundled in this env */ }
+            if (!ffmpegBin) {
+                const localBin = path.join(process.cwd(), 'node_modules', 'ffmpeg-static',
+                    process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg');
+                if (fs.existsSync(localBin)) ffmpegBin = localBin;
             }
+            if (!ffmpegBin) {
+                for (const p of ['/usr/bin/ffmpeg', '/usr/local/bin/ffmpeg']) {
+                    if (fs.existsSync(p)) { ffmpegBin = p; break; }
+                }
+            }
+            if (!ffmpegBin) ffmpegBin = 'ffmpeg'; // rely on PATH
 
             const tmpDir = os.tmpdir();
             const inPath = path.join(tmpDir, `${type}_tts_raw_${Date.now()}.wav`);
@@ -2739,7 +2752,12 @@ export const generateMotionGraphic = inngest.createFunction(
                                     try {
                                         const { execSync } = await import('child_process');
                                         const isWin = process.platform === 'win32';
-                                        const ffmpegBin = path.join(cwd, 'node_modules', 'ffmpeg-static', isWin ? 'ffmpeg.exe' : 'ffmpeg');
+                                        // Resolve ffmpeg with fallbacks (string literal for bundler externalization)
+                                        let ffmpegBin = '';
+                                        try { const b = require('ffmpeg-static') as string | null; if (b && fs.existsSync(b)) ffmpegBin = b; } catch {}
+                                        if (!ffmpegBin) { const lb = path.join(cwd, 'node_modules', 'ffmpeg-static', isWin ? 'ffmpeg.exe' : 'ffmpeg'); if (fs.existsSync(lb)) ffmpegBin = lb; }
+                                        if (!ffmpegBin) { for (const p of ['/usr/bin/ffmpeg', '/usr/local/bin/ffmpeg']) { if (fs.existsSync(p)) { ffmpegBin = p; break; } } }
+                                        if (!ffmpegBin) ffmpegBin = 'ffmpeg';
                                         // -r 30  : force output frame rate to 30fps (matches Remotion FPS)
                                         // -g 30  : keyframe every 30 frames so compositor can seek without gaps
                                         // -movflags +faststart : place moov atom at start for reliable seeking
