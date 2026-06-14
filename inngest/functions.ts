@@ -2,7 +2,7 @@ import { aiFallback } from "@/config/ai-fallback";
 import { db } from "@/config/db";
 import { shortVideoAssets, shortVideoSeries } from "@/config/schema";
 import { putWithRotation } from "@/lib/blob";
-import { generateNanoBananaImage, generateNanoBananaImagesParallel } from "@/lib/leonardo";
+import { generateNanoBananaImage, generateNanoBananaImagesParallel, submitNanoBananaJobsParallel, checkNanoBananaJobsStatus, NanoBananaSceneConfig, generateGptImage15SingleUrl } from "@/lib/leonardo";
 import { generateKlingScenesParallel } from "@/lib/leonardo-video";
 import { getMusicUrl } from "@/lib/music-urls";
 import { translateScript } from "@/lib/translate";
@@ -1479,100 +1479,169 @@ OUTPUT: JSON object wrapped in <json> and </json> tags.`;
             return { imageUrls, sceneOverrides, sceneProbedDurations };
         });
 
+        // ── SAME PATTERN AS NORMAL GENERATOR: Enrich ALL → Submit ALL → Sleep → Poll ──
+        // This mirrors exactly what the normal short generator does and is why it
+        // never hits timeouts. No single step runs a polling loop — instead we
+        // submit all jobs fast, sleep, then check status in parallel.
+
+        // Collect which scene indices need AI image generation (empty slots from resolve-assets)
+        const scenesNeedingImages = scriptData.scenes
+            .map((scene: any, i: number) => ({ scene, i }))
+            .filter(({ i }: { i: number }) => resolvedAssets.imageUrls[i] === "");
+
+        // ── Step A: Enrich ALL prompts in ONE step (sequential LLM calls, ~5s/scene) ──
+        const enrichedPrompts: Record<number, string> = await step.run("enrich-all-image-prompts", async () => {
+            const result: Record<number, string> = {};
+
+            for (const { scene, i } of scenesNeedingImages) {
+                const originalPrompt = scene.imagePrompt || scene.narration || "Cinematic scene illustration";
+                const wordCount = originalPrompt.split(/\s+/).length;
+                const alreadyRich = wordCount >= 70 && /photorealistic|cinematic|8k|ultra detailed/i.test(originalPrompt);
+
+                if (alreadyRich) {
+                    console.log(`  ✅ Scene ${i + 1}: prompt already rich (${wordCount} words), skipping enrichment`);
+                    result[i] = originalPrompt;
+                    continue;
+                }
+
+                try {
+                    const systemPrompt = `You are an expert AI image prompt engineer specialising in photorealistic image generation for Nano Banana 2 (Leonardo AI). Rewrite the scene description into a SINGLE rich image prompt.
+
+MANDATORY: Subject identity + architectural/physical details + camera angle + lighting + atmosphere + colour palette + end with "ultra photorealistic, 8K UHD, RAW photo, sharp focus, intricate detail, award-winning photography, no text, no watermarks, no words"
+
+OUTPUT: Return ONLY the enriched prompt (60-90 words). No explanation, no labels, no JSON.`;
+
+                    const userPrompt = `SCENE NARRATION: "${scene.narration || ''}"
+ORIGINAL PROMPT: "${originalPrompt}"
+
+Rewrite so it VISUALLY DEPICTS the specific event in the narration. 65-90 words. No explanation.`;
+
+                    const enriched = await shortsLLM.enrich(systemPrompt, userPrompt, { temperature: 0.4, maxTokens: 300 });
+                    if (enriched && enriched.trim().split(/\s+/).length > wordCount) {
+                        console.log(`  ✨ Scene ${i + 1}: prompt enriched ${wordCount}→${enriched.trim().split(/\s+/).length} words`);
+                        result[i] = enriched.trim();
+                    } else {
+                        result[i] = originalPrompt;
+                    }
+                } catch (err: any) {
+                    console.warn(`  ⚠️ Scene ${i + 1}: enrichment failed (${err?.message?.slice(0, 60)}), using original`);
+                    result[i] = originalPrompt;
+                }
+
+                // Small cooldown between sequential LLM calls to avoid rate limits
+                if (i < scenesNeedingImages[scenesNeedingImages.length - 1].i) {
+                    await new Promise(r => setTimeout(r, 1500));
+                }
+            }
+
+            return result;
+        });
+
+        // ── Step B: Cancel check before submitting jobs ──
+        const isCancelledBeforeSubmit = await step.run("check-cancel-before-image-submit", async () => {
+            const [current] = await db.select({ status: shortVideoSeries.status })
+                .from(shortVideoSeries)
+                .where(eq(shortVideoSeries.seriesId, seriesId));
+            return !current || current.status === "cancelled";
+        });
+
         const finalImageUrls = [...resolvedAssets.imageUrls];
 
-        for (let i = 0; i < scriptData.scenes.length; i++) {
-            if (resolvedAssets.imageUrls[i] !== "") continue;
+        if (isCancelledBeforeSubmit) {
+            console.log("🛑 Series cancelled — skipping image generation");
+            for (const { i } of scenesNeedingImages) finalImageUrls[i] = "SKIP_T2V";
+        } else if (scenesNeedingImages.length > 0) {
+            // ── Step C: Submit ALL Leonardo jobs in PARALLEL in ONE fast step (~3s) ──
+            // Identical to how the normal generator submits — all jobs go out at once,
+            // no waiting for images to complete. This step always finishes in < 10s.
+            const submissions = await step.run("submit-all-image-jobs", async () => {
+                const configs: NanoBananaSceneConfig[] = scenesNeedingImages.map(({ i }: { i: number }) => ({
+                    index: i,
+                    prompt: enrichedPrompts[i] || (scriptData.scenes[i].imagePrompt || scriptData.scenes[i].narration || "Cinematic scene"),
+                    width: 768,
+                    height: 1344,
+                }));
 
-            // Check if series was cancelled
-            const isCancelled = await step.run(`check-cancel-image-scene-${i}`, async () => {
-                const [current] = await db.select({ status: shortVideoSeries.status })
-                    .from(shortVideoSeries)
-                    .where(eq(shortVideoSeries.seriesId, seriesId));
-                return !current || current.status === "completed" || current.status === "cancelled";
+                console.log(`🚀 Submitting ${configs.length} Nano Banana image jobs in parallel...`);
+                return await submitNanoBananaJobsParallel(configs, undefined, 4);
             });
 
-            if (isCancelled) {
-                console.log(`🛑 Force stop detected! Aborting image generation for scene ${i + 1}.`);
-                finalImageUrls[i] = "SKIP_T2V";
-                continue;
-            }
-
-            const scene = scriptData.scenes[i];
-            const originalPrompt = scene.imagePrompt || scene.narration || "Cinematic scene illustration";
-
-            // Enrich prompt sequentially (if weak/short)
-            const wordCount = originalPrompt.split(/\s+/).length;
-            const alreadyRich = wordCount >= 70 && /photorealistic|cinematic|8k|ultra detailed/i.test(originalPrompt);
-
-            let enrichedPrompt = originalPrompt;
-            if (!alreadyRich) {
-                enrichedPrompt = await step.run(`enrich-prompt-scene-${i}`, async () => {
-                    console.log(`✨ Enriching prompt for Scene ${i + 1} sequentially...`);
-                    try {
-                        const systemPrompt = `You are an expert AI image prompt engineer specialising in photorealistic image generation for Nano Banana 2 (Leonardo AI). Your job is to rewrite a short or vague scene description into a SINGLE, rich, detailed image generation prompt.
-
-MANDATORY STRUCTURE (all elements required):
-1. Exact subject identity: name the specific monument, person, artifact, or landmark precisely.
-2. Physical/architectural details: materials (gold leaf, white marble, sandstone), state of preservation, key visual features.
-3. Composition & camera: camera angle (wide-angle 24mm, portrait 85mm, low-angle, aerial), framing.
-4. Lighting: golden hour, overcast diffused, dramatic rim light, moonlight, torchlight — be specific.
-5. Atmosphere: morning mist, dust particles, spiritual glow, monsoon air, etc.
-6. Color palette: describe dominant colors.
-7. Style tags: end with "ultra photorealistic, 8K UHD, RAW photo, sharp focus, intricate detail, award-winning photography, no text, no watermarks, no words"
-
-OUTPUT: Return ONLY the enriched prompt text (60-90 words). No explanation, no labels, no JSON.`;
-
-                        const sceneNarration = scene.narration || '';
-                        const userPrompt = `SCENE NARRATION (the image MUST depict THIS specific moment/event):
-"${sceneNarration}"
-
-Original image prompt (may be too generic or short):
-"${originalPrompt}"
-
-Your task: Rewrite the image prompt so it VISUALLY DEPICTS the specific event, action, or moment described in the SCENE NARRATION above — not just the subject in general.
-
-RULES:
-- The image must answer: "What is happening in this exact scene?"
-- Name the specific subject (monument, person, artifact) with its exact name.
-- Describe the specific action, state, or historical moment from the narration (e.g. "workers applying gold leaf", "the attack on the temple in 1984", "the foundation stone being laid").
-- Add: camera angle, lens, lighting (time of day), atmosphere, material textures, colour palette.
-- End with: "ultra photorealistic, 8K UHD, RAW photo, sharp focus, intricate detail, award-winning photography, no text, no watermarks, no words."
-- Length: 65-90 words. Return ONLY the prompt text. No explanation, no labels.`;
-
-                        const enriched = await shortsLLM.enrich(systemPrompt, userPrompt, {
-                            temperature: 0.4,
-                            maxTokens: 300,
-                        });
-                        if (enriched && enriched.trim().split(/\s+/).length > wordCount) {
-                            console.log(`  ✨ Scene ${i + 1}: prompt enriched ${wordCount}→${enriched.trim().split(/\s+/).length} words`);
-                            return enriched.trim();
+            // Mark failed submissions immediately as SKIP_T2V
+            const pendingJobs: Array<{ index: number; generationId: string; apiKey: string; model: string }> = [];
+            for (const sub of submissions) {
+                if (sub.success && sub.generationId && sub.apiKey && sub.model) {
+                    pendingJobs.push({ index: sub.index, generationId: sub.generationId, apiKey: sub.apiKey, model: sub.model });
+                } else {
+                    console.warn(`⚠️ Scene ${sub.index + 1} submission failed: ${sub.error}. Falling back to GPT Image-1.5...`);
+                    // Try GPT Image-1.5 fallback in its own step (fast, < 30s)
+                    const fallbackUrl = await step.run(`image-gpt-fallback-scene-${sub.index}`, async () => {
+                        try {
+                            const prompt = enrichedPrompts[sub.index] || "Cinematic scene illustration";
+                            const url = await generateGptImage15SingleUrl(prompt, 1024, 1536);
+                            console.log(`✅ Scene ${sub.index + 1} GPT Image-1.5 fallback ready`);
+                            return url;
+                        } catch (e: any) {
+                            console.warn(`⚠️ Scene ${sub.index + 1} GPT fallback also failed: ${e?.message}`);
+                            return "SKIP_T2V";
                         }
-                    } catch (enrichErr: any) {
-                        console.warn(`  ⚠️ Scene ${i + 1}: prompt enrichment failed (${enrichErr?.message?.slice(0, 80)}), using original`);
-                    }
-                    return originalPrompt;
-                });
+                    });
+                    finalImageUrls[sub.index] = fallbackUrl;
+                }
             }
 
-            // Generate image using Nano Banana 2
-            const imageUrl = await step.run(`generate-image-scene-${i}`, async () => {
-                console.log(`🖼️ Generating Nano Banana image for Scene ${i + 1}/${scriptData.scenes.length}...`);
-                try {
-                    const url = await generateNanoBananaImage(enrichedPrompt, 768, 1344);
-                    console.log(`✅ Scene ${i + 1} Nano Banana image ready: ${url.substring(0, 60)}...`);
-                    return url;
-                } catch (err: any) {
-                    console.warn(`⚠️ Scene ${i + 1} Nano Banana failed: ${err?.message || 'unknown'}. Falling back to text-to-video.`);
-                    return "SKIP_T2V";
+            // ── Step D: Poll ALL pending jobs using sleep → check pattern ──
+            // Each check step is fast (<5s). We sleep between checks using Inngest's
+            // native step.sleep so Vercel is never holding an open connection during waits.
+            // This is IDENTICAL to how the normal generator handles long-running polls.
+            const MAX_POLL_ROUNDS = 8;   // 8 × 30s = 4 minutes total max wait
+            const POLL_SLEEP_SEC = "30s";
+
+            let remainingJobs = [...pendingJobs];
+
+            for (let round = 0; round < MAX_POLL_ROUNDS && remainingJobs.length > 0; round++) {
+                // Sleep first — Leonardo typically takes 20-60s to generate
+                await step.sleep(`wait-for-images-round-${round}`, POLL_SLEEP_SEC);
+
+                // Check ALL remaining jobs in parallel in one fast step
+                const statusResults = await step.run(`check-image-status-round-${round}`, async () => {
+                    return await checkNanoBananaJobsStatus(remainingJobs);
+                });
+
+                const stillPending: typeof remainingJobs = [];
+                for (const result of statusResults) {
+                    if (result.status === "COMPLETE" && result.imageUrl) {
+                        console.log(`✅ Scene ${result.index + 1} image ready (round ${round + 1}): ${result.imageUrl.substring(0, 60)}...`);
+                        finalImageUrls[result.index] = result.imageUrl;
+                    } else if (result.status === "FAILED") {
+                        console.warn(`⚠️ Scene ${result.index + 1} Leonardo failed in round ${round + 1}. Trying GPT fallback...`);
+                        const fallbackUrl = await step.run(`image-gpt-fallback-scene-${result.index}-round-${round}`, async () => {
+                            try {
+                                const prompt = enrichedPrompts[result.index] || "Cinematic scene illustration";
+                                return await generateGptImage15SingleUrl(prompt, 1024, 1536);
+                            } catch {
+                                return "SKIP_T2V";
+                            }
+                        });
+                        finalImageUrls[result.index] = fallbackUrl;
+                    } else {
+                        // Still pending — keep in the list for next round
+                        const originalJob = remainingJobs.find(j => j.index === result.index);
+                        if (originalJob) stillPending.push(originalJob);
+                    }
                 }
-            });
+                remainingJobs = stillPending;
 
-            finalImageUrls[i] = imageUrl;
+                if (remainingJobs.length === 0) {
+                    console.log(`✅ All images ready after round ${round + 1}`);
+                    break;
+                }
+                console.log(`🔄 Round ${round + 1}: ${remainingJobs.length} image(s) still pending...`);
+            }
 
-            // Small gap between steps to avoid rate-limits
-            if (i < scriptData.scenes.length - 1) {
-                await new Promise(r => setTimeout(r, 1000));
+            // Any jobs still pending after max rounds → SKIP_T2V
+            for (const job of remainingJobs) {
+                console.warn(`⚠️ Scene ${job.index + 1} timed out after ${MAX_POLL_ROUNDS} rounds. Falling back to text-to-video.`);
+                finalImageUrls[job.index] = "SKIP_T2V";
             }
         }
 

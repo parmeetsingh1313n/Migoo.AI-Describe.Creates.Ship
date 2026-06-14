@@ -760,7 +760,7 @@ function extractGraphQLError(result: any): string | null {
 // PARALLEL NANO BANANA IMAGE GENERATION
 // ═══════════════════════════════════════════════════════════════════════════════
 
-interface NanoBananaSceneConfig {
+export interface NanoBananaSceneConfig {
     index: number;           // original scene index
     prompt: string;
     width?: number;
@@ -774,6 +774,168 @@ export interface NanoBananaResult {
     success: boolean;
     error?: string;
 }
+
+export interface NanoBananaSubmissionResult {
+    index: number;
+    success: boolean;
+    generationId?: string;
+    apiKey?: string;
+    model?: string;
+    error?: string;
+}
+
+export interface NanoBananaStatusResult {
+    index: number;
+    status: "COMPLETE" | "FAILED" | "PENDING";
+    imageUrl?: string;
+    error?: string;
+}
+
+export async function submitNanoBananaJobsParallel(
+    scenes: NanoBananaSceneConfig[],
+    cancelSignal?: { cancelled: boolean },
+    concurrency: number = 4,
+): Promise<NanoBananaSubmissionResult[]> {
+    const allKeys = getKeys();
+    if (allKeys.length === 0) throw new Error("No LEONARDO_API_KEY found");
+
+    console.log(`🚀 Parallel Submit: Submitting ${scenes.length} Nano Banana jobs in parallel...`);
+    const results: NanoBananaSubmissionResult[] = [];
+
+    for (let batchStart = 0; batchStart < scenes.length; batchStart += concurrency) {
+        if (cancelSignal?.cancelled) break;
+
+        const batch = scenes.slice(batchStart, batchStart + concurrency);
+
+        const batchResults = await Promise.allSettled(
+            batch.map(async (scene, batchIdx) => {
+                if (cancelSignal?.cancelled) throw new Error("cancelled by force stop");
+
+                const globalIdx = batchStart + batchIdx;
+                const primaryKeyIdx = globalIdx % allKeys.length;
+                const keyOrder: string[] = [];
+                for (let k = 0; k < allKeys.length; k++) {
+                    keyOrder.push(allKeys[(primaryKeyIdx + k) % allKeys.length]);
+                }
+
+                const prompt = enhanceForRealism(scene.prompt);
+                const width = scene.width || NB_9x16_WIDTH;
+                const height = scene.height || NB_9x16_HEIGHT;
+
+                console.log(`🍌 Scene ${scene.index + 1}: submitting with primary Key #${primaryKeyIdx + 1}`);
+
+                for (const model of NANO_BANANA_MODEL_PRIORITY) {
+                    if (cancelSignal?.cancelled) throw new Error("cancelled by force stop");
+                    try {
+                        const { generationId, apiKey } = await submitNanoBananaJobWithKeyOrder(
+                            model, prompt, width, height, keyOrder, scene.styleUUID
+                        );
+                        return { index: scene.index, generationId, apiKey, model };
+                    } catch (err: any) {
+                        if (cancelSignal?.cancelled || err?.message?.includes('cancelled')) throw err;
+                        console.warn(`⚠️ Scene ${scene.index + 1}: ${model} failed: ${err.message?.substring(0, 100)}`);
+                    }
+                }
+                throw new Error(`Scene ${scene.index + 1}: all models failed`);
+            })
+        );
+
+        for (let i = 0; i < batchResults.length; i++) {
+            const result = batchResults[i];
+            const scene = batch[i];
+            if (result.status === "fulfilled") {
+                results.push({
+                    index: result.value.index,
+                    success: true,
+                    generationId: result.value.generationId,
+                    apiKey: result.value.apiKey,
+                    model: result.value.model,
+                });
+            } else {
+                console.error(`❌ Scene ${scene.index + 1} submission failed: ${result.reason?.message}`);
+                results.push({
+                    index: scene.index,
+                    success: false,
+                    error: result.reason?.message || "All models failed",
+                });
+            }
+        }
+
+        if (batchStart + concurrency < scenes.length) {
+            await new Promise(r => setTimeout(r, 1000));
+        }
+    }
+
+    return results;
+}
+
+export async function checkNanoBananaJobsStatus(
+    jobs: Array<{ index: number; generationId: string; apiKey: string; model: string }>
+): Promise<NanoBananaStatusResult[]> {
+    console.log(`🔍 Parallel Status Check: checking ${jobs.length} jobs`);
+    const results = await Promise.allSettled(
+        jobs.map(async (job) => {
+            try {
+                const statusResponse = await fetch(
+                    `https://cloud.leonardo.ai/api/rest/v1/generations/${job.generationId}`,
+                    {
+                        headers: {
+                            "accept": "application/json",
+                            "authorization": `Bearer ${job.apiKey}`
+                        }
+                    }
+                );
+
+                if (statusResponse.status === 429) {
+                    console.warn(`⚠️ Leonardo polling rate-limited for job ${job.generationId}`);
+                    return { index: job.index, status: "PENDING" as const };
+                }
+
+                if (!statusResponse.ok) {
+                    const errorText = await statusResponse.text();
+                    return { index: job.index, status: "FAILED" as const, error: `Status check failed (${statusResponse.status}): ${errorText.substring(0, 100)}` };
+                }
+
+                const statusResult = await statusResponse.json();
+                const generation = statusResult?.generations_by_pk;
+                const status = generation?.status;
+
+                if (status === "COMPLETE") {
+                    const images = generation?.generated_images;
+                    if (!images || images.length === 0) {
+                        return { index: job.index, status: "FAILED" as const, error: "No images found in complete response" };
+                    }
+                    const imageUrl = images[0].url;
+                    if (!imageUrl) {
+                        return { index: job.index, status: "FAILED" as const, error: "No URL in completed image response" };
+                    }
+                    return { index: job.index, status: "COMPLETE" as const, imageUrl };
+                } else if (status === "FAILED") {
+                    return { index: job.index, status: "FAILED" as const, error: "Leonardo generation failed" };
+                }
+
+                return { index: job.index, status: "PENDING" as const };
+            } catch (err: any) {
+                console.warn(`⚠️ Error checking status for job ${job.generationId}: ${err.message}`);
+                return { index: job.index, status: "PENDING" as const };
+            }
+        })
+    );
+
+    return results.map((r, i) => {
+        const job = jobs[i];
+        if (r.status === "fulfilled") {
+            return r.value;
+        } else {
+            return {
+                index: job.index,
+                status: "FAILED" as const,
+                error: r.reason?.message || "Unknown check error",
+            };
+        }
+    });
+}
+
 
 /**
  * Submit a Nano Banana job using a SPECIFIC key order (no shuffling).
@@ -1040,7 +1202,7 @@ export async function generateNanoBananaImagesParallel(
  *
  * Used as the automatic fallback when Nano Banana 2 polling exceeds 150 attempts.
  */
-async function generateGptImage15SingleUrl(
+export async function generateGptImage15SingleUrl(
     prompt: string,
     width: number = 1024,
     height: number = 1024,
