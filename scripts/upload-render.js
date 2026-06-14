@@ -59,22 +59,101 @@ async function upload() {
     const filename   = `${videoId}.mp4`;
 
     try {
-        const result = await storage.createFile({
-            bucketId,
-            fileId: sdk.ID.unique(),
-            file: InputFile.fromPath(filePath, filename),
-        });
+        const CHUNK_SIZE_BYTES = 44 * 1024 * 1024; // 44 MB raw chunks (stays under Appwrite 50MB limit)
+        const finalSizeBytes = fs.existsSync(filePath) ? fs.statSync(filePath).size : 0;
+        const fileSizeMB = (finalSizeBytes / 1024 / 1024).toFixed(1);
 
-        // Construct public view URL
-        const videoUrl = `${endpoint}/storage/buckets/${bucketId}/files/${result.$id}/view?project=${projectId}`;
-        console.log('✅ Video uploaded successfully:', videoUrl);
+        if (finalSizeBytes > CHUNK_SIZE_BYTES) {
+            const totalChunks = Math.ceil(finalSizeBytes / CHUNK_SIZE_BYTES);
+            console.log(`✂️  Raw-binary splitting ${fileSizeMB} MB → ${totalChunks} raw chunks of ≤44 MB...`);
 
-        if (webhookUrl) {
-            await notifyWebhook(webhookUrl, videoId, videoUrl, 'completed');
+            const chunksDir = path.join(path.dirname(filePath), 'video-chunks');
+            fs.mkdirSync(chunksDir, { recursive: true });
+
+            const inFd = fs.openSync(filePath, 'r');
+            const chunkFiles = [];
+            const chunkIds = [];
+            const BUF_SIZE = 8 * 1024 * 1024; // 8 MB read buffer
+            const buf = Buffer.allocUnsafe(BUF_SIZE);
+
+            try {
+                for (let i = 0; i < totalChunks; i++) {
+                    const chunkName = `chunk-${String(i).padStart(3, '0')}.bin`;
+                    const chunkPath = path.join(chunksDir, chunkName);
+                    const outFd = fs.openSync(chunkPath, 'w');
+                    let bytesWritten = 0;
+
+                    while (bytesWritten < CHUNK_SIZE_BYTES) {
+                        const toRead = Math.min(BUF_SIZE, CHUNK_SIZE_BYTES - bytesWritten);
+                        const bytesRead = fs.readSync(inFd, buf, 0, toRead, null);
+                        if (bytesRead === 0) break;
+                        fs.writeSync(outFd, buf, 0, bytesRead);
+                        bytesWritten += bytesRead;
+                    }
+                    fs.closeSync(outFd);
+                    chunkFiles.push(chunkPath);
+
+                    const cleanVideoId = videoId.replace(/[^a-zA-Z0-9._-]/g, '-');
+                    const chunkFileId = `v-${cleanVideoId.slice(0, 28)}-${i}`.slice(0, 36);
+
+                    console.log(`   [${i + 1}/${totalChunks}] Uploading ${chunkName} as ${chunkFileId}...`);
+                    await storage.createFile({
+                        bucketId,
+                        fileId: chunkFileId,
+                        file: InputFile.fromPath(chunkPath, chunkName),
+                    });
+                    chunkIds.push(chunkFileId);
+                }
+                fs.closeSync(inFd);
+
+                const videoUrl = JSON.stringify({
+                    chunked: true,
+                    rawBinary: true,
+                    count: totalChunks,
+                    ids: chunkIds,
+                    bucketId,
+                    endpoint,
+                    projectId,
+                });
+
+                console.log('✅ Chunked upload complete. videoUrl metadata:', videoUrl);
+
+                if (webhookUrl) {
+                    await notifyWebhook(webhookUrl, videoId, videoUrl, 'completed');
+                }
+
+                // Clean up chunks directory
+                try { fs.rmSync(chunksDir, { recursive: true, force: true }); } catch {}
+
+                console.log('🎉 Done!');
+                process.exit(0);
+            } catch (chunkErr) {
+                try { fs.closeSync(inFd); } catch {}
+                try { fs.rmSync(chunksDir, { recursive: true, force: true }); } catch {}
+                throw chunkErr;
+            }
+        } else {
+            console.log(`☁️  Uploading single file ${filePath} (${fileSizeMB} MB) → Appwrite Storage (bucket: ${bucketId})...`);
+            const filename = `${videoId}.mp4`;
+            const cleanVideoId = videoId.replace(/[^a-zA-Z0-9._-]/g, '-').slice(0, 36);
+
+            const result = await storage.createFile({
+                bucketId,
+                fileId: cleanVideoId,
+                file: InputFile.fromPath(filePath, filename),
+            });
+
+            // Construct public view URL
+            const videoUrl = `${endpoint}/storage/buckets/${bucketId}/files/${result.$id}/view?project=${projectId}`;
+            console.log('✅ Video uploaded successfully:', videoUrl);
+
+            if (webhookUrl) {
+                await notifyWebhook(webhookUrl, videoId, videoUrl, 'completed');
+            }
+
+            console.log('🎉 Done!');
+            process.exit(0);
         }
-
-        console.log('🎉 Done!');
-        process.exit(0);
     } catch (error) {
         console.error('❌ Upload failed:', error?.message ?? error);
         if (webhookUrl) await notifyWebhook(webhookUrl, videoId, null, 'failed');
