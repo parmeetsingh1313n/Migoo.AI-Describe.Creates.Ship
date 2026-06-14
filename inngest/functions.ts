@@ -969,33 +969,32 @@ OUTPUT: JSON object wrapped in <json> and </json> tags.`;
         // Update status: generating voice
         await step.run("update-status-voice", () => updateSeriesStatus(seriesId, "generating:voice"));
 
-        // Step 3: Generate Voice using TTS (Sarvam)
-        const voiceData = await step.run("generate-voice", async () => {
-            console.log(`🎙️ Generating voice for: "${seriesData.title}"`);
+        // Step 3: Generate Voice using TTS (Sarvam) — ONE STEP PER SCENE to avoid 60s timeouts.
+        // Each scene audio is saved as an Inngest checkpoint; if Vercel times out mid-way,
+        // Inngest resumes from the next unfinished scene instead of restarting all from scratch.
+        const voiceConfigs = studioPayload?.sceneVoiceConfigs || [];
+        const sceneAudioUrls: string[] = [];
 
-            // ── Generate audio PER SCENE to respect individual pace/temp settings ──
-            const audioBuffers: Buffer[] = [];
-            const voiceConfigs = studioPayload?.sceneVoiceConfigs || [];
+        for (let i = 0; i < scriptData.scenes.length; i++) {
+            const scene = scriptData.scenes[i];
+            let sceneNarration = scene.narration || '';
+            if (!sceneNarration.trim()) {
+                sceneAudioUrls.push(''); // keep index aligned
+                continue;
+            }
 
-            for (let i = 0; i < scriptData.scenes.length; i++) {
-                const scene = scriptData.scenes[i];
-                let sceneNarration = scene.narration || '';
-                if (!sceneNarration.trim()) continue;
-
-                // Add a small pause at the end of the scene using punctuation
-                if (!/[.!?]$/.test(sceneNarration.trim())) {
-                    sceneNarration += '.';
-                }
+            const sceneAudioUrl = await step.run(`generate-voice-scene-${i}`, async () => {
+                // Ensure sentence ends with punctuation (adds natural pause)
+                if (!/[.!?]$/.test(sceneNarration.trim())) sceneNarration += '.';
 
                 const cleanedScene = sanitizeForTTS(sceneNarration);
                 const scenePace = voiceConfigs[i]?.pace ?? 1.05;
-                const sceneTemp = voiceConfigs[i]?.temperature ?? 0.7;
+                const sceneTemp  = voiceConfigs[i]?.temperature ?? 0.7;
 
                 console.log(`🔊 Scene ${i + 1}/${scriptData.scenes.length}: ${cleanedScene.length} chars (pace: ${scenePace}, temp: ${sceneTemp})`);
 
-                // A single scene is usually < 500 chars, well within Sarvam's limit.
-                // But just in case, we chunk the scene itself if it's too long.
                 const chunks = chunkText(cleanedScene, 2200);
+                const audioBuffers: Buffer[] = [];
 
                 for (let j = 0; j < chunks.length; j++) {
                     const buf = await callSarvamTTS(
@@ -1006,32 +1005,52 @@ OUTPUT: JSON object wrapped in <json> and </json> tags.`;
                         sceneTemp
                     );
                     audioBuffers.push(buf);
-
-                    // Rate-limit between chunks
-                    if (j < chunks.length - 1) {
-                        await new Promise(r => setTimeout(r, 1000));
-                    }
+                    if (j < chunks.length - 1) await new Promise(r => setTimeout(r, 1000));
                 }
 
-                // Rate-limit between scenes
-                if (i < scriptData.scenes.length - 1) {
-                    await new Promise(r => setTimeout(r, 1000));
-                }
+                // Merge chunk buffers for this scene into a single WAV
+                const sceneWav = mergeWavBuffers(audioBuffers);
+
+                // Upload this scene's WAV temporarily so the merge step can fetch it
+                const blob = await putWithRotation(
+                    `shorts/${seriesData.seriesId}/scene_audio_${i}_${Date.now()}.wav`,
+                    sceneWav,
+                    { access: "public", contentType: "audio/wav" }
+                );
+                return blob.url;
+            });
+
+            sceneAudioUrls.push(sceneAudioUrl);
+
+            // Small gap between scene steps to avoid Sarvam rate-limits on rapid retries
+            if (i < scriptData.scenes.length - 1) {
+                await new Promise(r => setTimeout(r, 300));
+            }
+        }
+
+        // Merge all per-scene WAVs into one final audio file
+        const voiceData = await step.run("merge-and-upload-audio", async () => {
+            const validUrls = sceneAudioUrls.filter(Boolean);
+            console.log(`🔗 Merging ${validUrls.length} scene audio files...`);
+
+            const audioBuffers: Buffer[] = [];
+            for (const url of validUrls) {
+                const res = await fetch(url);
+                if (!res.ok) throw new Error(`Failed to fetch scene audio: ${url}`);
+                audioBuffers.push(Buffer.from(await res.arrayBuffer()));
             }
 
-            // Merge chunks into single WAV
             const finalAudio = mergeWavBuffers(audioBuffers);
             console.log(`🔗 Merged audio: ${finalAudio.length} bytes`);
 
-            // Estimate duration from WAV data (sample rate 22050, 16-bit mono)
-            const sampleRate = finalAudio.readUInt32LE(24);
-            const dataSize = finalAudio.length - 44;
+            // Estimate duration from WAV header
+            const sampleRate    = finalAudio.readUInt32LE(24);
+            const dataSize      = finalAudio.length - 44;
             const bytesPerSample = finalAudio.readUInt16LE(34) / 8;
-            const channels = finalAudio.readUInt16LE(22);
+            const channels      = finalAudio.readUInt16LE(22);
             const audioDuration = dataSize / (sampleRate * bytesPerSample * channels);
             console.log(`⏱️ Estimated duration: ${audioDuration.toFixed(1)}s`);
 
-            // Upload to Vercel Blob with token rotation (unique path per generation)
             const blobResult = await putWithRotation(
                 `shorts/${seriesData.seriesId}/audio_${Date.now()}.wav`,
                 finalAudio,
@@ -1044,6 +1063,7 @@ OUTPUT: JSON object wrapped in <json> and </json> tags.`;
                 audioDuration: Math.round(audioDuration * 10) / 10,
             };
         });
+
 
         // Update status: generating captions
         await step.run("update-status-captions", () => updateSeriesStatus(seriesId, "generating:captions"));
