@@ -24,10 +24,10 @@ async function upload() {
     const videoId    = process.env.VIDEO_ID;
     const webhookUrl = process.env.WEBHOOK_URL;
 
-    const endpoint   = (process.env.APPWRITE_ENDPOINT || '').replace(/\/$/, '');
-    const projectId  = process.env.APPWRITE_PROJECT_ID;
-    const apiKey     = process.env.APPWRITE_API_KEY;
-    const bucketId   = process.env.APPWRITE_BUCKET_ID;
+    const endpoint   = (process.env.APPWRITE_VIDEO_ENDPOINT || process.env.APPWRITE_ENDPOINT || '').replace(/\/$/, '');
+    const projectId  = process.env.APPWRITE_VIDEO_PROJECT_ID || process.env.APPWRITE_PROJECT_ID;
+    const apiKey     = process.env.APPWRITE_VIDEO_API_KEY || process.env.APPWRITE_API_KEY;
+    const bucketId   = process.env.APPWRITE_VIDEO_BUCKET_ID || process.env.APPWRITE_BUCKET_ID;
 
     // ── Guard: required env vars ─────────────────────────────────────────────
     if (!videoId) {

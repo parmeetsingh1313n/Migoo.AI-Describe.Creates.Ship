@@ -29,12 +29,16 @@ interface AppwriteConfig {
 function getAppwriteConfigs(): AppwriteConfig[] {
     const configs: AppwriteConfig[] = [];
     
-    // Check base config
-    if (process.env.APPWRITE_PROJECT_ID && process.env.APPWRITE_API_KEY && process.env.APPWRITE_BUCKET_ID) {
+    // Check base config (with video fallback)
+    const baseProject = process.env.APPWRITE_VIDEO_PROJECT_ID || process.env.APPWRITE_PROJECT_ID;
+    const baseApiKey = process.env.APPWRITE_VIDEO_API_KEY || process.env.APPWRITE_API_KEY;
+    const baseBucket = process.env.APPWRITE_VIDEO_BUCKET_ID || process.env.APPWRITE_BUCKET_ID;
+
+    if (baseProject && baseApiKey && baseBucket) {
         configs.push({
-            projectId: process.env.APPWRITE_PROJECT_ID,
-            apiKey: process.env.APPWRITE_API_KEY,
-            bucketId: process.env.APPWRITE_BUCKET_ID,
+            projectId: baseProject,
+            apiKey: baseApiKey,
+            bucketId: baseBucket,
         });
     }
 
@@ -71,7 +75,7 @@ function getConfigAt(index: number): AppwriteConfig {
 }
 
 function createAppwriteClient(config: AppwriteConfig): Client {
-    const endpoint = process.env.APPWRITE_ENDPOINT?.replace(/\/$/, "");
+    const endpoint = (process.env.APPWRITE_VIDEO_ENDPOINT || process.env.APPWRITE_ENDPOINT)?.replace(/\/$/, "");
     
     if (!endpoint) {
         throw new Error("Missing Appwrite config. Set APPWRITE_ENDPOINT in .env");
@@ -137,7 +141,7 @@ export async function putWithRotation(
         allowOverwrite?: boolean;
     }
 ): Promise<PutBlobResult> {
-    const endpoint = process.env.APPWRITE_ENDPOINT?.replace(/\/$/, "");
+    const endpoint = (process.env.APPWRITE_VIDEO_ENDPOINT || process.env.APPWRITE_ENDPOINT)?.replace(/\/$/, "");
     if (!endpoint) {
         throw new Error("Missing Appwrite config. Set APPWRITE_ENDPOINT in .env");
     }
