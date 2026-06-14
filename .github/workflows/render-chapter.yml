@@ -52,6 +52,10 @@ jobs:
       - name: Render chapter video
         run: node scripts/render-chapter-gh.js
         env:
+          # ── Callback URL for real-time slide progress updates ──────────────────
+          # The render script POSTs progress after each batch so the UI shows
+          # realistic percentages (not a hardcoded 50%).
+          WEBHOOK_URL:          ${{ github.event.client_payload.webhookUrl }}
           # ── Your stable Vercel production URL ──────────────────────────────────
           # Set this GitHub Secret to e.g. https://your-app.vercel.app
           # so the render script fetches slide data from the correct deployment.

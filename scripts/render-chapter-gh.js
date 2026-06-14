@@ -36,6 +36,32 @@ let slides = payload.slides;
 let durationsBySlideId = payload.durationsBySlideId;
 let baseUrl = payload.baseUrl || '';
 
+// Webhook URL for posting progress + completion back to Vercel
+const webhookUrl = payload.webhookUrl || process.env.WEBHOOK_URL || '';
+
+// ── Helper: POST progress to callback URL ───────────────────────────────────
+async function postProgress(slidesComplete, slidesTotal) {
+  if (!webhookUrl) return;
+  // Map slides → 0-90% range. 90-99 reserved for concat/upload.
+  const pct = Math.round((slidesComplete / slidesTotal) * 90);
+  try {
+    await fetch(webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chapterId,
+        status: 'progress',
+        progress: pct,
+        slidesComplete,
+        slidesTotal,
+      }),
+    });
+    console.log(`📊 Progress update sent: ${pct}% (${slidesComplete}/${slidesTotal} slides)`);
+  } catch (e) {
+    console.warn(`⚠️  Failed to POST progress: ${e.message}`);
+  }
+}
+
 if (!chapterId) {
   console.error('❌ Invalid payload — missing chapterId');
   process.exit(1);
@@ -479,12 +505,16 @@ async function render() {
   const results = [];
 
   // Process in batches of CONCURRENCY
+  let completedSlides = 0;
   for (let batch = 0; batch < totalSlides; batch += CONCURRENCY) {
     const batchSlides = slides.slice(batch, batch + CONCURRENCY);
     const batchResults = await Promise.all(
       batchSlides.map((slide, idx) => renderSlide(batch + idx, slide, totalSlides))
     );
     results.push(...batchResults);
+    completedSlides += batchSlides.length;
+    // POST real progress after each batch — slides map to 0-90% range
+    await postProgress(completedSlides, totalSlides);
   }
 
   // Sort results back in order (parallel may complete out of order)
@@ -495,9 +525,21 @@ async function render() {
   // Final concat → output file directly (no extra compression pass — clips already at CRF 28)
   // Option 2: Skip redundant compression pass — saves 3-5 minutes!
   console.log(`\n🔗 Concatenating ${slideClips.length} slides...`);
+  await postProgress(totalSlides, totalSlides); // 90% — all slides done, concat starting
   await concat(slideClips, outFile);
   const concatMb = fs.existsSync(outFile) ? (fs.statSync(outFile).size / 1024 / 1024).toFixed(1) : '?';
   console.log(`   ✅ Concat complete: ${concatMb} MB (clips already encoded at CRF 28, skipping re-encode)`);
+
+  // Signal 95% — concat done, about to split/upload
+  if (webhookUrl) {
+    try {
+      await fetch(webhookUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chapterId, status: 'progress', progress: 95, slidesComplete: totalSlides, slidesTotal: totalSlides }),
+      });
+    } catch {}
+  }
 
   const mb = fs.existsSync(outFile) ? (fs.statSync(outFile).size / 1024 / 1024).toFixed(1) : '?';
   console.log(`\n🏁 DONE — ${mb} MB → ${outFile}`);

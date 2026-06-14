@@ -587,11 +587,11 @@ export async function POST(req: NextRequest) {
     try {
       await dispatchToGitHub({ chapterId, fetchUrl, webhookUrl });
 
-      // Mark as rendering in DB
+      // Mark as rendering in DB (reset progress to 0 so UI starts from 0%)
       try {
         await db
           .update(chapterGenerationStatus)
-          .set({ renderStatus: 'rendering:video', videoUrl: null, renderError: null })
+          .set({ renderStatus: 'rendering:video', renderProgress: 0, videoUrl: null, renderError: null })
           .where(eq(chapterGenerationStatus.chapterId, chapterId));
       } catch (dbErr: any) {
         console.warn('DB update failed (non-fatal):', dbErr.message);
@@ -685,9 +685,10 @@ export async function GET(req: NextRequest) {
   try {
     const [row] = await db
       .select({
-        renderStatus: chapterGenerationStatus.renderStatus,
-        videoUrl:     chapterGenerationStatus.videoUrl,
-        renderError:  chapterGenerationStatus.renderError,
+        renderStatus:   chapterGenerationStatus.renderStatus,
+        videoUrl:       chapterGenerationStatus.videoUrl,
+        renderError:    chapterGenerationStatus.renderError,
+        renderProgress: chapterGenerationStatus.renderProgress,
       })
       .from(chapterGenerationStatus)
       .where(eq(chapterGenerationStatus.chapterId, chapterId))
@@ -698,7 +699,9 @@ export async function GET(req: NextRequest) {
     }
     // Only report rendering from DB if we are running in GitHub Actions mode
     if (isGitHubActionsMode() && row?.renderStatus === 'rendering:video') {
-      return NextResponse.json({ status: 'rendering', progress: 50 });
+      // Return the REAL per-slide progress stored by the callback route
+      const realProgress = Math.max(0, Math.min(99, row.renderProgress ?? 0));
+      return NextResponse.json({ status: 'rendering', progress: realProgress });
     }
     if (row?.renderStatus === 'video:failed') {
       return NextResponse.json({ status: 'failed', error: row.renderError ?? 'Render failed' });

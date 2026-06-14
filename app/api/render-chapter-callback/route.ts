@@ -6,11 +6,12 @@ import { eq } from 'drizzle-orm';
 /**
  * POST /api/render-chapter-callback
  *
- * Called by GitHub Actions (scripts/upload-chapter-render.js) when a chapter
- * video has been rendered and uploaded to Appwrite.
+ * Called by GitHub Actions during and after rendering.
  *
- * Body: { chapterId, videoUrl, status, error? }
- *   status: 'completed' | 'failed'
+ * Body variants:
+ *   { chapterId, status: 'progress', progress: 0-100, slidesComplete, slidesTotal }
+ *   { chapterId, status: 'completed', videoUrl }
+ *   { chapterId, status: 'failed', error }
  */
 export async function POST(req: NextRequest) {
   let body: any;
@@ -20,20 +21,30 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
   }
 
-  const { chapterId, videoUrl, status, error } = body;
+  const { chapterId, videoUrl, status, error, progress } = body;
 
   if (!chapterId) {
     return NextResponse.json({ error: 'Missing chapterId' }, { status: 400 });
   }
 
-  console.log(`📡 render-chapter-callback: chapterId=${chapterId} status=${status}`);
+  console.log(`📡 render-chapter-callback: chapterId=${chapterId} status=${status} progress=${progress ?? '-'}`);
 
   try {
-    if (status === 'completed' && videoUrl) {
+    if (status === 'progress') {
+      // Real-time slide-completion progress update from GitHub Actions
+      const pct = Math.max(0, Math.min(99, Math.round(progress ?? 0)));
+      await db
+        .update(chapterGenerationStatus)
+        .set({ renderProgress: pct })
+        .where(eq(chapterGenerationStatus.chapterId, chapterId));
+
+      console.log(`📊 Chapter ${chapterId} render progress: ${pct}%`);
+    } else if (status === 'completed' && videoUrl) {
       await db
         .update(chapterGenerationStatus)
         .set({
           renderStatus: 'video:completed',
+          renderProgress: 100,
           videoUrl,
           renderError: null,
         })
@@ -46,6 +57,7 @@ export async function POST(req: NextRequest) {
         .update(chapterGenerationStatus)
         .set({
           renderStatus: 'video:failed',
+          renderProgress: 0,
           renderError: String(error ?? 'Unknown render error').slice(0, 500),
         })
         .where(eq(chapterGenerationStatus.chapterId, chapterId));
