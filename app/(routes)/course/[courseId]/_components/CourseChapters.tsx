@@ -66,10 +66,27 @@ function CourseChapters({ course, onRefresh }: Props) {
                     stopPoll(chapterId);
                 } else if (data.status === 'failed') {
                     setDlStatus(p => ({ ...p, [chapterId]: 'failed' }));
+                    setDlProgress(p => {
+                        const merged = { ...p };
+                        delete merged[chapterId];
+                        return merged;
+                    });
                     stopPoll(chapterId);
                     toast.error(`Render failed: ${data.error ?? 'Unknown error'}`);
                 } else if (data.status === 'rendering') {
                     setDlProgress(p => ({ ...p, [chapterId]: data.progress ?? 0 }));
+                } else if (data.status === 'idle') {
+                    setDlStatus(p => {
+                        const merged = { ...p };
+                        delete merged[chapterId];
+                        return merged;
+                    });
+                    setDlProgress(p => {
+                        const merged = { ...p };
+                        delete merged[chapterId];
+                        return merged;
+                    });
+                    stopPoll(chapterId);
                 }
             } catch { /* ignore poll errors */ }
         }, 3000);
@@ -185,6 +202,7 @@ function CourseChapters({ course, onRefresh }: Props) {
             
             const newDlStatus: Record<string, DownloadStatus> = {};
             const newDlUrls: Record<string, string> = {};
+            const newDlProgress: Record<string, number> = {};
             
             for (const row of list) {
                 map[row.chapterId] = {
@@ -199,8 +217,10 @@ function CourseChapters({ course, onRefresh }: Props) {
                 if (row.renderStatus === 'video:completed' && row.videoUrl) {
                     newDlStatus[row.chapterId] = 'completed';
                     newDlUrls[row.chapterId] = row.videoUrl;
+                    newDlProgress[row.chapterId] = 100;
                 } else if (row.renderStatus === 'rendering:video') {
                     newDlStatus[row.chapterId] = 'rendering';
+                    newDlProgress[row.chapterId] = row.renderProgress ?? 0;
                     // CRITICAL FIX: if DB says rendering but we're not already polling,
                     // start polling now so the chapter can transition out of the
                     // stale "Rendering 0%" state automatically.
@@ -209,6 +229,10 @@ function CourseChapters({ course, onRefresh }: Props) {
                     }
                 } else if (row.renderStatus === 'video:failed') {
                     newDlStatus[row.chapterId] = 'failed';
+                    newDlProgress[row.chapterId] = 0;
+                } else {
+                    newDlStatus[row.chapterId] = 'idle';
+                    newDlProgress[row.chapterId] = 0;
                 }
                 
                 // Trigger page refresh when a chapter changes state to 'completed'
@@ -225,7 +249,12 @@ function CourseChapters({ course, onRefresh }: Props) {
             setDlStatus(prev => {
                 const merged = { ...prev };
                 for (const cid in newDlStatus) {
-                    if (prev[cid] !== 'rendering' || newDlStatus[cid] === 'completed') {
+                    if (
+                        prev[cid] !== 'rendering' || 
+                        newDlStatus[cid] === 'completed' || 
+                        newDlStatus[cid] === 'failed' || 
+                        (newDlStatus[cid] === 'idle' && !pollTimers.current[cid])
+                    ) {
                         merged[cid] = newDlStatus[cid];
                     }
                 }
@@ -236,6 +265,16 @@ function CourseChapters({ course, onRefresh }: Props) {
                 const merged = { ...prev };
                 for (const cid in newDlUrls) {
                     merged[cid] = newDlUrls[cid];
+                }
+                return merged;
+            });
+
+            setDlProgress(prev => {
+                const merged = { ...prev };
+                for (const cid in newDlProgress) {
+                    if (!pollTimers.current[cid]) {
+                        merged[cid] = newDlProgress[cid];
+                    }
                 }
                 return merged;
             });

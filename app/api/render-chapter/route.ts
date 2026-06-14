@@ -588,10 +588,11 @@ export async function POST(req: NextRequest) {
       await dispatchToGitHub({ chapterId, fetchUrl, webhookUrl });
 
       // Mark as rendering in DB (reset progress to 0 so UI starts from 0%)
+      // updatedAt is set explicitly so staleness detection in GET works correctly
       try {
         await db
           .update(chapterGenerationStatus)
-          .set({ renderStatus: 'rendering:video', renderProgress: 0, videoUrl: null, renderError: null })
+          .set({ renderStatus: 'rendering:video', renderProgress: 0, videoUrl: null, renderError: null, updatedAt: new Date() })
           .where(eq(chapterGenerationStatus.chapterId, chapterId));
       } catch (dbErr: any) {
         console.warn('DB update failed (non-fatal):', dbErr.message);
@@ -689,6 +690,7 @@ export async function GET(req: NextRequest) {
         videoUrl:       chapterGenerationStatus.videoUrl,
         renderError:    chapterGenerationStatus.renderError,
         renderProgress: chapterGenerationStatus.renderProgress,
+        updatedAt:      chapterGenerationStatus.updatedAt,
       })
       .from(chapterGenerationStatus)
       .where(eq(chapterGenerationStatus.chapterId, chapterId))
@@ -699,6 +701,25 @@ export async function GET(req: NextRequest) {
     }
     // Only report rendering from DB if we are running in GitHub Actions mode
     if (isGitHubActionsMode() && row?.renderStatus === 'rendering:video') {
+      // ── Staleness detection ─────────────────────────────────────────────────
+      // If the DB says rendering:video but updatedAt hasn't changed in >60 mins,
+      // this is a stale/abandoned render (GitHub Actions job crashed, user
+      // navigated away, etc.). Auto-reset to idle so the UI clears.
+      const STALE_MS = 60 * 60 * 1000; // 60 minutes
+      const lastUpdate = row.updatedAt ? new Date(row.updatedAt).getTime() : 0;
+      const isStale = Date.now() - lastUpdate > STALE_MS;
+
+      if (isStale) {
+        console.log(`⏰ Stale render detected for chapter ${chapterId} (last update: ${row.updatedAt ?? 'never'}). Auto-resetting to idle.`);
+        try {
+          await db
+            .update(chapterGenerationStatus)
+            .set({ renderStatus: 'idle', renderProgress: 0, renderError: null, updatedAt: new Date() })
+            .where(eq(chapterGenerationStatus.chapterId, chapterId));
+        } catch { /* non-fatal */ }
+        return NextResponse.json({ status: 'idle', progress: 0 });
+      }
+
       // Return the REAL per-slide progress stored by the callback route
       const realProgress = Math.max(0, Math.min(99, row.renderProgress ?? 0));
       return NextResponse.json({ status: 'rendering', progress: realProgress });

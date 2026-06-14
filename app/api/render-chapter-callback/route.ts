@@ -35,7 +35,7 @@ export async function POST(req: NextRequest) {
       const pct = Math.max(0, Math.min(99, Math.round(progress ?? 0)));
       await db
         .update(chapterGenerationStatus)
-        .set({ renderProgress: pct })
+        .set({ renderProgress: pct, updatedAt: new Date() })
         .where(eq(chapterGenerationStatus.chapterId, chapterId));
 
       console.log(`📊 Chapter ${chapterId} render progress: ${pct}%`);
@@ -47,6 +47,7 @@ export async function POST(req: NextRequest) {
           renderProgress: 100,
           videoUrl,
           renderError: null,
+          updatedAt: new Date(),
         })
         .where(eq(chapterGenerationStatus.chapterId, chapterId));
 
@@ -59,6 +60,7 @@ export async function POST(req: NextRequest) {
           renderStatus: 'video:failed',
           renderProgress: 0,
           renderError: String(error ?? 'Unknown render error').slice(0, 500),
+          updatedAt: new Date(),
         })
         .where(eq(chapterGenerationStatus.chapterId, chapterId));
 

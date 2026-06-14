@@ -111,6 +111,31 @@ export async function GET(req: NextRequest) {
                     row.videoUrl = `/renders/chapter-${row.chapterId}.mp4`;
                 }
             }
+
+            // Check for stale render status
+            if (row.renderStatus === 'rendering:video') {
+                const STALE_MS = 60 * 60 * 1000; // 60 minutes
+                const lastUpdate = row.updatedAt ? new Date(row.updatedAt).getTime() : 0;
+                const isStale = Date.now() - lastUpdate > STALE_MS;
+
+                if (isStale) {
+                    console.log(`⏰ Stale render detected in status API for chapter ${row.chapterId} (last update: ${row.updatedAt ?? 'never'}). Auto-resetting to idle.`);
+                    try {
+                        await db
+                            .update(chapterGenerationStatus)
+                            .set({
+                                renderStatus: 'idle',
+                                renderProgress: 0,
+                                renderError: null,
+                                updatedAt: new Date(),
+                            })
+                            .where(eq(chapterGenerationStatus.chapterId, row.chapterId));
+                    } catch { /* ignore — row may be from legacy DB (read-only) */ }
+
+                    row.renderStatus = 'idle';
+                    row.renderProgress = 0;
+                }
+            }
         }
 
         return apiSuccess({ statuses });
