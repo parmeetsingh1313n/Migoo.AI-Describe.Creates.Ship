@@ -46,6 +46,7 @@ jobs:
           APPWRITE_BUCKET_ID: ${{ secrets.APPWRITE_VIDEO_BUCKET_ID || secrets.APPWRITE_BUCKET_ID }}
           VIDEO_ID: ${{ github.event.client_payload.videoId }}
           WEBHOOK_URL: ${{ github.event.client_payload.webhookUrl }}
+          WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
         run: node scripts/upload-render.js
 
       - name: Notify Failure
@@ -53,4 +54,6 @@ jobs:
         run: |
           curl -s -X PATCH "${{ github.event.client_payload.webhookUrl }}" \
             -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${{ secrets.WEBHOOK_SECRET }}" \
             -d '{"videoId": "${{ github.event.client_payload.videoId }}", "status": "failed"}'
+
