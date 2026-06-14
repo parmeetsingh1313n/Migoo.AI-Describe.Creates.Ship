@@ -382,9 +382,14 @@ export async function triggerRender(videoId: string, props: Record<string, any>)
     const appUrl = process.env.NEXT_PUBLIC_APP_URL
         || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null);
 
-    const isLocal = !appUrl;
+    const githubToken = process.env.GH_PAT;
+    const repoOwner = process.env.GH_OWNER || "keshav-agrawal595";
+    const repoName = process.env.GH_REPO || "Migoo";
 
-    if (isLocal) {
+    // Detect if cloud rendering can be used
+    const isCloud = !!(githubToken && process.env.GH_OWNER && process.env.GH_REPO && appUrl);
+
+    if (!isCloud) {
         if (activeRenders.has(videoId)) {
             console.log(`⚠️ Video ${videoId} is already actively rendering in this process. Skipping duplicate trigger.`);
             return { success: true, mode: 'local', skipped: true };
@@ -414,12 +419,7 @@ export async function triggerRender(videoId: string, props: Record<string, any>)
     }
 
     // CLOUD MODE
-    console.log(`🎬 Triggering GitHub Action rendering for: ${videoId}`);
-    const githubToken = process.env.GH_PAT;
-    const repoOwner = "keshav-agrawal595";
-    const repoName = "Migoo";
-
-    if (!githubToken) throw new Error("GH_PAT not configured");
+    console.log(`🎬 Triggering GitHub Action rendering for: ${videoId} via repo ${repoOwner}/${repoName}`);
 
     const webhookUrl = `${appUrl}/api/video/webhook`;
 
