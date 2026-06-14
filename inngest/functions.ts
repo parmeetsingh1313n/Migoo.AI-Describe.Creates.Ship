@@ -1304,56 +1304,18 @@ OUTPUT: JSON object wrapped in <json> and </json> tags.`;
         // Update status: generating images
         await step.run("update-status-images", () => updateSeriesStatus(seriesId, "generating:images"));
 
-        // Step 5: Generate Images — Nano Banana (Gemini 2.5 Flash Image)
-        const imageData = await step.run("generate-images", async () => {
-            console.log(`🖼️ Generating images for: "${seriesData.title}"`);
-            console.log(`📸 Scenes to generate: ${scriptData.scenes?.length}`);
+        // Step 5: Generate Images — Nano Banana (Gemini 2.5 Flash Image) — SPLIT INTO STEPS TO PREVENT TIMEOUTS
+        const resolvedAssets = await step.run("resolve-assets", async () => {
+            console.log(`🖼️ Resolving assets for: "${seriesData.title}"`);
+            console.log(`📸 Scenes: ${scriptData.scenes?.length}`);
 
-            const MAX_RETRIES_PER_SCENE = 3;
             const totalScenes = scriptData.scenes.length;
             const imageUrls: string[] = new Array(totalScenes).fill("");
-            // sceneOverrides: pre-computed video payloads that bypass Kling
-            // (split-screen JSON strings keyed by scene index)
             const sceneOverrides: Record<number, string> = {};
-            // sceneProbedDurations: actual video file durations (seconds) probed from user uploads
-            // Used later to set correct playbackRate — prevents "No frame found" crashes
             const sceneProbedDurations: Record<number, number> = {};
 
-            // ── Shared cancellation token — passed INTO the poller so force-stop
-            //    aborts mid-poll, not just between scenes. ──────────────────────
-            const cancelSignal = { cancelled: false };
-
-            // ── Force-stop check: query DB to see if series was cancelled ──────
-            async function isForceStoppedCheck(): Promise<boolean> {
-                const [current] = await db.select({ status: shortVideoSeries.status })
-                    .from(shortVideoSeries)
-                    .where(eq(shortVideoSeries.seriesId, seriesId));
-                if (!current || current.status === "completed" || current.status === "cancelled") {
-                    cancelSignal.cancelled = true; // ← signal the poller to stop NOW
-                    console.log(`🛑 Force stop detected! Series status is "${current?.status}". Aborting all image generation.`);
-                    return true;
-                }
-                return false;
-            }
-
-            // ── Generate all scenes ────────────────────────────────────────────
-            // Real entity scenes are collected here for parallel batch generation
-            const realEntityScenes: Array<{ sceneIndex: number; prompt: string; attemptMode: string }> = [];
-
             for (let i = 0; i < totalScenes; i++) {
-                if (await isForceStoppedCheck()) break;
-
                 const scene = scriptData.scenes[i];
-
-                const prompt = scene.imagePrompt || scene.narration || "Cinematic scene illustration";
-                console.log(`🖼️ Scene ${i + 1}/${totalScenes}: "${prompt.substring(0, 80)}..."`);
-
-                let attemptMode = scene.sceneCategory || "general";
-
-                // Map legacy 'monument' to 'real_entity' just in case the LLM messes up
-                if (attemptMode === "monument") {
-                    attemptMode = "real_entity";
-                }
 
                 // ── STUDIO MODE: User provided their own asset(s) ─────────────────
                 const sceneAsset = resolveSceneAsset(i);
@@ -1366,38 +1328,28 @@ OUTPUT: JSON object wrapped in <json> and </json> tags.`;
                     }
 
                     // ── user_upload: Build COMPOSITE payload preserving ALL assets in user order ──
-                    // PRINCIPLE: Never modify user-finalized assets. Only arrange + time them.
                     const allFiles: any[] = sceneAsset.files || [];
                     const splitPairs: [string, string][] = sceneAsset.splitPairs || [];
-                    // Legacy split-screen support
                     const realVideos = allFiles.filter((f: any) => f.isVideo && !f.isImgToVideo);
                     const legacySplit = splitPairs.length === 0 && sceneAsset.splitScreenEnabled && realVideos.length >= 2;
                     if (legacySplit) {
-                        // Convert legacy boolean into a proper pair
                         splitPairs.push([realVideos[0].fileId, realVideos[1].fileId]);
                     }
 
-                    // Track which fileIds are consumed by split-screen pairs
                     const consumedByPair = new Set<string>();
                     for (const [a, b] of splitPairs) { consumedByPair.add(a); consumedByPair.add(b); }
 
-                    // Build ordered asset entries from user's file order
-                    // Split-screen pair is inserted at the position of the FIRST file in the pair;
-                    // the second file is consumed (not shown separately).
                     type CompositeAsset =
                         | { kind: "image"; url: string }
                         | { kind: "video"; url: string; durationSec: number; isImgToVideo: boolean }
                         | { kind: "split"; urls: [string, string]; durationSec: number };
 
                     const compositeAssets: CompositeAsset[] = [];
-                    const pairsEmitted = new Set<string>(); // "idA-idB" to avoid double-emit
+                    const pairsEmitted = new Set<string>();
 
                     for (const file of allFiles) {
                         const fid = file.fileId;
-
-                        // Check if this file is part of a split-screen pair
                         if (consumedByPair.has(fid)) {
-                            // Find which pair(s) include this file
                             for (const [a, b] of splitPairs) {
                                 if (a !== fid && b !== fid) continue;
                                 const pairKey = `${a}-${b}`;
@@ -1413,18 +1365,17 @@ OUTPUT: JSON object wrapped in <json> and </json> tags.`;
                                 compositeAssets.push({
                                     kind: "split",
                                     urls: [fileA.url, fileB.url],
-                                    durationSec: 0, // will be probed below
+                                    durationSec: 0,
                                 });
                             }
                             continue;
                         }
 
-                        // Regular file (not in any split pair)
                         if (file.isVideo) {
                             compositeAssets.push({
                                 kind: "video",
                                 url: file.url,
-                                durationSec: 0, // will be probed below
+                                durationSec: 0,
                                 isImgToVideo: !!file.isImgToVideo,
                             });
                         } else {
@@ -1437,7 +1388,6 @@ OUTPUT: JSON object wrapped in <json> and </json> tags.`;
                         continue;
                     }
 
-                    // ── Special fast paths: single image or single video only ────────
                     if (compositeAssets.length === 1) {
                         const single = compositeAssets[0];
                         if (single.kind === "image") {
@@ -1446,7 +1396,6 @@ OUTPUT: JSON object wrapped in <json> and </json> tags.`;
                             continue;
                         }
                         if (single.kind === "video") {
-                            // Probe ACTUAL video duration — critical to prevent "No frame found" crashes
                             const probedDur = await probeVideoDuration(single.url);
                             sceneProbedDurations[i] = Math.round(probedDur * 10) / 10;
                             console.log(`🎬 Studio Scene ${i + 1}: single video → ${single.url.substring(0, 60)} (probed: ${sceneProbedDurations[i]}s)`);
@@ -1454,7 +1403,6 @@ OUTPUT: JSON object wrapped in <json> and </json> tags.`;
                             continue;
                         }
                         if (single.kind === "split") {
-                            // Probe both videos in the pair — use the longer one
                             const [d1, d2] = await Promise.all([
                                 probeVideoDuration(single.urls[0]),
                                 probeVideoDuration(single.urls[1]),
@@ -1471,7 +1419,6 @@ OUTPUT: JSON object wrapped in <json> and </json> tags.`;
                         }
                     }
 
-                    // ── Multiple images only → slideshow (backward compat) ───────────
                     const hasAnyVideo = compositeAssets.some(a => a.kind === "video" || a.kind === "split");
                     if (!hasAnyVideo) {
                         const slideshowPayload = JSON.stringify({
@@ -1483,7 +1430,6 @@ OUTPUT: JSON object wrapped in <json> and </json> tags.`;
                         continue;
                     }
 
-                    // ── Mixed assets or multiple videos: probe video durations ───────
                     console.log(`📦 Studio Scene ${i + 1}: composite (${compositeAssets.length} assets). Probing video durations...`);
                     const probePromises: Promise<void>[] = [];
                     for (const asset of compositeAssets) {
@@ -1495,7 +1441,6 @@ OUTPUT: JSON object wrapped in <json> and </json> tags.`;
                                 })
                             );
                         } else if (asset.kind === "split") {
-                            // Probe the longer of the two URLs
                             probePromises.push(
                                 Promise.all([
                                     probeVideoDuration(asset.urls[0]),
@@ -1509,7 +1454,6 @@ OUTPUT: JSON object wrapped in <json> and </json> tags.`;
                     }
                     await Promise.all(probePromises);
 
-                    // Build composite payload
                     const compositePayload = JSON.stringify({
                         type: "composite",
                         assets: compositeAssets,
@@ -1520,39 +1464,51 @@ OUTPUT: JSON object wrapped in <json> and </json> tags.`;
                     continue;
                 }
 
-                // Only real_entity scenes get image generation (Nano Banana 2)
-                // living_thing and general scenes skip to direct text-to-video via Kling 2.5 Turbo
+                let attemptMode = scene.sceneCategory || "general";
+                if (attemptMode === "monument") {
+                    attemptMode = "real_entity";
+                }
+
                 if (attemptMode === "living_thing" || attemptMode === "general") {
                     console.log(`🎬 Scene ${i + 1} features '${attemptMode}', skipping image generation for direct Text-to-Video.`);
                     imageUrls[i] = "SKIP_T2V";
                     continue;
                 }
-
-                // Collect real_entity scenes for parallel batch generation
-                realEntityScenes.push({
-                    sceneIndex: i,
-                    prompt,
-                    attemptMode,
-                });
             }
 
-            // ── PARALLEL BATCH: Generate all real_entity images at once ───────
-            if (realEntityScenes.length > 0 && !cancelSignal.cancelled) {
-                console.log(`🚀 Submitting ${realEntityScenes.length} real_entity scenes for PARALLEL Nano Banana generation...`);
+            return { imageUrls, sceneOverrides, sceneProbedDurations };
+        });
 
-                // ── PRE-GENERATION: Enrich weak image prompts via OpenRouter ─────────
-                // Run SEQUENTIALLY with a 600ms gap — all 5 free-tier models share a
-                // per-minute request window. Parallel calls instantly exhaust that window.
-                console.log(`✨ Enriching image prompts for ${realEntityScenes.length} scenes sequentially...`);
-                for (let idx = 0; idx < realEntityScenes.length; idx++) {
-                    const s = realEntityScenes[idx];
-                    const wordCount = s.prompt.split(/\s+/).length;
-                    const alreadyRich = wordCount >= 70 && /photorealistic|cinematic|8k|ultra detailed/i.test(s.prompt);
-                    if (alreadyRich) {
-                        console.log(`  ✅ Scene ${s.sceneIndex + 1}: prompt already rich (${wordCount} words), skipping enrichment`);
-                        continue;
-                    }
+        const finalImageUrls = [...resolvedAssets.imageUrls];
 
+        for (let i = 0; i < scriptData.scenes.length; i++) {
+            if (resolvedAssets.imageUrls[i] !== "") continue;
+
+            // Check if series was cancelled
+            const isCancelled = await step.run(`check-cancel-image-scene-${i}`, async () => {
+                const [current] = await db.select({ status: shortVideoSeries.status })
+                    .from(shortVideoSeries)
+                    .where(eq(shortVideoSeries.seriesId, seriesId));
+                return !current || current.status === "completed" || current.status === "cancelled";
+            });
+
+            if (isCancelled) {
+                console.log(`🛑 Force stop detected! Aborting image generation for scene ${i + 1}.`);
+                finalImageUrls[i] = "SKIP_T2V";
+                continue;
+            }
+
+            const scene = scriptData.scenes[i];
+            const originalPrompt = scene.imagePrompt || scene.narration || "Cinematic scene illustration";
+
+            // Enrich prompt sequentially (if weak/short)
+            const wordCount = originalPrompt.split(/\s+/).length;
+            const alreadyRich = wordCount >= 70 && /photorealistic|cinematic|8k|ultra detailed/i.test(originalPrompt);
+
+            let enrichedPrompt = originalPrompt;
+            if (!alreadyRich) {
+                enrichedPrompt = await step.run(`enrich-prompt-scene-${i}`, async () => {
+                    console.log(`✨ Enriching prompt for Scene ${i + 1} sequentially...`);
                     try {
                         const systemPrompt = `You are an expert AI image prompt engineer specialising in photorealistic image generation for Nano Banana 2 (Leonardo AI). Your job is to rewrite a short or vague scene description into a SINGLE, rich, detailed image generation prompt.
 
@@ -1567,12 +1523,12 @@ MANDATORY STRUCTURE (all elements required):
 
 OUTPUT: Return ONLY the enriched prompt text (60-90 words). No explanation, no labels, no JSON.`;
 
-                        const sceneNarration = scriptData.scenes[s.sceneIndex]?.narration || '';
+                        const sceneNarration = scene.narration || '';
                         const userPrompt = `SCENE NARRATION (the image MUST depict THIS specific moment/event):
 "${sceneNarration}"
 
 Original image prompt (may be too generic or short):
-"${s.prompt}"
+"${originalPrompt}"
 
 Your task: Rewrite the image prompt so it VISUALLY DEPICTS the specific event, action, or moment described in the SCENE NARRATION above — not just the subject in general.
 
@@ -1589,69 +1545,42 @@ RULES:
                             maxTokens: 300,
                         });
                         if (enriched && enriched.trim().split(/\s+/).length > wordCount) {
-                            console.log(`  ✨ Scene ${s.sceneIndex + 1}: prompt enriched ${wordCount}→${enriched.trim().split(/\s+/).length} words`);
-                            realEntityScenes[idx].prompt = enriched.trim();
+                            console.log(`  ✨ Scene ${i + 1}: prompt enriched ${wordCount}→${enriched.trim().split(/\s+/).length} words`);
+                            return enriched.trim();
                         }
                     } catch (enrichErr: any) {
-                        console.warn(`  ⚠️ Scene ${s.sceneIndex + 1}: prompt enrichment failed (${enrichErr?.message?.slice(0, 80)}), using original`);
+                        console.warn(`  ⚠️ Scene ${i + 1}: prompt enrichment failed (${enrichErr?.message?.slice(0, 80)}), using original`);
                     }
+                    return originalPrompt;
+                });
+            }
 
-                    // 2s cooldown between enrichment calls — free tier
-                    // shares a ~60 RPM window across the whole pipeline. By enrichment
-                    // time, script generation has already consumed several calls.
-                    // 2s spacing lets the rolling window partially replenish.
-                    if (idx < realEntityScenes.length - 1) {
-                        await new Promise(r => setTimeout(r, 2000));
-                    }
-                }
-
-                const parallelConfigs = realEntityScenes.map(s => ({
-                    index: s.sceneIndex,
-                    prompt: s.prompt,
-                    // 768×1344 (9:16) is the default in the parallel function
-                }));
-
+            // Generate image using Nano Banana 2
+            const imageUrl = await step.run(`generate-image-scene-${i}`, async () => {
+                console.log(`🖼️ Generating Nano Banana image for Scene ${i + 1}/${scriptData.scenes.length}...`);
                 try {
-                    const parallelResults = await generateNanoBananaImagesParallel(
-                        parallelConfigs,
-                        cancelSignal,
-                        4, // concurrency: up to 4 scenes submitted simultaneously
-                    );
-
-                    // Map results back to imageUrls
-                    for (const result of parallelResults) {
-                        if (result.success && result.imageUrl) {
-                            imageUrls[result.index] = result.imageUrl;
-                            console.log(`✅ Scene ${result.index + 1} Nano Banana image: ${result.imageUrl.substring(0, 60)}...`);
-                        } else {
-                            console.warn(`⚠️ Scene ${result.index + 1} Nano Banana failed: ${result.error || 'unknown'}. Falling back to text-to-video.`);
-                            imageUrls[result.index] = "SKIP_T2V";
-                        }
-                    }
+                    const url = await generateNanoBananaImage(enrichedPrompt, 768, 1344);
+                    console.log(`✅ Scene ${i + 1} Nano Banana image ready: ${url.substring(0, 60)}...`);
+                    return url;
                 } catch (err: any) {
-                    if (cancelSignal.cancelled || err?.message?.includes('cancelled')) {
-                        console.log(`🛑 Parallel image generation cancelled by force stop.`);
-                    } else {
-                        console.error(`❌ Parallel Nano Banana batch failed: ${err?.message}`);
-                    }
-                    // Mark all unfinished real_entity scenes as SKIP_T2V
-                    for (const s of realEntityScenes) {
-                        if (!imageUrls[s.sceneIndex] || imageUrls[s.sceneIndex] === "") {
-                            imageUrls[s.sceneIndex] = "SKIP_T2V";
-                        }
-                    }
+                    console.warn(`⚠️ Scene ${i + 1} Nano Banana failed: ${err?.message || 'unknown'}. Falling back to text-to-video.`);
+                    return "SKIP_T2V";
                 }
+            });
+
+            finalImageUrls[i] = imageUrl;
+
+            // Small gap between steps to avoid rate-limits
+            if (i < scriptData.scenes.length - 1) {
+                await new Promise(r => setTimeout(r, 1000));
             }
+        }
 
-            const successCount = imageUrls.filter(u => u.length > 0).length;
-            console.log(`✅ Final result: ${successCount}/${totalScenes} images generated`);
-
-            if (successCount < totalScenes) {
-                console.warn(`⚠️ ${totalScenes - successCount} scene image(s) could not be generated after all attempts.`);
-            }
-
-            return { imageUrls, sceneOverrides, sceneProbedDurations };
-        });
+        const imageData = {
+            imageUrls: finalImageUrls,
+            sceneOverrides: resolvedAssets.sceneOverrides,
+            sceneProbedDurations: resolvedAssets.sceneProbedDurations
+        };
 
         // Step 4.5: Generate high-quality AI Thumbnail using Nano Banana 2 (Leonardo AI)
         const thumbnailData = await step.run("generate-thumbnail", async () => {
