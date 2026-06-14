@@ -201,6 +201,12 @@ function CourseChapters({ course, onRefresh }: Props) {
                     newDlUrls[row.chapterId] = row.videoUrl;
                 } else if (row.renderStatus === 'rendering:video') {
                     newDlStatus[row.chapterId] = 'rendering';
+                    // CRITICAL FIX: if DB says rendering but we're not already polling,
+                    // start polling now so the chapter can transition out of the
+                    // stale "Rendering 0%" state automatically.
+                    if (!pollTimers.current[row.chapterId]) {
+                        pollRenderStatus(row.chapterId);
+                    }
                 } else if (row.renderStatus === 'video:failed') {
                     newDlStatus[row.chapterId] = 'failed';
                 }
@@ -240,7 +246,7 @@ function CourseChapters({ course, onRefresh }: Props) {
         } catch (err) {
             console.error("Failed to fetch chapter statuses:", err);
         }
-    }, [course?.courseId, onRefresh, statuses]);
+    }, [course?.courseId, onRefresh, statuses, pollRenderStatus]);
 
     // Initial status fetch on mount/course change
     useEffect(() => {

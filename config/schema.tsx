@@ -251,4 +251,6 @@ export const chapterGenerationStatus = pgTable("chapter_generation_status", {
     videoUrl: text("video_url"),
     // Render error details (when renderStatus = video:failed)
     renderError: text("render_error"),
+    // 0-100 progress updated as each slide completes during GitHub Actions render
+    renderProgress: integer("render_progress").default(0),
 })
