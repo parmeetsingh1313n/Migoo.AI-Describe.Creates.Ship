@@ -612,6 +612,26 @@ Reply with ONLY the chosen topic/title. Do NOT include any markdown code blocks,
         // Update status: generating script
         await step.run("update-status-script", () => updateSeriesStatus(seriesId, "generating:script"));
 
+        // Step 1.8: Run Web Research (RAG) — separate step to prevent Vercel 60s timeout
+        const webResearchData = await step.run("run-web-research", async () => {
+            if (studioPayload?.scriptData) {
+                return null;
+            }
+            console.log(`🌐 Deep-Crawl RAG research on: "${chosenTopic}"...`);
+            const webResearch = await searchWeb(chosenTopic, { deepCrawl: true });
+            const webContext = webResearch.contextBlock || '';
+            let factCount = 0;
+            if (webResearch.factSheet) {
+                factCount = webResearch.factSheet.split('\n').filter((l: string) => /^[•\-\*]/.test(l.trim())).length;
+                console.log(`📋 Fact sheet: ${factCount} verified facts from ${webResearch.sources.length} sources`);
+            }
+            return {
+                webContext,
+                factCount,
+                sourcesCount: webResearch.sources?.length || 0,
+            };
+        });
+
         // Step 2: Generate Video Script — skip when Studio pre-edited script is provided
         const scriptData = await step.run("generate-video-script", async () => {
             // ── STUDIO MODE: Use pre-edited user script ─────────────────────
@@ -654,15 +674,7 @@ Reply with ONLY the chosen topic/title. Do NOT include any markdown code blocks,
             ];
             const angle = contentAngles[seed % contentAngles.length];
             
-            // ── DEEP-CRAWL RAG: full web research + page extraction + fact distillation ─────
-            console.log(`🌐 Deep-Crawl RAG research on: "${chosenTopic}"...`);
-            const webResearch = await searchWeb(chosenTopic, { deepCrawl: true });
-            const webContext = webResearch.contextBlock || '';
-            if (webResearch.factSheet) {
-                const factCount = webResearch.factSheet.split('\n').filter((l: string) => /^[•\-\*]/.test(l.trim())).length;
-                console.log(`📋 Fact sheet: ${factCount} verified facts from ${webResearch.sources.length} sources`);
-            }
-
+            const webContext = webResearchData?.webContext || '';
             const randomTopicTwist = `SPECIFIC TOPIC: The video MUST be specifically about: "${chosenTopic}". Focus entirely on this topic. Make it engaging, viral, and packed with fascinating details. Angle: ${angle}. Seed: ${seed}`;
             // ─────────────────────────────────────────────────────────
 
