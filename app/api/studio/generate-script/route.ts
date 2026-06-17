@@ -6,6 +6,8 @@ import { NextRequest, NextResponse } from "next/server";
 // POST /api/studio/generate-script
 // body: { topic, contextMarkdown?, instruction?, language, seriesNiche, docImages? }
 // Returns: { scriptData }
+// maxDuration=300 allows the RAG search (~15s) + script LLM (~40s) to complete safely.
+export const maxDuration = 300;
 
 export async function POST(req: NextRequest) {
     try {
@@ -32,7 +34,10 @@ export async function POST(req: NextRequest) {
         let searchedAt = "";
         if (topic) {
             try {
-                const research = await searchWeb(topic);
+                // skipDistillation:true — skip the 50-60s LLM distillation step.
+                // The script generation LLM receives raw snippet context which is
+                // sufficient; it does its own synthesis from the research.
+                const research = await searchWeb(topic, { skipDistillation: true });
                 webSources = research.sources;
                 webContextBlock = research.contextBlock;
                 searchedAt = research.searchedAt;

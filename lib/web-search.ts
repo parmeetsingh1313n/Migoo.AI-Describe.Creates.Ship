@@ -342,7 +342,7 @@ async function deepCrawlSources(sources: WebSource[]): Promise<WebSource[]> {
  * This is the core of the advanced RAG — model reads raw web content and extracts
  * only the most valuable, specific, accurate facts.
  */
-async function distillFactSheet(query: string, sources: WebSource[]): Promise<string> {
+export async function distillFactSheet(query: string, sources: WebSource[]): Promise<string> {
     // Build raw content from all sources
     const sourcesWithContent = sources.filter(s => 
         (s.fullText && s.fullText.length > 100) || s.snippet.length > 100
@@ -427,8 +427,8 @@ Extract 30-45 specific facts grouped into 5-7 chronological/thematic categories.
  * @param options.deepCrawl - Whether to crawl full page content (default: true)
  * @returns WebResearchResult with distilled fact sheet and context block
  */
-export async function searchWeb(query: string, options: { deepCrawl?: boolean } = {}): Promise<WebResearchResult> {
-    const { deepCrawl = true } = options;
+export async function searchWeb(query: string, options: { deepCrawl?: boolean; skipDistillation?: boolean } = {}): Promise<WebResearchResult> {
+    const { deepCrawl = true, skipDistillation = false } = options;
 
     if (!query || query.trim().length < 3) {
         return { query, sources: [], factSheet: '', contextBlock: '', searchedAt: new Date().toISOString() };
@@ -469,8 +469,15 @@ export async function searchWeb(query: string, options: { deepCrawl?: boolean } 
         enrichedSources = await deepCrawlSources(allSources);
     }
 
-    // ── Step 3: Distill fact sheet using Groq ───────────────────────────────
-    const factSheet = await distillFactSheet(query, enrichedSources);
+    // ── Step 3: Distill fact sheet using LLM ────────────────────────────────
+    // skipDistillation:true → skip the ~50-60s LLM call; use raw snippets.
+    // Use this for topic-discovery / angles generation where snippets suffice.
+    let factSheet = '';
+    if (skipDistillation) {
+        console.log(`⏭️ Skipping fact distillation (skipDistillation:true) — using raw source snippets`);
+    } else {
+        factSheet = await distillFactSheet(query, enrichedSources);
+    }
 
     // ── Step 4: Build context block for LLM prompt injection ────────────────
     let contextBlock = '';

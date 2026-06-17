@@ -2,6 +2,9 @@ import { shortsLLM } from "@/lib/shorts-llm";
 import { searchWeb } from "@/lib/web-search";
 import { NextRequest, NextResponse } from "next/server";
 
+// Each call to this route can take up to 5 minutes (RAG + LLM).
+export const maxDuration = 300;
+
 export async function POST(req: NextRequest) {
     try {
         const { niche, seriesTitle } = await req.json();
@@ -14,7 +17,7 @@ export async function POST(req: NextRequest) {
             console.log(`🌐 [generate-angles] RAG search for topic ideas: "${topic}"`);
             const research = await searchWeb(
                 `${topic} unique lesser known facts mysteries hidden history secrets`,
-                { deepCrawl: false }   // fast mode — just snippets, no full crawl
+                { deepCrawl: false, skipDistillation: true }   // fast snippets only — no 60s LLM distillation
             );
             webContext = research.contextBlock || "";
             console.log(`✅ [generate-angles] RAG done — ${research.sources.length} sources`);
