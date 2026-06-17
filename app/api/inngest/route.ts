@@ -3,10 +3,10 @@ import { generateCourseImagesFn, generateCourseThumbnailFn, generateCourseVideoC
 import { generateMotionGraphic, generateShortVideo, helloWorld, renderMotionGraphicOnly } from "@/inngest/functions";
 import { serve } from "inngest/next";
 
-// Tell Vercel to keep this serverless function alive for up to 60s.
-// Inngest handles short timeouts gracefully via step-resumption, so
-// a lower value is safer than a very high one (which can cause real blocking).
-export const maxDuration = 60;
+// Inngest requires a long maxDuration so each step.run() gets enough time.
+// Deep-crawl RAG + LLM distillation can take ~80s; script generation ~40s.
+// 300s (5 min) is the recommended value for Inngest on Vercel Pro.
+export const maxDuration = 300;
 
 export const { GET, POST, PUT } = serve({
     client: inngest,

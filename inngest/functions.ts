@@ -11,7 +11,7 @@ import { and, desc, eq, or } from "drizzle-orm";
 import { inngest } from "./client";
 import { groq } from "@/config/groq";
 import { shortsLLM } from "@/lib/shorts-llm";
-import { searchWeb } from "@/lib/web-search";
+import { distillFactSheet, searchWeb } from "@/lib/web-search";
 
 // ─── Lightweight MP4 duration prober (works on serverless, no ffprobe) ────────
 // Fetches up to 2 MB of the file and walks MP4 box headers looking for
@@ -540,8 +540,29 @@ export const generateShortVideo = inngest.createFunction(
             return series;
         });
 
-        // Step 1.5: Discover a unique topic with RAG (Tavily + Wikipedia) to avoid duplicates and generic/limited knowledge
-        const chosenTopic = await step.run("discover-unique-topic", async () => {
+        // ── Step 1.5a: Fetch already-covered titles (DB only, very fast) ────────
+        const coveredTitles = await step.run("fetch-covered-topics", async () => {
+            if (customTopic || studioPayload?.scriptData?.videoTitle) return [];
+            const existingVideos = await db
+                .select({ title: shortVideoAssets.videoTitle })
+                .from(shortVideoAssets)
+                .where(eq(shortVideoAssets.seriesId, seriesId));
+            return existingVideos.map(v => v.title).filter(Boolean).slice(0, 25);
+        });
+
+        // ── Step 1.5b: Fast snippet research for topic ideas (NO distillation LLM call) ──
+        // skipDistillation:true means we only run Tavily + Wikipedia (< 15s total).
+        // Full LLM fact-distillation is not needed here — raw snippets inspire topic selection.
+        const topicResearchContext = await step.run("research-topic-ideas", async () => {
+            if (customTopic || studioPayload?.scriptData?.videoTitle) return '';
+            const searchQuery = `${seriesData.title} ${seriesData.niche} unique lesser known facts history mysteries`;
+            console.log(`🔍 Fast snippet research for topic ideas: "${searchQuery.slice(0, 60)}"`);
+            const research = await searchWeb(searchQuery, { deepCrawl: false, skipDistillation: true });
+            return research.contextBlock || '';
+        });
+
+        // ── Step 1.5c: LLM call to pick the unique topic (isolated, fresh timeout window) ──
+        const chosenTopic = await step.run("pick-unique-topic", async () => {
             if (customTopic) {
                 console.log(`🎯 Custom topic provided by user: "${customTopic}"`);
                 return customTopic;
@@ -553,23 +574,8 @@ export const generateShortVideo = inngest.createFunction(
 
             console.log(`🔍 AI discovering unique topic for series niche: "${seriesData.niche}", title: "${seriesData.title}"`);
 
-            // Fetch already generated video titles in this series
-            const existingVideos = await db
-                .select({ title: shortVideoAssets.videoTitle })
-                .from(shortVideoAssets)
-                .where(eq(shortVideoAssets.seriesId, seriesId));
-            const coveredTitles = existingVideos
-                .map(v => v.title)
-                .filter(Boolean)
-                .slice(0, 25);
-
-            // Fetch live web research around the series theme/niche (FAST mode — no deep crawl, just snippets for topic picking)
-            const searchQuery = `${seriesData.title} ${seriesData.niche} unique lesser known facts history mysteries`;
-            const research = await searchWeb(searchQuery, { deepCrawl: false });
-            const researchContext = research.contextBlock || '';
-
             const alreadyCoveredText = coveredTitles.length > 0
-                ? `\nHere are the video topics already covered in this series (NEVER repeat these or talk about these exact things):\n${coveredTitles.map(t => `- ${t}`).join('\n')}`
+                ? `\nHere are the video topics already covered in this series (NEVER repeat these or talk about these exact things):\n${coveredTitles.map((t: string) => `- ${t}`).join('\n')}`
                 : '';
 
             const systemPrompt = `You are a viral content strategist for short-form videos. Your job is to choose ONE highly unique, engaging, and specific video topic/title.`;
@@ -577,7 +583,7 @@ export const generateShortVideo = inngest.createFunction(
 Niche: "${seriesData.niche}"
 ${alreadyCoveredText}
 
-${researchContext ? `REAL-TIME WEB RESEARCH context:\n${researchContext}\n` : ''}
+${topicResearchContext ? `REAL-TIME WEB RESEARCH context:\n${topicResearchContext}\n` : ''}
 
 Task:
 Pick ONE highly specific, fascinating, and unique video topic or title that:
@@ -594,7 +600,7 @@ Reply with ONLY the chosen topic/title. Do NOT include any markdown code blocks,
                     temperature: 0.9,
                     maxTokens: 50,
                 });
-                const picked = result?.trim().replace(/^["']|["']$/g, '') || '';
+                const picked = result?.trim().replace(/^[\"']|[\"']$/g, '') || '';
                 console.log(`🎯 AI chose unique topic: "${picked}"`);
                 return picked || seriesData.title;
             } catch (err: any) {
@@ -612,24 +618,57 @@ Reply with ONLY the chosen topic/title. Do NOT include any markdown code blocks,
         // Update status: generating script
         await step.run("update-status-script", () => updateSeriesStatus(seriesId, "generating:script"));
 
-        // Step 1.8: Run Web Research (RAG) — separate step to prevent Vercel 60s timeout
-        const webResearchData = await step.run("run-web-research", async () => {
-            if (studioPayload?.scriptData) {
-                return null;
-            }
+        // ── Step 1.8a: Deep-Crawl Web Research (Tavily + Wikipedia + page crawl, NO LLM distillation) ──
+        // Crawling pages is I/O-bound (~15-20s). We separate it from the LLM distillation
+        // so each slow operation gets its own fresh Vercel execution window.
+        const rawResearchSources = await step.run("run-web-research", async () => {
+            if (studioPayload?.scriptData) return null;
             console.log(`🌐 Deep-Crawl RAG research on: "${chosenTopic}"...`);
-            const webResearch = await searchWeb(chosenTopic, { deepCrawl: true });
-            const webContext = webResearch.contextBlock || '';
-            let factCount = 0;
-            if (webResearch.factSheet) {
-                factCount = webResearch.factSheet.split('\n').filter((l: string) => /^[•\-\*]/.test(l.trim())).length;
-                console.log(`📋 Fact sheet: ${factCount} verified facts from ${webResearch.sources.length} sources`);
-            }
-            return {
-                webContext,
-                factCount,
-                sourcesCount: webResearch.sources?.length || 0,
-            };
+            // skipDistillation:true — crawl pages but defer the LLM fact-distillation to next step
+            const webResearch = await searchWeb(chosenTopic, { deepCrawl: true, skipDistillation: true });
+            console.log(`✅ Crawl complete: ${webResearch.sources.length} sources`);
+            // Return only what we need — avoid serialising huge fullText between steps
+            return webResearch.sources.map((s: any) => ({
+                title:    s.title,
+                url:      s.url,
+                snippet:  s.snippet,
+                fullText: s.fullText ? s.fullText.slice(0, 8000) : undefined,
+                source:   s.source,
+            }));
+        });
+
+        // ── Step 1.8b: LLM Fact-Sheet Distillation (isolated — its own 300s window) ──
+        // The distillFactSheet LLM call takes 50-80s on free-tier models.
+        // Keeping it in its own step prevents it from consuming other steps' time budgets.
+        const webResearchData = await step.run("distill-fact-sheet", async () => {
+            if (studioPayload?.scriptData || !rawResearchSources?.length) return null;
+            console.log(`🧠 Distilling fact sheet from ${rawResearchSources.length} sources...`);
+            const factSheet = await distillFactSheet(chosenTopic, rawResearchSources as any);
+            const factCount = factSheet.split('\n').filter((l: string) => /^[•\-\*]/.test(l.trim())).length;
+            console.log(`📋 Fact sheet: ${factCount} verified facts from ${rawResearchSources.length} sources`);
+
+            // Rebuild context block from distilled fact sheet
+            const wikiCount = (rawResearchSources as any[]).filter((s: any) => s.source === 'wikipedia').length;
+            const webCount  = (rawResearchSources as any[]).filter((s: any) => s.source === 'tavily').length;
+            const webContext = `
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📚 VERIFIED RESEARCH (Deep-Crawl RAG — ${wikiCount} Wikipedia + ${webCount} web sources)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Topic: ${chosenTopic}
+
+${factSheet}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🚨 SCRIPT-WRITING RULES (MANDATORY):
+1. Follow the CENTRAL NARRATIVE thread above — every scene must advance that story.
+2. Use SPECIFIC facts (dates, names, numbers) from the research in EVERY scene.
+3. Facts marked (confirmed ✓) are verified by multiple sources — use them FIRST.
+4. Wikipedia data overrides your training knowledge when they conflict.
+5. Each scene must END with a natural bridge to the NEXT scene topic.
+6. Do NOT introduce any fact not present in this research block.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+`;
+            return { webContext, factCount, sourcesCount: rawResearchSources.length };
         });
 
         // Step 2: Generate Video Script — skip when Studio pre-edited script is provided
