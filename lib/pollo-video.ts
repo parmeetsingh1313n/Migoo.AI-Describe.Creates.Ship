@@ -421,6 +421,9 @@ export async function generateSeedanceVideo(
 
 /**
  * Generate multiple scene videos in parallel using Pollo Seedance 1.5 Pro.
+ * NOTE: This runs the FULL submit+poll cycle inside one call — kept for Studio mode
+ * where we can't use the Inngest sleep pattern (direct API endpoint context).
+ * For the main pipeline, use submitSeedanceVideoTask + checkPolloVideoTaskStatus + processSeedanceVideoResult.
  */
 export async function generateKlingScenesParallel(
     scenes: Array<{
@@ -460,3 +463,108 @@ export async function generateKlingScenesParallel(
     );
     return finalResults;
 }
+
+// ─── Submit-only + Single-check + Process helpers (submit-sleep-poll pattern) ──
+
+/**
+ * Submit a Seedance 1.5 Pro video task WITHOUT polling.
+ * Returns { taskId, apiKey } for idempotent polling in later Inngest steps.
+ * This is safe to call inside a step.run because it completes in < 5 seconds.
+ */
+export async function submitSeedanceVideoTask(
+    imageUrl: string | undefined,
+    prompt: string,
+    aspectRatio: "9:16" | "16:9" | "1:1" = "9:16"
+): Promise<{ taskId: string; apiKey: string }> {
+    const input: Record<string, any> = {
+        prompt,
+        resolution: "480p",
+        length: 5,
+        aspectRatio,
+        cameraFixed: false,
+        generateAudio: false,
+    };
+    // Only add image for img2vid; text2vid has no image
+    if (imageUrl && imageUrl !== "SKIP_T2V" && imageUrl !== "SKIP_VEO" && imageUrl !== "") {
+        input.image = imageUrl;
+    }
+    console.log(`🚀 [pollo-video] Submitting Seedance task (${imageUrl ? "img2vid" : "txt2vid"}, no poll)...`);
+    return submitPolloVideoTask({ input }, "/generation/bytedance/seedance-1-5-pro");
+}
+
+/**
+ * Single lightweight status check for a Pollo video task — no polling loop.
+ * Use this inside Inngest check-round steps after sleeping.
+ */
+export async function checkPolloVideoTaskStatus(
+    taskId: string,
+    apiKey: string
+): Promise<{ status: "complete" | "failed" | "pending"; url?: string }> {
+    try {
+        const workingUrl = await getStatusUrl(taskId, apiKey);
+        const res = await fetch(workingUrl, { headers: makeHeaders(apiKey) });
+        if (!res.ok) return { status: "pending" };
+
+        const data = await res.json();
+        const gen = data?.data?.generations?.[0];
+        const st = gen?.status || data?.data?.status || data?.status || "unknown";
+
+        if (st === "succeed" || st === "success" || st === "completed") {
+            const url =
+                gen?.url ||
+                data?.data?.output ||
+                data?.output ||
+                data?.data?.url ||
+                data?.url;
+            if (url) return { status: "complete", url };
+        }
+        if (st === "failed" || st === "error") return { status: "failed" };
+        return { status: "pending" };
+    } catch {
+        return { status: "pending" };
+    }
+}
+
+/**
+ * Process a finished Seedance video: download raw URL → FFmpeg stretch → upload to Appwrite.
+ * This should run in its own Inngest step.run so each scene gets its own 60s window.
+ * On retry, the caller checks shortVideoProgress for an existing resultUrl before calling this.
+ */
+export async function processSeedanceVideoResult(
+    rawVideoUrl: string,
+    imageUrl: string | undefined,
+    durationSec: number,
+    seriesId: string,
+    sceneIndex: number
+): Promise<{ videoUrl: string; thumbnailUrl: string; actualDurationSec: number }> {
+    console.log(`📥 [pollo-video] Processing scene ${sceneIndex + 1}: ${rawVideoUrl.substring(0, 60)}...`);
+
+    const videoRes = await fetch(rawVideoUrl);
+    if (!videoRes.ok) throw new Error(`Failed to download Pollo video: ${videoRes.status}`);
+    let videoBuffer: Buffer = Buffer.from(new Uint8Array(await videoRes.arrayBuffer()));
+
+    const TRIM_MARGIN = 0.5;
+    let stretchSucceeded = false;
+    try {
+        videoBuffer = await stretchVideo(videoBuffer, durationSec, 5);
+        stretchSucceeded = true;
+    } catch (err: any) {
+        console.warn(`⚠️ stretchVideo failed for scene ${sceneIndex + 1}, using original: ${err.message}`);
+    }
+
+    const filename = `shorts/${seriesId}/scene_${sceneIndex}_pollo_${Date.now()}.mp4`;
+    const blob = await putWithRotation(filename, videoBuffer, {
+        access: "public",
+        contentType: "video/mp4",
+    });
+
+    const reportedDuration = stretchSucceeded ? Math.max(1.0, durationSec - TRIM_MARGIN) : 5;
+    console.log(`✅ Scene ${sceneIndex + 1} processed & uploaded (${reportedDuration.toFixed(2)}s): ${blob.url}`);
+
+    return {
+        videoUrl: blob.url,
+        thumbnailUrl: imageUrl || "",
+        actualDurationSec: reportedDuration,
+    };
+}
+

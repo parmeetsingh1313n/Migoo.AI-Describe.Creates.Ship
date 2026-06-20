@@ -274,19 +274,38 @@ export async function generateNanoBananaImage(
 
 /**
  * Generate an image using Pollo Nano Banana 2 (with key rotation).
+ *
+ * The API requires:
+ *  - Text-to-Image:        { prompt, aspectRatio, resolution }
+ *  - Image-to-Image:       { prompt, aspectRatio, resolution, imageUrl, images: [imageUrl] }
+ *
+ * @param prompt      - Image generation prompt
+ * @param imageUrl    - Optional source image URL for img2img mode
+ * @param width       - Width hint used to derive aspectRatio (default 768 = 9:16)
+ * @param height      - Height hint used to derive aspectRatio (default 1344 = 9:16)
+ * @param cancelSignal - Optional cancellation token
  */
 export async function generateNanoBanana2Image(
     prompt: string,
     imageUrl?: string,
+    width: number = 768,
+    height: number = 1344,
     cancelSignal?: { cancelled: boolean }
 ): Promise<string> {
-    console.log(`🎨 [pollo] Generating image via Nano Banana 2...`);
+    // Resolve aspectRatio from width/height — Nano Banana 2 requires this field
+    const aspectRatio = getAspectRatio(width, height);
+    const mode = imageUrl ? "img2img" : "txt2img";
+    console.log(`🎨 [pollo] Nano Banana 2 ${mode} | aspectRatio=${aspectRatio}...`);
+
     const body: Record<string, any> = {
         input: {
             prompt,
             resolution: "1K",
+            aspectRatio,   // ← REQUIRED by Nano Banana 2 API
         },
     };
+
+    // Image-to-Image: both imageUrl and images[] are required
     if (imageUrl) {
         body.input.imageUrl = imageUrl;
         body.input.images = [imageUrl];
@@ -294,7 +313,7 @@ export async function generateNanoBanana2Image(
 
     if (cancelSignal?.cancelled) throw new Error("Job cancelled by force stop.");
     const { taskId, apiKey } = await submitPolloImageTask(body, "/generation/google/nano-banana-2/image");
-    console.log(`✅ [pollo] Created Nano Banana 2 task: ${taskId}. Polling...`);
+    console.log(`✅ [pollo] Nano Banana 2 task created: ${taskId}. Polling...`);
     return pollPolloTask(taskId, apiKey, 10 * 60 * 1000, 5000, cancelSignal);
 }
 
@@ -494,4 +513,57 @@ export async function generateGptImage15(
 export async function uploadImageToLeonardo(imageUrl: string, _apiKey: string): Promise<string> {
     console.log(`☁️ [pollo] Skipping pre-upload step (Pollo accepts direct URLs)`);
     return imageUrl;
+}
+
+// ─── Submit-only + Single-check helpers (for submit-sleep-poll pattern) ────────
+
+/**
+ * Submit a Nano Banana 2 / GPT Image 2.0 thumbnail task without polling.
+ * Returns { taskId, apiKey } for use in later polling steps.
+ */
+export async function submitNanoBananaImageTask(
+    prompt: string,
+    width: number = 1024,
+    height: number = 1024,
+    cancelSignal?: { cancelled: boolean }
+): Promise<{ taskId: string; apiKey: string }> {
+    const body = {
+        input: {
+            prompt,
+            resolution: "1K",
+            quality: "medium",
+            aspectRatio: getAspectRatio(width, height),
+        },
+    };
+    if (cancelSignal?.cancelled) throw new Error("Job cancelled by force stop.");
+    console.log(`🎨 [pollo] Submitting thumbnail task (no poll)...`);
+    return submitPolloImageTask(body, "/generation/openai/gpt-image-2-0/image");
+}
+
+/**
+ * Single lightweight status check for any Pollo task — no polling loop.
+ * Returns 'complete' | 'failed' | 'pending' so callers can implement their own sleep-poll.
+ */
+export async function checkPolloTaskStatus(
+    taskId: string,
+    apiKey: string
+): Promise<{ status: 'complete' | 'failed' | 'pending'; url?: string }> {
+    try {
+        const workingUrl = await getStatusUrl(taskId, apiKey);
+        const res = await fetch(workingUrl, { headers: makeHeaders(apiKey) });
+        if (!res.ok) return { status: 'pending' };
+
+        const data = await res.json();
+        const gen = data?.data?.generations?.[0];
+        const st = gen?.status || data?.data?.status || data?.status || "unknown";
+
+        if (st === "succeed" || st === "success" || st === "completed") {
+            const url = gen?.url || data?.data?.output || data?.output || data?.data?.url || data?.url;
+            if (url) return { status: 'complete', url };
+        }
+        if (st === "failed" || st === "error") return { status: 'failed' };
+        return { status: 'pending' };
+    } catch {
+        return { status: 'pending' };
+    }
 }
