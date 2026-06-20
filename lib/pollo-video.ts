@@ -119,7 +119,7 @@ async function submitPolloVideoTask(
             }
 
             const data = await res.json();
-            const taskId = data?.data?.taskId;
+            const taskId = data?.data?.taskId || data?.taskId;
             if (!taskId) throw new Error(`Pollo video response missing taskId: ${JSON.stringify(data)}`);
 
             if (ki > 0) console.log(`✅ [pollo-video] Succeeded with [${keyLabel}] after key rotation.`);
