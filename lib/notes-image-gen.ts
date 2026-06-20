@@ -18,7 +18,7 @@ import {
     generateGptImage15,
     generateNanoBananaImage,
     NANO_BANANA_STYLES,
-} from "@/lib/leonardo";
+} from "@/lib/pollo";
 
 const NOTES_STYLE_UUID = NANO_BANANA_STYLES["Illustration"];
 

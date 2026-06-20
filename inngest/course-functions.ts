@@ -17,7 +17,7 @@ import { openrouter } from "@/config/openrouter";
 import { chapterContentSlides, chapterGenerationStatus, courseImages, coursesTable } from "@/config/schema";
 import { GENERATE_SINGLE_SLIDE_PROMPT } from "@/data/Prompt";
 import { putWithRotation } from "@/lib/blob";
-import { generateNanoBananaImage } from "@/lib/leonardo";
+import { generateNanoBananaImage } from "@/lib/pollo";
 import { eq } from "drizzle-orm";
 import { inngest } from "./client";
 

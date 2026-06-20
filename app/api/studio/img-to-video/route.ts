@@ -1,24 +1,12 @@
-import { putWithRotation } from "@/lib/blob";
 import { groq } from "@/config/groq";
+import { generateSeedanceVideo } from "@/lib/pollo-video";
 import { NextRequest, NextResponse } from "next/server";
 import * as zlib from "node:zlib";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-const INIT_IMAGE_ENDPOINT     = "https://cloud.leonardo.ai/api/rest/v1/init-image";
-const IMAGE_TO_VIDEO_ENDPOINT = "https://cloud.leonardo.ai/api/rest/v1/generations-image-to-video";
-const POLL_ENDPOINT           = "https://cloud.leonardo.ai/api/rest/v1/generations";
-const KLING_MODEL             = "KLING2_5";
-const SARVAM_BASE             = "https://api.sarvam.ai";
+const SARVAM_BASE = "https://api.sarvam.ai";
 
 // ─── Key helpers ──────────────────────────────────────────────────────────────
-function getLeonardoKeys(): string[] {
-    const names = [
-        "LEONARDO_API_KEY","LEONARDO_API_KEY1","LEONARDO_API_KEY2","LEONARDO_API_KEY3",
-        "LEONARDO_API_KEY4","LEONARDO_API_KEY5","LEONARDO_API_KEY6","LEONARDO_API_KEY7",
-        "LEONARDO_API_KEY8","LEONARDO_API_KEY9",
-    ];
-    return names.map(n => process.env[n]).filter((k): k is string => !!k && k.length > 0);
-}
 function getSarvamKeys(): string[] {
     const keys: string[] = [];
     const primary = process.env.SARVAM_API_KEY;
@@ -478,152 +466,12 @@ function buildFallbackPrompt(caption: string, _narration: string): string {
     return result;
 }
 
-// ─── Leonardo / Kling helpers ────────────────────────────────────────────────
-async function uploadImageToLeonardo(imageUrl: string, apiKey: string): Promise<string> {
-    const imageRes = await fetch(imageUrl);
-    if (!imageRes.ok) throw new Error(`Failed to download image: ${imageRes.status}`);
-    const imageBuffer = await imageRes.arrayBuffer();
-    const contentType = imageRes.headers.get("content-type") || "image/jpeg";
-    const ext = contentType.includes("webp") ? "webp"
-              : contentType.includes("jpeg") || contentType.includes("jpg") ? "jpg"
-              : "png";
-
-    const initRes = await fetch(INIT_IMAGE_ENDPOINT, {
-        method: "POST",
-        headers: { accept: "application/json", authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
-        body: JSON.stringify({ extension: ext }),
-    });
-    if (!initRes.ok) throw new Error(`Leonardo init-image failed (${initRes.status}): ${await initRes.text()}`);
-    const initData  = await initRes.json();
-    const uploadUrl = initData?.uploadInitImage?.url;
-    const imageId   = initData?.uploadInitImage?.id;
-    const fields    = initData?.uploadInitImage?.fields ? JSON.parse(initData.uploadInitImage.fields) : null;
-    if (!uploadUrl || !imageId) throw new Error(`Missing url/id from init-image: ${JSON.stringify(initData).slice(0, 200)}`);
-
-    if (fields) {
-        const form = new FormData();
-        for (const [k, v] of Object.entries(fields)) form.append(k, v as string);
-        form.append("file", new Blob([imageBuffer], { type: contentType }), `upload.${ext}`);
-        const uploadRes = await fetch(uploadUrl, { method: "POST", body: form });
-        if (!uploadRes.ok && uploadRes.status !== 204) throw new Error(`Image upload failed (${uploadRes.status}): ${await uploadRes.text()}`);
-    } else {
-        const uploadRes = await fetch(uploadUrl, { method: "PUT", headers: { "Content-Type": contentType }, body: imageBuffer });
-        if (!uploadRes.ok && uploadRes.status !== 200) throw new Error(`Image upload PUT failed (${uploadRes.status}): ${await uploadRes.text()}`);
-    }
-    return imageId;
-}
-
-// ── submitImg2VidJob — ONLY uses API-documented parameters ──────────────────
-// Per Leonardo API docs, Kling 2.5 Turbo image-to-video accepts ONLY:
-//   prompt, imageId, imageType, resolution, height, width, duration, model, isPublic, endFrameImage
-// negativePrompt, motionStrength, frameInterpolation → silently IGNORED by the API!
-async function submitImg2VidJob(
-    imageId: string, prompt: string, duration: 5 | 10,
-    apiKey: string, forceShorts = true
-): Promise<string> {
-    // Final prompt sanitization
-    let finalPrompt = prompt
-        .replace(/\b(text|title|caption|subtitle|label|watermark|logo|word|letter|overlay|heading|banner|sign|writing|inscription|credit|quote|annotation|typography|font)[\w]*\b/gi, '')
-        .replace(/\b(the image shows?|in the image|we can see|there is|there are|the scene depicts?|the photo shows?|a photo of|an image of|a picture of)\b/gi, '')
-        .replace(/\s+/g, ' ').trim().slice(0, 1200);
-
-    // Ensure anti-text + stationary camera suffix
-    if (!finalPrompt.includes('no text') && !finalPrompt.includes('No text')) {
-        finalPrompt += ANTI_TEXT_SUFFIX;
-    }
-    if (!/(stationary|locked|tripod|zero camera|no camera)/i.test(finalPrompt)) {
-        finalPrompt += ' Stationary camera, locked tripod.';
-    }
-
-    // Try portrait first for Shorts; fall back to landscape if the API rejects it
-    const candidates = forceShorts
-        ? [
-            { width: 1080, height: 1920, label: "9:16 portrait (Shorts)" },
-            { width: 1920, height: 1080, label: "16:9 landscape (fallback)" },
-          ]
-        : [
-            { width: 1920, height: 1080, label: "16:9 landscape" },
-          ];
-
-    let lastError = "";
-    for (const dims of candidates) {
-        // ONLY send parameters documented in Leonardo API
-        const body = JSON.stringify({
-            prompt: finalPrompt,
-            imageId, imageType: "UPLOADED",
-            resolution: "RESOLUTION_1080",
-            width: dims.width, height: dims.height,
-            duration, model: KLING_MODEL,
-            isPublic: false,
-        });
-        console.log(`📐 [img-to-video] Trying ${dims.label} (${dims.width}×${dims.height}), prompt=${finalPrompt.length} chars...`);
-        const res = await fetch(IMAGE_TO_VIDEO_ENDPOINT, {
-            method: "POST",
-            headers: { accept: "application/json", authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
-            body,
-        });
-        if (!res.ok) {
-            const errText = await res.text();
-            lastError = `Kling img2vid submit failed (${res.status}): ${errText}`;
-            console.warn(`⚠️ [img-to-video] ${dims.label} rejected: ${errText.slice(0, 150)}`);
-            continue;
-        }
-        const data = await res.json();
-        const generationId =
-            data?.motionVideoGenerationJob?.generationId ||
-            data?.sdGenerationJob?.generationId ||
-            data?.generationId;
-        if (!generationId) throw new Error(`Missing generationId from Kling: ${JSON.stringify(data).slice(0, 300)}`);
-        console.log(`✅ [img-to-video] Accepted ${dims.label}, generationId=${generationId}`);
-        return generationId;
-    }
-    throw new Error(lastError || "All Kling resolution candidates failed");
-}
-
-async function pollKling(generationId: string, apiKey: string): Promise<string> {
-    const MAX = 80;
-    for (let i = 0; i < MAX; i++) {
-        const delay = i < 3 ? 5000 : i < 8 ? 8000 : i < 18 ? 12000 : 15000;
-        await new Promise(r => setTimeout(r, delay));
-        const res = await fetch(`${POLL_ENDPOINT}/${generationId}`, {
-            headers: { accept: "application/json", authorization: `Bearer ${apiKey}` },
-        });
-        if (res.status === 429) { await new Promise(r => setTimeout(r, 10000)); continue; }
-        if (res.status === 404 && i < 10) { continue; }
-        if (!res.ok) throw new Error(`Kling poll failed (${res.status}): ${await res.text()}`);
-        const data = await res.json();
-        const gen  = data?.generations_by_pk;
-        if (gen?.status === "COMPLETE") {
-            const videos = gen?.generated_images?.filter((img: any) => img.motionMP4URL);
-            if (videos?.length > 0) return videos[0].motionMP4URL;
-            const images = gen?.generated_images;
-            if (images?.length > 0) return images[0].motionMP4URL || images[0].url;
-            throw new Error("Kling COMPLETE but no video URL found");
-        }
-        if (gen?.status === "FAILED") throw new Error(`Kling job FAILED: ${JSON.stringify(data).slice(0, 300)}`);
-    }
-    throw new Error(`Kling img2vid timed out after ${MAX} polls`);
-}
-
-async function uploadVideoToAppwrite(klingVideoUrl: string, sceneIndex: number): Promise<{ finalUrl: string; isKlingFallback: boolean }> {
-    let buffer: Buffer | null = null;
-    try {
-        const res = await fetch(klingVideoUrl);
-        if (res.ok) buffer = Buffer.from(await res.arrayBuffer());
-    } catch (e) {
-        console.warn("[img-to-video] Could not download Kling video:", e);
-    }
-    if (!buffer) return { finalUrl: klingVideoUrl, isKlingFallback: true };
-    try {
-        const pathname = `studio/img2vid/scene${sceneIndex}_${Date.now()}.mp4`;
-        const result   = await putWithRotation(pathname, buffer, { access: "public", contentType: "video/mp4" });
-        console.log(`✅ [img-to-video] Uploaded: ${result.url.slice(0, 80)}`);
-        return { finalUrl: result.url, isKlingFallback: false };
-    } catch (e: any) {
-        console.warn(`[img-to-video] Upload failed: ${e.message?.slice(0, 100)}`);
-        return { finalUrl: klingVideoUrl, isKlingFallback: true };
-    }
-}
+// ─── Pollo Seedance 1.5 Pro — img-to-video ───────────────────────────────────
+// generateSeedanceVideo (from lib/pollo-video.ts) handles:
+//   1. Submitting the task to Pollo Seedance 1.5 Pro
+//   2. Polling for completion
+//   3. Downloading, FFmpeg-stretching, and uploading to Blob storage
+// No local image upload or API key rotation needed — Seedance accepts direct URLs.
 
 export async function processImgToVideo({ 
     imageUrl, 
@@ -640,11 +488,8 @@ export async function processImgToVideo({
 }) {
     if (!imageUrl) throw new Error("imageUrl is required");
 
-    const validDuration: 5 | 10 = duration >= 8 ? 10 : 5;
-    const keys = getLeonardoKeys();
-    if (keys.length === 0) throw new Error("No Leonardo API keys configured");
-
-    console.log(`📱 [img-to-video] Format: ${forceShorts ? "SHORTS (9:16 portrait)" : "LANDSCAPE (16:9)"}`);
+    const aspectRatio: "9:16" | "16:9" = forceShorts ? "9:16" : "16:9";
+    console.log(`📱 [img-to-video] Pollo Seedance 1.5 Pro | Format: ${aspectRatio} | ${duration}s`);
 
     // ── Step 1: Download the image for captioning ──────────────────────────
     let imgBuf: Buffer | null = null;
@@ -654,7 +499,6 @@ export async function processImgToVideo({
         if (imgRes.ok) {
             imgBuf      = Buffer.from(await imgRes.arrayBuffer());
             contentType = imgRes.headers.get("content-type") || "image/jpeg";
-            // Normalise content-type
             if (!contentType.startsWith("image/")) contentType = "image/jpeg";
         }
     } catch (e) {
@@ -677,48 +521,32 @@ export async function processImgToVideo({
         }
     }
 
-    // ── Step 3: Groq refines caption → Kling subject-preserving, anti-zoom prompt ──
-    console.log("✍️ [img-to-video] Step 2: Building Kling anti-zoom motion prompt...");
-    const klingPrompt = await buildKlingPrompt(caption, sceneNarration);
-    console.log(`📝 [img-to-video] Final Kling prompt: "${klingPrompt.slice(0, 120)}..."`);
+    // ── Step 3: Build Seedance motion prompt (reuse Groq prompt builder) ───
+    console.log("✍️ [img-to-video] Step 2: Building Seedance motion prompt...");
+    const motionPrompt = await buildKlingPrompt(caption, sceneNarration);
+    console.log(`📝 [img-to-video] Final Seedance prompt: "${motionPrompt.slice(0, 120)}..."`);
 
-    // ── Step 4: Kling animation ────────────────────────────────────────────
-    let klingVideoUrl = "";
-    let lastErr       = "";
+    // ── Step 4: Pollo Seedance 1.5 Pro — img2vid ──────────────────────────
+    // generateSeedanceVideo handles: submission → polling → download → FFmpeg stretch → blob upload
+    console.log(`🎬 [img-to-video] Step 3: Submitting to Pollo Seedance 1.5 Pro...`);
+    const seriesId = `studio_${Date.now()}`; // ephemeral series ID for blob path
+    const result = await generateSeedanceVideo(
+        imageUrl,
+        motionPrompt,
+        duration,
+        seriesId,
+        sceneIndex,
+        aspectRatio
+    );
 
-    for (const apiKey of keys) {
-        try {
-            console.log(`🎬 [img-to-video] Uploading image to Leonardo (key: ...${apiKey.slice(-6)})...`);
-            const imageId = await uploadImageToLeonardo(imageUrl, apiKey);
-
-            console.log(`🚀 [img-to-video] Submitting Kling job (${validDuration}s, shorts=${forceShorts})...`);
-            const generationId = await submitImg2VidJob(imageId, klingPrompt, validDuration, apiKey, forceShorts);
-
-            console.log(`⏳ [img-to-video] Polling Kling job ${generationId}...`);
-            klingVideoUrl = await pollKling(generationId, apiKey);
-
-            console.log(`🎥 [img-to-video] Kling completed: ${klingVideoUrl.slice(0, 80)}`);
-            break;
-        } catch (e: any) {
-            lastErr = e.message;
-            console.warn(`⚠️ [img-to-video] Key attempt failed: ${e.message?.slice(0, 120)}`);
-        }
-    }
-
-    if (!klingVideoUrl) {
-        throw new Error(`img-to-video failed: ${lastErr}`);
-    }
-
-    // ── Step 5: Upload to Appwrite ─────────────────────────────────────────
-    console.log(`📦 [img-to-video] Uploading to Appwrite...`);
-    const { finalUrl, isKlingFallback } = await uploadVideoToAppwrite(klingVideoUrl, sceneIndex);
+    console.log(`🎉 [img-to-video] Seedance complete: ${result.videoUrl.slice(0, 80)}`);
 
     return {
-        ok: true, 
-        videoUrl: finalUrl,
-        durationSec: validDuration, 
-        isKlingFallback,
-        isShorts: !!forceShorts,
+        ok: true,
+        videoUrl: result.videoUrl,
+        durationSec: result.actualDurationSec,
+        isKlingFallback: false,
+        isShorts: forceShorts,
     };
 }
 
