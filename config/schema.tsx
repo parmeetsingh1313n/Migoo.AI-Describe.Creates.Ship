@@ -1,4 +1,4 @@
-import { boolean, integer, json, pgTable, real, text, timestamp, varchar } from "drizzle-orm/pg-core";
+import { boolean, integer, json, pgTable, real, text, timestamp, uniqueIndex, varchar } from "drizzle-orm/pg-core";
 
 export const usersTable = pgTable("users", {
     id: integer().primaryKey().generatedAlwaysAsIdentity(),
@@ -128,6 +128,23 @@ export const shortVideoAssets = pgTable("short_video_assets", {
     status: varchar({ length: 50 }).default("completed"), // generating | completed | failed
     createdAt: timestamp("created_at").defaultNow(),
 })
+
+// ── Short Video Pipeline Progress (idempotency guard) ────────────
+// Stores per-scene task IDs so Inngest retries never create duplicate Pollo tasks.
+export const shortVideoProgress = pgTable("short_video_progress", {
+    id: integer().primaryKey().generatedAlwaysAsIdentity(),
+    seriesId: varchar({ length: 255 }).notNull().references(() => shortVideoSeries.seriesId),
+    stepKey: varchar({ length: 100 }).notNull(),   // e.g. "scene_video_2", "thumbnail"
+    taskId: varchar({ length: 255 }),              // Pollo task ID
+    apiKey: varchar({ length: 500 }),              // which key succeeded
+    resultUrl: varchar({ length: 1000 }),          // final output URL
+    durationSec: real("duration_sec"),             // video duration after processing
+    status: varchar({ length: 30 }).default("submitted"), // submitted | complete | failed
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+}, (t) => ({
+    uniqSeriesStep: uniqueIndex("progress_series_step_idx").on(t.seriesId, t.stepKey),
+}))
 
 // ── Motion Graphic Projects ─────────────────────────────────
 export const motionGraphicProjects = pgTable("motion_graphic_projects", {

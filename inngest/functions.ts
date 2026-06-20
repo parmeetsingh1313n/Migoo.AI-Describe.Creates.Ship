@@ -1,9 +1,9 @@
 import { aiFallback } from "@/config/ai-fallback";
 import { db } from "@/config/db";
-import { shortVideoAssets, shortVideoSeries } from "@/config/schema";
+import { shortVideoAssets, shortVideoProgress, shortVideoSeries } from "@/config/schema";
 import { putWithRotation } from "@/lib/blob";
-import { generateNanoBananaImage, generateNanoBananaImagesParallel, submitNanoBananaJobsParallel, checkNanoBananaJobsStatus, NanoBananaSceneConfig, generateGptImage15SingleUrl, generateNanoBanana2Image } from "@/lib/pollo";
-import { generateKlingScenesParallel } from "@/lib/pollo-video";
+import { generateNanoBananaImage, generateNanoBananaImagesParallel, submitNanoBananaJobsParallel, checkNanoBananaJobsStatus, NanoBananaSceneConfig, generateGptImage15SingleUrl, generateNanoBanana2Image, submitNanoBananaImageTask, checkPolloTaskStatus } from "@/lib/pollo";
+import { generateKlingScenesParallel, submitSeedanceVideoTask, checkPolloVideoTaskStatus, processSeedanceVideoResult } from "@/lib/pollo-video";
 import { getMusicUrl } from "@/lib/music-urls";
 import { translateScript } from "@/lib/translate";
 import { triggerRender } from "@/lib/video-render";
@@ -1695,7 +1695,7 @@ Rewrite so it VISUALLY DEPICTS the specific event in the narration. 65-90 words.
                 const fallbackUrl = await step.run(`image-nanobanana2-fallback-scene-${job.index}`, async () => {
                     try {
                         const prompt = enrichedPrompts[job.index] || (scriptData.scenes[job.index].imagePrompt || scriptData.scenes[job.index].narration || "Cinematic scene");
-                        const url = await generateNanoBanana2Image(prompt);
+                        const url = await generateNanoBanana2Image(prompt, undefined, 768, 1344);
                         console.log(`✅ Scene ${job.index + 1} Nano Banana 2 fallback ready: ${url.substring(0, 60)}...`);
                         return url;
                     } catch (e: any) {
@@ -1713,181 +1713,230 @@ Rewrite so it VISUALLY DEPICTS the specific event in the narration. 65-90 words.
             sceneProbedDurations: resolvedAssets.sceneProbedDurations
         };
 
-        // Step 4.5: Generate high-quality AI Thumbnail using Nano Banana 2 (Leonardo AI)
-        const thumbnailData = await step.run("generate-thumbnail", async () => {
-            console.log(`🖼️ Generating AI thumbnail via Nano Banana 2 for: "${seriesData.title}"`);
-            let prompt = (scriptData as any).thumbnailPrompt || `Cinematic masterpiece poster for a video titled: "${(scriptData as any).videoTitle || seriesData.title}". Epic composition, stunning lighting.`;
-
-            // Strictly enforce no text
+        // ── Step 4.5a: Submit AI Thumbnail Job (fast, < 5s, no blocking poll) ──────────
+        const thumbnailJobData = await step.run("submit-thumbnail-job", async () => {
+            let prompt = (scriptData as any).thumbnailPrompt ||
+                `Cinematic masterpiece poster for: "${(scriptData as any).videoTitle || seriesData.title}". Epic composition, stunning lighting.`;
             prompt += " -- CRITICAL: NO TEXT, NO WORDS, NO LETTERS, NO NUMBERS. PURE IMAGE ONLY.";
-
+            console.log(`🖼️ Submitting thumbnail job for: "${seriesData.title}"`);
             try {
-                const thumbnailUrl = await generateNanoBananaImage(prompt, 1024, 1024);
-                console.log(`✅ AI Thumbnail (Nano Banana 2) ready: ${thumbnailUrl.substring(0, 60)}...`);
-                return { thumbnailUrl };
+                const { taskId, apiKey } = await submitNanoBananaImageTask(prompt, 1024, 1024);
+                console.log(`✅ Thumbnail task submitted: ${taskId}`);
+                return { taskId, apiKey };
             } catch (err: any) {
-                console.warn(`⚠️ AI Thumbnail generation failed, will fallback to video frame later: ${err?.message || err}`);
-                return { thumbnailUrl: "" };
+                console.warn(`⚠️ Thumbnail submit failed: ${err?.message}`);
+                return { taskId: null as string | null, apiKey: null as string | null };
             }
         });
+
+        // ── Step 4.5b-d: Poll thumbnail — 3 × 30s rounds (90s max) ──────────────────
+        let thumbnailUrl = "";
+        for (let tRound = 0; tRound < 3 && !thumbnailUrl && thumbnailJobData.taskId; tRound++) {
+            await step.sleep(`wait-thumbnail-r${tRound}`, "30s");
+            const tResult = await step.run(`check-thumbnail-r${tRound}`, async () =>
+                (thumbnailJobData.taskId && thumbnailJobData.apiKey)
+                    ? checkPolloTaskStatus(thumbnailJobData.taskId, thumbnailJobData.apiKey)
+                    : { status: "failed" as const }
+            );
+            if (tResult.status === "complete" && tResult.url) {
+                thumbnailUrl = tResult.url;
+                console.log(`✅ AI Thumbnail ready: ${thumbnailUrl.substring(0, 60)}...`);
+            }
+        }
+        const thumbnailData = { thumbnailUrl };
 
         // Update status: generating scene videos (image → video)
         await step.run("update-status-videos", () => updateSeriesStatus(seriesId, "generating:videos"));
 
-        // Step 5.25: Convert scenes to video clips using Kling 2.5 Turbo (PARALLEL)
-        const sceneVideoData = await step.run("generate-scene-videos", async () => {
-            console.log(`🎬 Generating scene video clips via Kling 2.5 Turbo (parallel) for: "${seriesData.title}"`);
+        // ── Step 5a: Submit all Pollo Seedance scene video tasks (idempotent, fast) ──
+        // Idempotency: checks shortVideoProgress DB for existing taskId before submitting.
+        // On any Inngest retry, already-submitted tasks are reused — no duplicate Pollo jobs.
+        const videoJobSubmissions = await step.run("submit-scene-video-jobs", async () => {
             const totalScenes = scriptData.scenes.length;
+            const submitted: Array<{ index: number; taskId: string; apiKey: string }> = [];
             const sceneVideoUrls: string[] = new Array(totalScenes).fill("");
-            const sceneThumbnailUrls: string[] = new Array(totalScenes).fill("");
             const sceneVideoDurations: number[] = new Array(totalScenes).fill(5);
 
-            // Force-stop check: only abort if the user explicitly cancelled
-            // (status === "cancelled"). Do NOT abort on "completed" — that just
-            // means a previous run finished. Also never abort on DB errors.
+            // Cancel check
             try {
-                const [currentStatus] = await db.select({ status: shortVideoSeries.status })
-                    .from(shortVideoSeries)
-                    .where(eq(shortVideoSeries.seriesId, seriesId));
-                if (currentStatus?.status === "cancelled") {
-                    console.log(`🛑 Explicit cancellation detected — aborting scene video generation.`);
-                    return { sceneVideoUrls, sceneThumbnailUrls, sceneVideoDurations };
+                const [cur] = await db.select({ status: shortVideoSeries.status })
+                    .from(shortVideoSeries).where(eq(shortVideoSeries.seriesId, seriesId));
+                if (cur?.status === "cancelled") {
+                    console.log(`🛑 Cancellation detected — skipping video submission.`);
+                    return { submitted, sceneVideoUrls, sceneVideoDurations };
                 }
-            } catch (dbErr: any) {
-                // DB transient error — log and continue, never abort the pipeline
-                console.warn(`⚠️ Force-stop check DB query failed (continuing anyway): ${dbErr?.message}`);
-            }
-
-            // Build scene configs for parallel generation
-            const sceneConfigs: Array<{
-                index: number;
-                prompt: string;
-                imageUrl?: string;
-                duration: number;
-            }> = [];
+            } catch {}
 
             for (let i = 0; i < totalScenes; i++) {
                 const scene = scriptData.scenes[i];
                 const sceneImageUrl = imageData.imageUrls[i];
-                // Build ACTION-DRIVEN video prompt (physics/forces, not scene description)
-                // Kling already sees the image — describing the scene causes Ken Burns effect
-                let videoPrompt = scene.videoPrompt || scene.imagePrompt || scene.narration || "";
-
-                // Categorize what might be in the scene to apply the right motion type
-                const promptForCategorization = (scene.videoPrompt || scene.imagePrompt || "").toLowerCase();
-                const pLower = videoPrompt.toLowerCase();
-                let motionSuffix = "";
-                if (/\b(person|woman|man|girl|boy|people|face)\b/.test(promptForCategorization || pLower)) {
-                    motionSuffix = " The person breathes naturally with subtle chest rise and fall. Eyes blink softly. Head tilts slightly. Hair strands drift gently. Fingers twitch.";
-                } else if (promptForCategorization && /\b(animal|dog|cat|bird|horse|fish|tiger|lion|bear|wolf|rabbit|deer|monkey|fox|elephant|snake)\b/.test(promptForCategorization)) {
-                    motionSuffix = " The animal breathes with visible ribcage expansion. Ears flick. Fur ripples in breeze. Eyes track sideways.";
-                } else if (/\b(water|ocean|sea|river|lake|rain|wave)\b/.test(promptForCategorization || pLower)) {
-                    motionSuffix = " Water surface ripples expand outward. Reflections shimmer and distort. Foam edges creep forward. Light dances across the water.";
-                } else if (/\b(tree|plant|flower|grass|leaf|forest)\b/.test(promptForCategorization || pLower)) {
-                    motionSuffix = " Leaves rustle and turn. Branches bob gently up and down in breeze. Grass blades bend in rolling wave patterns.";
-                } else {
-                    motionSuffix = " Ambient dust particles drift through visible light beams. Subtle atmospheric shimmer across all surfaces. Light rays sweep slowly. Shadows crawl.";
-                }
-
-                // Strip scene-description & text-related phrases
-                videoPrompt = videoPrompt
-                    .replace(/\b(text|title|caption|subtitle|label|watermark|logo|word|letter|number|overlay|heading|banner|sign|writing|inscription|credit|quote|annotation|typography|font)s?\b/gi, '')
-                    .replace(/\b(the image shows?|in the image|we can see|there is|there are|the scene depicts?|the photo shows?|a photo of|an image of)\b/gi, '')
-                    .replace(/\s{2,}/g, ' ')
-                    .trim();
-
-                // Append physics-based motion + fixed camera trick + compact anti-text
-                videoPrompt += motionSuffix;
-                if (!/(stationary|locked|tripod|zero camera|no camera)/i.test(videoPrompt)) {
-                    videoPrompt += ' Stationary camera, locked tripod, zero camera movement.';
-                }
-                videoPrompt += " Absolutely no text, titles, words, writing, captions, labels, or overlays of any kind in any language.";
                 const sceneDuration = scene.duration || 10;
 
-                // Skip if no image was generated and no skip marker
-                if (!sceneImageUrl || sceneImageUrl === "") {
-                    console.warn(`⚠️ Scene ${i + 1}: No image URL or skip marker, skipping video generation`);
-                    continue;
-                }
+                if (!sceneImageUrl || sceneImageUrl === "") continue;
 
-                // ── STUDIO: split-screen/composite override — inject directly, skip Kling ──
+                // Studio split/composite override — already a final video URL
                 const splitOverride = imageData.sceneOverrides?.[i];
                 if (splitOverride) {
-                    console.log(`🎬 Scene ${i + 1}: studio override (split/composite), bypassing Kling`);
-                    sceneVideoUrls[i] = splitOverride; // JSON string → Remotion will parse it
-                    // Use probed actual duration — narration-based sceneDuration causes "No frame found" crashes
+                    sceneVideoUrls[i] = splitOverride;
                     sceneVideoDurations[i] = imageData.sceneProbedDurations?.[i] || sceneDuration;
-                    console.log(`  ⏱️ Override duration: ${sceneVideoDurations[i]}s (probed: ${!!imageData.sceneProbedDurations?.[i]})`);
                     continue;
                 }
 
-                // ── STUDIO: slideshow JSON — Remotion handles it via imageUrls, skip Kling ──
-                let isSlideshow = false;
+                // Slideshow JSON — handled at render time, not a video file
                 try {
                     const parsed = JSON.parse(sceneImageUrl);
-                    if (parsed?.type === "slideshow") { isSlideshow = true; }
-                } catch { }
-                if (isSlideshow) {
-                    console.log(`🖼️ Scene ${i + 1}: slideshow — skipping Kling, Remotion will cycle images`);
-                    // imageUrls[i] already has the slideshow JSON — Remotion reads it directly
-                    sceneVideoDurations[i] = sceneDuration;
-                    continue;
-                }
+                    if (parsed?.type === "slideshow") { sceneVideoDurations[i] = sceneDuration; continue; }
+                } catch {}
 
-                // ── STUDIO: direct user-uploaded video URL — skip Kling ──────────
-                const isDirectVideo = sceneImageUrl !== "SKIP_T2V" && sceneImageUrl !== "SKIP_VEO" &&
-                    /\.(mp4|mov|webm)/i.test(sceneImageUrl);
-                if (isDirectVideo) {
-                    console.log(`🎬 Scene ${i + 1}: direct user video, bypassing Kling`);
+                // Direct user-uploaded video — use as-is
+                if (sceneImageUrl !== "SKIP_T2V" && sceneImageUrl !== "SKIP_VEO" && /\.(mp4|mov|webm)/i.test(sceneImageUrl)) {
                     sceneVideoUrls[i] = sceneImageUrl;
-                    // Use probed actual duration — narration-based sceneDuration causes "No frame found" crashes
-                    if (imageData.sceneProbedDurations?.[i]) {
-                        sceneVideoDurations[i] = imageData.sceneProbedDurations[i];
-                    } else {
-                        // Safety: probe now if not probed in image step
-                        const probedDur = await probeVideoDuration(sceneImageUrl);
-                        sceneVideoDurations[i] = Math.round(probedDur * 10) / 10;
-                    }
-                    console.log(`  ⏱️ Direct video duration: ${sceneVideoDurations[i]}s`);
+                    sceneVideoDurations[i] = imageData.sceneProbedDurations?.[i] || sceneDuration;
                     continue;
                 }
 
-                // Text-to-video for general/living_thing scenes, image-to-video for monument scenes
+                // ── Idempotency check ────────────────────────────────────────────────
+                const stepKey = `scene_video_${i}`;
+                try {
+                    const [existing] = await db.select().from(shortVideoProgress)
+                        .where(and(eq(shortVideoProgress.seriesId, seriesId), eq(shortVideoProgress.stepKey, stepKey)));
+
+                    if (existing?.status === "complete" && existing?.resultUrl) {
+                        // Already processed on a previous run — load cached result
+                        sceneVideoUrls[i] = existing.resultUrl;
+                        if (existing.durationSec) sceneVideoDurations[i] = existing.durationSec;
+                        console.log(`✅ Scene ${i + 1} already complete (cached), skipping submission`);
+                        continue;
+                    }
+                    if (existing?.taskId && existing?.apiKey) {
+                        // Already submitted but not yet processed — reuse taskId
+                        submitted.push({ index: i, taskId: existing.taskId, apiKey: existing.apiKey });
+                        console.log(`♻️ Scene ${i + 1} reusing existing taskId: ${existing.taskId.slice(0, 10)}...`);
+                        continue;
+                    }
+                } catch {}
+
+                // ── Build motion prompt ───────────────────────────────────────────────
+                const pLower = (scene.videoPrompt || scene.imagePrompt || "").toLowerCase();
+                let videoPrompt = scene.videoPrompt || scene.imagePrompt || scene.narration || "";
+                const motionSuffix = /\b(person|woman|man|girl|boy|people|face)\b/.test(pLower)
+                    ? " The person breathes naturally. Eyes blink softly. Hair drifts gently."
+                    : /\b(water|ocean|sea|river|lake|rain|wave)\b/.test(pLower)
+                    ? " Water ripples expand outward. Reflections shimmer. Light dances on surface."
+                    : /\b(tree|plant|flower|grass|leaf|forest)\b/.test(pLower)
+                    ? " Leaves rustle. Branches sway gently in breeze. Light filters through."
+                    : " Ambient dust particles drift through light. Subtle atmospheric shimmer.";
+                videoPrompt = videoPrompt.replace(/\b(text|title|caption|label|watermark|logo|word|letter|overlay)s?\b/gi, "")
+                    .replace(/\s{2,}/g, " ").trim() + motionSuffix;
+                if (!/(stationary|locked|tripod|zero camera)/i.test(videoPrompt))
+                    videoPrompt += " Stationary camera, locked tripod, zero camera movement.";
+                videoPrompt += " Absolutely no text, titles, words, writing, captions, labels, or overlays.";
+
+                // ── Submit new Pollo Seedance task ───────────────────────────────────
                 const isTextToVideo = sceneImageUrl === "SKIP_T2V" || sceneImageUrl === "SKIP_VEO";
-                sceneConfigs.push({
-                    index: i,
-                    prompt: videoPrompt || scene.imagePrompt,
-                    imageUrl: isTextToVideo ? undefined : sceneImageUrl,
-                    duration: sceneDuration,
-                });
-
-                const mode = isTextToVideo ? "txt2vid" : "img2vid (monument)";
-                console.log(`📋 Scene ${i + 1}/${totalScenes}: Kling ${mode} | duration=${sceneDuration}s`);
-            }
-
-            // Submit all jobs and poll in parallel — dramatically reduces total time
-            console.log(`🚀 Submitting ${sceneConfigs.length} Kling 2.5 Turbo jobs in parallel...`);
-            try {
-                const results = await generateKlingScenesParallel(sceneConfigs, seriesId);
-
-                // Map results back to arrays
-                for (const [sceneIndex, result] of results) {
-                    sceneVideoUrls[sceneIndex] = result.videoUrl;
-                    sceneThumbnailUrls[sceneIndex] = result.thumbnailUrl;
-                    sceneVideoDurations[sceneIndex] = result.actualDurationSec;
-                    console.log(`✅ Scene ${sceneIndex + 1} Kling video ready: ${result.videoUrl.substring(0, 60)}...`);
+                try {
+                    const { taskId, apiKey } = await submitSeedanceVideoTask(
+                        isTextToVideo ? undefined : sceneImageUrl,
+                        videoPrompt,
+                        "9:16"
+                    );
+                    // Persist immediately so retries find it
+                    try {
+                        await db.insert(shortVideoProgress).values({ seriesId, stepKey, taskId, apiKey, status: "submitted" });
+                    } catch { /* unique constraint = already inserted, that's fine */ }
+                    submitted.push({ index: i, taskId, apiKey });
+                    console.log(`🚀 Scene ${i + 1} video submitted: ${taskId}`);
+                } catch (err: any) {
+                    console.error(`❌ Scene ${i + 1} video submission failed: ${err.message}`);
                 }
-            } catch (err: any) {
-                console.error(`❌ Parallel Kling generation error: ${err?.message || err}`);
-                // Individual scene failures are already handled inside generateKlingScenesParallel
-                // Scenes that failed will have empty URLs and fall back to static images in Remotion
             }
-
-            const videoSuccessCount = sceneVideoUrls.filter(u => u.length > 0).length;
-            console.log(`✅ Scene video generation complete: ${videoSuccessCount}/${totalScenes} videos generated via Kling 2.5 Turbo`);
-            return { sceneVideoUrls, sceneThumbnailUrls, sceneVideoDurations };
+            return { submitted, sceneVideoUrls, sceneVideoDurations };
         });
 
+        // ── Steps 5b-z: Sleep → Check → Process rounds (max 20 × 30s = 10 min) ─────
+        const MAX_VIDEO_ROUNDS = 20;
+        let pendingVideoJobs = [...videoJobSubmissions.submitted];
+
+        for (let vRound = 0; vRound < MAX_VIDEO_ROUNDS && pendingVideoJobs.length > 0; vRound++) {
+            // First round: give Seedance 60s to start rendering before we check
+            await step.sleep(`wait-scene-video-r${vRound}`, vRound === 0 ? "60s" : "30s");
+
+            const videoCheckResult = await step.run(`check-scene-videos-r${vRound}`, async () => {
+                const done: Array<{ index: number; rawUrl: string }> = [];
+                const stillPending: typeof pendingVideoJobs = [];
+                for (const job of pendingVideoJobs) {
+                    const result = await checkPolloVideoTaskStatus(job.taskId, job.apiKey);
+                    if (result.status === "complete" && result.url) {
+                        done.push({ index: job.index, rawUrl: result.url });
+                    } else if (result.status !== "failed") {
+                        stillPending.push(job);
+                    } else {
+                        console.warn(`❌ Scene ${job.index + 1} Seedance task failed`);
+                    }
+                }
+                console.log(`📊 Round ${vRound}: ${done.length} done, ${stillPending.length} pending`);
+                return { done, stillPending };
+            });
+
+            // Each done scene gets its own isolated step (60s budget: download + FFmpeg + upload)
+            for (const doneScene of videoCheckResult.done) {
+                await step.run(`process-scene-video-${doneScene.index}`, async () => {
+                    const stepKey = `scene_video_${doneScene.index}`;
+                    try {
+                        // Idempotency: skip if already processed by a previous Inngest retry
+                        const [existing] = await db.select().from(shortVideoProgress)
+                            .where(and(eq(shortVideoProgress.seriesId, seriesId), eq(shortVideoProgress.stepKey, stepKey)));
+                        if (existing?.status === "complete" && existing?.resultUrl) {
+                            console.log(`✅ Scene ${doneScene.index + 1} already processed (cached), skipping`);
+                            return;
+                        }
+
+                        const sceneImageUrl = imageData.imageUrls[doneScene.index];
+                        const sceneDuration = scriptData.scenes[doneScene.index]?.duration || 10;
+                        const result = await processSeedanceVideoResult(
+                            doneScene.rawUrl,
+                            (sceneImageUrl && sceneImageUrl !== "SKIP_T2V" && sceneImageUrl !== "SKIP_VEO") ? sceneImageUrl : undefined,
+                            sceneDuration,
+                            seriesId,
+                            doneScene.index
+                        );
+                        await db.update(shortVideoProgress)
+                            .set({ resultUrl: result.videoUrl, durationSec: result.actualDurationSec, status: "complete", updatedAt: new Date() })
+                            .where(and(eq(shortVideoProgress.seriesId, seriesId), eq(shortVideoProgress.stepKey, stepKey)));
+                    } catch (err: any) {
+                        console.error(`❌ Scene ${doneScene.index + 1} processing failed: ${err.message}`);
+                    }
+                });
+            }
+            pendingVideoJobs = videoCheckResult.stillPending;
+        }
+
+        // ── Step 5z: Finalize — merge direct results + DB-processed results ─────────
+        const sceneVideoData = await step.run("finalize-scene-videos", async () => {
+            const totalScenes = scriptData.scenes.length;
+            // Start with direct results (split/slideshow/direct-upload scenes)
+            const sceneVideoUrls = [...videoJobSubmissions.sceneVideoUrls];
+            const sceneThumbnailUrls: string[] = new Array(totalScenes).fill("");
+            const sceneVideoDurations = [...videoJobSubmissions.sceneVideoDurations];
+
+            // Overlay all successfully processed scenes from DB
+            const rows = await db.select().from(shortVideoProgress)
+                .where(and(eq(shortVideoProgress.seriesId, seriesId), eq(shortVideoProgress.status, "complete")));
+            for (const row of rows) {
+                const m = row.stepKey.match(/^scene_video_(\d+)$/);
+                if (m && row.resultUrl) {
+                    const idx = parseInt(m[1]);
+                    if (idx < totalScenes) {
+                        sceneVideoUrls[idx] = row.resultUrl;
+                        if (row.durationSec) sceneVideoDurations[idx] = row.durationSec;
+                    }
+                }
+            }
+
+            const successCount = sceneVideoUrls.filter(u => u.length > 0).length;
+            console.log(`✅ Scene video finalization: ${successCount}/${totalScenes} videos ready`);
+            return { sceneVideoUrls, sceneThumbnailUrls, sceneVideoDurations };
+        });
         // Update status: selecting avatar clips
         await step.run("update-status-avatar", () => updateSeriesStatus(seriesId, "generating:avatar"));
 
