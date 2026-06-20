@@ -176,7 +176,7 @@ async function submitPolloImageTask(
             }
 
             const data = await res.json();
-            const taskId = data?.data?.taskId;
+            const taskId = data?.data?.taskId || data?.taskId;
             if (!taskId) throw new Error(`Pollo response missing taskId: ${JSON.stringify(data)}`);
 
             if (ki > 0) console.log(`✅ [pollo] Succeeded with [${keyLabel}] after key rotation.`);
@@ -271,6 +271,33 @@ export async function generateNanoBananaImage(
     console.log(`✅ [pollo] Created task: ${taskId}. Polling...`);
     return pollPolloTask(taskId, apiKey, 10 * 60 * 1000, 5000, cancelSignal);
 }
+
+/**
+ * Generate an image using Pollo Nano Banana 2 (with key rotation).
+ */
+export async function generateNanoBanana2Image(
+    prompt: string,
+    imageUrl?: string,
+    cancelSignal?: { cancelled: boolean }
+): Promise<string> {
+    console.log(`🎨 [pollo] Generating image via Nano Banana 2...`);
+    const body: Record<string, any> = {
+        input: {
+            prompt,
+            resolution: "1K",
+        },
+    };
+    if (imageUrl) {
+        body.input.imageUrl = imageUrl;
+        body.input.images = [imageUrl];
+    }
+
+    if (cancelSignal?.cancelled) throw new Error("Job cancelled by force stop.");
+    const { taskId, apiKey } = await submitPolloImageTask(body, "/generation/google/nano-banana-2/image");
+    console.log(`✅ [pollo] Created Nano Banana 2 task: ${taskId}. Polling...`);
+    return pollPolloTask(taskId, apiKey, 10 * 60 * 1000, 5000, cancelSignal);
+}
+
 
 /**
  * Generate multiple images in parallel using Pollo GPT Image 2.0.

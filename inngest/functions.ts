@@ -2,7 +2,7 @@ import { aiFallback } from "@/config/ai-fallback";
 import { db } from "@/config/db";
 import { shortVideoAssets, shortVideoSeries } from "@/config/schema";
 import { putWithRotation } from "@/lib/blob";
-import { generateNanoBananaImage, generateNanoBananaImagesParallel, submitNanoBananaJobsParallel, checkNanoBananaJobsStatus, NanoBananaSceneConfig, generateGptImage15SingleUrl } from "@/lib/pollo";
+import { generateNanoBananaImage, generateNanoBananaImagesParallel, submitNanoBananaJobsParallel, checkNanoBananaJobsStatus, NanoBananaSceneConfig, generateGptImage15SingleUrl, generateNanoBanana2Image } from "@/lib/pollo";
 import { generateKlingScenesParallel } from "@/lib/pollo-video";
 import { getMusicUrl } from "@/lib/music-urls";
 import { translateScript } from "@/lib/translate";
@@ -1689,10 +1689,21 @@ Rewrite so it VISUALLY DEPICTS the specific event in the narration. 65-90 words.
                 console.log(`🔄 Round ${round + 1}: ${remainingJobs.length} image(s) still pending...`);
             }
 
-            // Any jobs still pending after max rounds → SKIP_T2V
+            // Any jobs still pending after max rounds → Try Nano Banana 2 first, then text-to-video
             for (const job of remainingJobs) {
-                console.warn(`⚠️ Scene ${job.index + 1} timed out after ${MAX_POLL_ROUNDS} rounds. Falling back to text-to-video.`);
-                finalImageUrls[job.index] = "SKIP_T2V";
+                console.warn(`⚠️ Scene ${job.index + 1} timed out after ${MAX_POLL_ROUNDS} rounds. Trying Nano Banana 2 fallback...`);
+                const fallbackUrl = await step.run(`image-nanobanana2-fallback-scene-${job.index}`, async () => {
+                    try {
+                        const prompt = enrichedPrompts[job.index] || (scriptData.scenes[job.index].imagePrompt || scriptData.scenes[job.index].narration || "Cinematic scene");
+                        const url = await generateNanoBanana2Image(prompt);
+                        console.log(`✅ Scene ${job.index + 1} Nano Banana 2 fallback ready: ${url.substring(0, 60)}...`);
+                        return url;
+                    } catch (e: any) {
+                        console.warn(`⚠️ Scene ${job.index + 1} Nano Banana 2 fallback failed: ${e?.message}. Falling back to text-to-video.`);
+                        return "SKIP_T2V";
+                    }
+                });
+                finalImageUrls[job.index] = fallbackUrl;
             }
         }
 
