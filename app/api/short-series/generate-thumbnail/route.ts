@@ -1,6 +1,6 @@
 import { db } from "@/config/db";
 import { shortVideoSeries } from "@/config/schema";
-import { generateNanoBananaImage } from "@/lib/leonardo";
+import { generateNanoBananaImage } from "@/lib/pollo";
 import { eq } from "drizzle-orm";
 import fs from "fs";
 import { NextRequest, NextResponse } from "next/server";
