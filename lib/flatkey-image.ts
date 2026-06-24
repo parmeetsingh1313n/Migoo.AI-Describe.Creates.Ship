@@ -29,6 +29,9 @@ const GEMINI_FALLBACK    = "gemini-3-pro-image-preview"; // Flatkey model name
 
 // ─── Key rotation ─────────────────────────────────────────────────────────────
 
+/** Global round-robin counter — incremented per request so parallel calls spread across keys */
+let _keyRoundRobin = 0;
+
 function getFlatkeys(): string[] {
     const keys: string[] = [];
     const base = process.env.FLATKEY_API_KEY;
@@ -39,6 +42,15 @@ function getFlatkeys(): string[] {
     }
     if (keys.length === 0) throw new Error("[flatkey-image] No FLATKEY_API_KEY configured");
     return keys;
+}
+
+/**
+ * Rotate the keys array so this request starts at a different key.
+ * Each parallel request gets its own offset, spreading load across all keys.
+ */
+function rotateKeys(keys: string[], startIndex: number): string[] {
+    const offset = startIndex % keys.length;
+    return [...keys.slice(offset), ...keys.slice(0, offset)];
 }
 
 function isQuotaError(status: number, body: string): boolean {
@@ -104,7 +116,7 @@ export async function uploadBase64ToAppwrite(base64Data: string, mimeType: strin
 async function callGptImage2(
     prompt:      string,
     aspectRatio: "1:1" | "9:16" | "16:9",
-    keys:        string[]
+    keys:        string[], // already rotated for this request
 ): Promise<string> {
     const size    = getSizeForAspectRatio(aspectRatio);
     let lastErr   = "";
@@ -169,7 +181,7 @@ async function callGptImage2(
 async function callGeminiImage(
     prompt:      string,
     _aspectRatio: "1:1" | "9:16" | "16:9",
-    keys:         string[]
+    keys:        string[], // already rotated for this request
 ): Promise<string> {
     let lastErr = "";
 
@@ -229,13 +241,19 @@ async function callGeminiImage(
 // ─── Core: primary → fallback, returns Appwrite URL or data URL ───────────────
 
 async function generateImage(
-    prompt:      string,
-    aspectRatio: "1:1" | "9:16" | "16:9",
-    cancelSignal?: { cancelled: boolean }
+    prompt:       string,
+    aspectRatio:  "1:1" | "9:16" | "16:9",
+    cancelSignal?: { cancelled: boolean },
+    keyOffset:    number = 0
 ): Promise<string> {
     if (cancelSignal?.cancelled) throw new Error("Job cancelled by force stop.");
 
-    const keys = getFlatkeys();
+    // Round-robin: rotate key array so this request starts on a different key
+    const allKeys = getFlatkeys();
+    const keys    = rotateKeys(allKeys, keyOffset);
+    const startKeyLabel = keyOffset % allKeys.length === 0 ? "primary" : `key_${(keyOffset % allKeys.length) + 1}`;
+    console.log(`🔑 [flatkey-image] Using key slot [${startKeyLabel}] (offset ${keyOffset % allKeys.length} of ${allKeys.length})`);
+
     let b64:  string | undefined;
     let mime  = "image/png";
 
@@ -340,15 +358,18 @@ export interface NanoBananaStatusResult {
  * styleUUID is accepted for compatibility but ignored (prompt-based styling).
  */
 export async function generateNanoBananaImage(
-    prompt:  string,
-    width:   number = 768,
-    height:  number = 1376,
+    prompt:     string,
+    width:      number = 768,
+    height:     number = 1376,
     _styleUUID?: string,
-    cancelSignal?: { cancelled: boolean }
+    cancelSignal?: { cancelled: boolean },
+    keyOffset?: number  // internal: round-robin slot for parallel calls
 ): Promise<string> {
-    const aspectRatio = getAspectRatio(width, height);
+    const aspectRatio  = getAspectRatio(width, height);
+    // Assign round-robin slot if not explicitly provided
+    const slot = keyOffset !== undefined ? keyOffset : _keyRoundRobin++;
     console.log(`🎨 [flatkey-image] generateNanoBananaImage | ${aspectRatio} | "${prompt.slice(0, 80)}..."`);
-    const url = await generateImage(prompt, aspectRatio, cancelSignal);
+    const url = await generateImage(prompt, aspectRatio, cancelSignal, slot);
     console.log(`✅ [flatkey-image] Image ready: ${url.slice(0, 80)}...`);
     return url;
 }
@@ -399,19 +420,28 @@ export async function generateGptImage15(
 export async function generateNanoBananaImagesParallel(
     scenes:      NanoBananaSceneConfig[],
     cancelSignal?: { cancelled: boolean },
-    concurrency: number = 3   // slightly lower concurrency — each key handles more load
+    concurrency: number = 3
 ): Promise<NanoBananaResult[]> {
     console.log(`🚀 [flatkey-image] Generating ${scenes.length} images (concurrency=${concurrency})...`);
     const results: NanoBananaResult[] = [];
+    // Base round-robin slot for this batch — each item in a batch gets a different slot
+    const batchBaseSlot = _keyRoundRobin;
+    _keyRoundRobin += scenes.length;
 
     for (let i = 0; i < scenes.length; i += concurrency) {
         if (cancelSignal?.cancelled) break;
         const batch = scenes.slice(i, i + concurrency);
 
         const batchResults = await Promise.allSettled(
-            batch.map(async (scene) => {
+            batch.map(async (scene, batchIdx) => {
+                // Stagger start: each parallel request is offset by 150ms so they don't
+                // all hit the API at exactly the same millisecond
+                if (batchIdx > 0) await new Promise(r => setTimeout(r, batchIdx * 150));
+
+                // Each request in the batch starts on a different key slot
+                const slot = batchBaseSlot + i + batchIdx;
                 const url = await generateNanoBananaImage(
-                    scene.prompt, scene.width, scene.height, scene.styleUUID, cancelSignal
+                    scene.prompt, scene.width, scene.height, scene.styleUUID, cancelSignal, slot
                 );
                 return { index: scene.index, imageUrl: url };
             })
@@ -450,16 +480,21 @@ export async function submitNanoBananaJobsParallel(
 ): Promise<NanoBananaSubmissionResult[]> {
     console.log(`🚀 [flatkey-image] Submitting ${scenes.length} image tasks...`);
     const results: NanoBananaSubmissionResult[] = [];
+    const batchBaseSlot = _keyRoundRobin;
+    _keyRoundRobin += scenes.length;
 
     for (let i = 0; i < scenes.length; i += concurrency) {
         if (cancelSignal?.cancelled) break;
         const batch = scenes.slice(i, i + concurrency);
 
         const batchResults = await Promise.allSettled(
-            batch.map(async (scene) => {
+            batch.map(async (scene, batchIdx) => {
                 if (cancelSignal?.cancelled) throw new Error("cancelled");
+                // Stagger + round-robin: request N starts 150ms later and on key N
+                if (batchIdx > 0) await new Promise(r => setTimeout(r, batchIdx * 150));
+                const slot = batchBaseSlot + i + batchIdx;
                 const url = await generateNanoBananaImage(
-                    scene.prompt, scene.width, scene.height, scene.styleUUID, cancelSignal
+                    scene.prompt, scene.width, scene.height, scene.styleUUID, cancelSignal, slot
                 );
                 return { index: scene.index, url };
             })
