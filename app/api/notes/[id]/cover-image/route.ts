@@ -9,7 +9,7 @@
 
 import { currentUser } from "@clerk/nextjs/server"
 import { NextRequest, NextResponse } from "next/server"
-import { generateNanoBananaImage, NANO_BANANA_STYLES } from "@/lib/vercel-image"
+import { generateNanoBananaImage, NANO_BANANA_STYLES } from "@/lib/flatkey-image"
 import { db } from "@/config/db"
 import { notesProjects } from "@/config/schema"
 import { eq } from "drizzle-orm"

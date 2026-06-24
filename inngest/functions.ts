@@ -2,7 +2,7 @@ import { aiFallback } from "@/config/ai-fallback";
 import { db } from "@/config/db";
 import { shortVideoAssets, shortVideoProgress, shortVideoSeries } from "@/config/schema";
 import { putWithRotation } from "@/lib/blob";
-import { generateNanoBananaImage, generateNanoBananaImagesParallel, submitNanoBananaJobsParallel, checkNanoBananaJobsStatus, NanoBananaSceneConfig, generateGptImage15SingleUrl, generateNanoBanana2Image, submitNanoBananaImageTask, checkPolloTaskStatus } from "@/lib/vercel-image";
+import { generateNanoBananaImage, generateNanoBananaImagesParallel, submitNanoBananaJobsParallel, checkNanoBananaJobsStatus, NanoBananaSceneConfig, generateGptImage15SingleUrl, generateNanoBanana2Image, submitNanoBananaImageTask, checkPolloTaskStatus } from "@/lib/flatkey-image";
 import { generateKlingScenesParallel, submitSeedanceVideoTask, checkPolloVideoTaskStatus, processSeedanceVideoResult } from "@/lib/wavespeed-video";
 import { getMusicUrl } from "@/lib/music-urls";
 import { translateScript } from "@/lib/translate";
