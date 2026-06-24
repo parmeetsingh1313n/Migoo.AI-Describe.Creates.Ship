@@ -1,5 +1,5 @@
 import { groq } from "@/config/groq";
-import { generateSeedanceVideo } from "@/lib/pollo-video";
+import { generateSeedanceVideo } from "@/lib/wavespeed-video";
 import { NextRequest, NextResponse } from "next/server";
 import * as zlib from "node:zlib";
 

@@ -59,10 +59,10 @@ export const LEONARDO_STYLES: Record<string, string> = {
 
 export const NANO_BANANA_STYLES: Record<string, string> = {
     ...LEONARDO_STYLES,
-    "Graphic Design 2D":    "703d6fe5-7f1c-4a9e-8da0-5331f214d5cf",
-    "Portrait Fashion":     "0d34f8e1-46d4-428f-8ddd-4b11811fa7c9",
-    "Pro B&W Photography":  "22a9a7d2-2166-4d86-80ff-22e2643adbcf",
-    "Pro Color Photography":"7c3f932b-a572-47cb-9b9b-f20211e63b5b",
+    "Graphic Design 2D": "703d6fe5-7f1c-4a9e-8da0-5331f214d5cf",
+    "Portrait Fashion": "0d34f8e1-46d4-428f-8ddd-4b11811fa7c9",
+    "Pro B&W Photography": "22a9a7d2-2166-4d86-80ff-22e2643adbcf",
+    "Pro Color Photography": "7c3f932b-a572-47cb-9b9b-f20211e63b5b",
     "Pro Film Photography": "581ba6d6-5aac-4492-bebe-54c424a0d46e",
 };
 
@@ -116,7 +116,7 @@ async function getStatusUrl(taskId: string, apiKey: string): Promise<string> {
     try {
         const r = await fetch(cachedUrl, { headers });
         if (r.status === 200 || r.status === 404) return cachedUrl;
-    } catch {}
+    } catch { }
 
     // Find working one
     for (let i = 0; i < urls.length; i++) {
@@ -127,7 +127,7 @@ async function getStatusUrl(taskId: string, apiKey: string): Promise<string> {
                 cachedStatusPatternIndex = i;
                 return urls[i];
             }
-        } catch {}
+        } catch { }
     }
     return urls[0];
 }
@@ -498,7 +498,7 @@ export async function generateGptImage15(
     };
 
     if (refImageUrl) {
-        input.image    = refImageUrl;
+        input.image = refImageUrl;
         input.imageUrl = refImageUrl;
     }
 
