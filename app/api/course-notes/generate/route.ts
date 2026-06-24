@@ -8,7 +8,7 @@ import { db } from "@/config/db";
 import { chapterContentSlides } from "@/config/schema";
 import { eq, and, asc } from "drizzle-orm";
 import { NextRequest, NextResponse } from "next/server";
-import { generateNanoBananaImagesParallel } from "@/lib/vercel-image";
+import { generateNanoBananaImagesParallel } from "@/lib/flatkey-image";
 
 // ── Extract readable text from slide HTML ────────────────────────────────────
 function extractTextFromHtml(html: string): string {
