@@ -7,7 +7,7 @@
 
 import { db } from "@/config/db";
 import { shortVideoAssets, shortVideoSeries } from "@/config/schema";
-import { generateNanoBananaImage } from "@/lib/pollo";
+import { generateNanoBananaImage } from "@/lib/vercel-image";
 import { eq } from "drizzle-orm";
 import { exec } from "child_process";
 import path from "path";
