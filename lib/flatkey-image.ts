@@ -25,7 +25,7 @@ const FLATKEY_BASE = "https://console.flatkey.ai";
 // ─── Models ───────────────────────────────────────────────────────────────────
 
 const GPT_IMAGE_2_MODEL  = "openai/gpt-image-2";
-const GEMINI_FALLBACK    = "gemini-3-pro-image-preview"; // Flatkey model name
+const GEMINI_FALLBACK    = "google/imagen-3"; // Flatkey model name
 
 // ─── Key rotation ─────────────────────────────────────────────────────────────
 
@@ -184,7 +184,10 @@ async function callGptImage2(
 
             const data = JSON.parse(rawText);
             const b64  = data?.data?.[0]?.b64_json;
-            if (!b64) throw new Error(`[flatkey-image] No b64_json in gpt-image-2 response`);
+            if (!b64) {
+                const errMsg = data?.error?.message || data?.message || JSON.stringify(data);
+                throw new Error(`[flatkey-image] No b64_json in gpt-image-2 response. Detail: ${errMsg.slice(0, 200)}`);
+            }
 
             if (ki > 0) console.log(`✅ [flatkey-image] gpt-image-2 succeeded with [${keyLabel}]`);
             return b64; // return raw base64
@@ -283,7 +286,8 @@ async function callGeminiImage(
                 return b64FromUrl;
             }
 
-            throw new Error(`[flatkey-image] No image data in Gemini response: ${JSON.stringify(data).slice(0, 200)}`);
+            const errMsg = data?.error?.message || data?.message || JSON.stringify(data);
+            throw new Error(`[flatkey-image] No image data in Gemini response. Detail: ${errMsg.slice(0, 200)}`);
 
         } catch (e: any) {
             const isQuota = isQuotaError(0, e.message);
@@ -297,6 +301,75 @@ async function callGeminiImage(
     }
 
     throw new Error(`[flatkey-image] All ${keys.length} Gemini fallback key(s) exhausted. Last: ${lastErr.slice(0, 150)}`);
+}
+
+async function callGptImage15(
+    prompt:      string,
+    aspectRatio: "1:1" | "9:16" | "16:9",
+    keys:        string[], // already rotated for this request
+): Promise<string> {
+    const size    = getSizeForAspectRatio(aspectRatio);
+    let lastErr   = "";
+
+    for (let ki = 0; ki < keys.length; ki++) {
+        const apiKey   = keys[ki];
+        const keyLabel = ki === 0 ? "primary" : `key_${ki + 1}`;
+
+        try {
+            console.log(`🎨 [flatkey-image] gpt-image-1.5 [${keyLabel}] | ${aspectRatio} | ${size}`);
+
+            const res = await fetchWithTimeout(
+                `${FLATKEY_BASE}/v1/images/generations`,
+                {
+                    method:  "POST",
+                    headers: {
+                        "Content-Type":  "application/json",
+                        "Authorization": `Bearer ${apiKey}`,
+                    },
+                    body: JSON.stringify({
+                        model:           "openai/gpt-image-1.5",
+                        prompt,
+                        n:               1,
+                        size,
+                        response_format: "b64_json",
+                    }),
+                },
+                120_000  // 120s
+            );
+
+            const rawText = await res.text();
+
+            if (!res.ok) {
+                if (isQuotaError(res.status, rawText) && ki < keys.length - 1) {
+                    console.warn(`⚠️ [flatkey-image] [${keyLabel}] quota/error (${res.status}) — rotating...`);
+                    lastErr = rawText;
+                    continue;
+                }
+                throw new Error(`[flatkey-image] gpt-image-1.5 error (${res.status}): ${rawText.slice(0, 200)}`);
+            }
+
+            const data = JSON.parse(rawText);
+            const b64  = data?.data?.[0]?.b64_json;
+            if (!b64) {
+                const errMsg = data?.error?.message || data?.message || JSON.stringify(data);
+                throw new Error(`[flatkey-image] No b64_json in gpt-image-1.5 response. Detail: ${errMsg.slice(0, 200)}`);
+            }
+
+            if (ki > 0) console.log(`✅ [flatkey-image] gpt-image-1.5 succeeded with [${keyLabel}]`);
+            return b64;
+
+        } catch (e: any) {
+            const isQuota = isQuotaError(0, e.message);
+            if (isQuota && ki < keys.length - 1) {
+                console.warn(`⚠️ [flatkey-image] [${keyLabel}] exception (rotating): ${e.message.slice(0, 80)}`);
+                lastErr = e.message;
+                continue;
+            }
+            throw e;
+        }
+    }
+
+    throw new Error(`[flatkey-image] All ${keys.length} gpt-image-1.5 key(s) exhausted. Last: ${lastErr.slice(0, 150)}`);
 }
 
 // ─── Core: primary → fallback, returns Appwrite URL or data URL ───────────────
@@ -326,17 +399,27 @@ async function generateImage(
     } catch (primaryErr: any) {
         console.warn(`⚠️ [flatkey-image] gpt-image-2 failed, trying Gemini fallback: ${primaryErr.message.slice(0, 120)}`);
 
-        // ── Fallback: Gemini 3 Pro Image ──────────────────────────────────────
+        // ── Fallback 1: Gemini (Imagen-3) ────────────────────────────────────
         try {
             b64  = await callGeminiImage(prompt, aspectRatio, keys);
             mime = "image/jpeg";
             console.log(`✅ [flatkey-image] Gemini fallback done`);
         } catch (fallbackErr: any) {
-            throw new Error(
-                `[flatkey-image] Both providers failed.\n` +
-                `  Primary (gpt-image-2): ${primaryErr.message.slice(0, 100)}\n` +
-                `  Fallback (gemini):     ${fallbackErr.message.slice(0, 100)}`
-            );
+            console.warn(`⚠️ [flatkey-image] Gemini fallback failed, trying GPT-Image-1.5 fallback: ${fallbackErr.message.slice(0, 120)}`);
+
+            // ── Fallback 2: GPT Image-1.5 ────────────────────────────────────
+            try {
+                b64  = await callGptImage15(prompt, aspectRatio, keys);
+                mime = "image/png";
+                console.log(`✅ [flatkey-image] GPT-Image-1.5 fallback done`);
+            } catch (fallback2Err: any) {
+                throw new Error(
+                    `[flatkey-image] All three providers failed.\n` +
+                    `  Primary (gpt-image-2): ${primaryErr.message.slice(0, 100)}\n` +
+                    `  Fallback 1 (imagen-3): ${fallbackErr.message.slice(0, 100)}\n` +
+                    `  Fallback 2 (gpt-image-1.5): ${fallback2Err.message.slice(0, 100)}`
+                );
+            }
         }
     }
 
