@@ -61,6 +61,30 @@ function isQuotaError(status: number, body: string): boolean {
            b.includes("unauthorized") || b.includes("credit");
 }
 
+/**
+ * Cross-runtime fetch with timeout — works on ALL Node.js versions (including
+ * older Vercel serverless runtimes that don't support AbortSignal.timeout).
+ */
+async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs: number): Promise<Response> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const controller = new AbortController();
+    const timeoutPromise = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+            controller.abort();
+            reject(new Error(`[flatkey-image] Request timed out after ${timeoutMs / 1000}s`));
+        }, timeoutMs);
+    });
+    try {
+        const res = await Promise.race([
+            fetch(url, { ...options, signal: controller.signal }),
+            timeoutPromise,
+        ]);
+        return res;
+    } finally {
+        if (timer !== undefined) clearTimeout(timer);
+    }
+}
+
 // ─── Aspect ratio helpers ─────────────────────────────────────────────────────
 
 function getAspectRatio(width: number, height: number): "1:1" | "9:16" | "16:9" {
@@ -128,21 +152,24 @@ async function callGptImage2(
         try {
             console.log(`🎨 [flatkey-image] gpt-image-2 [${keyLabel}] | ${aspectRatio} | ${size}`);
 
-            const res = await fetch(`${FLATKEY_BASE}/v1/images/generations`, {
-                method:  "POST",
-                headers: {
-                    "Content-Type":  "application/json",
-                    "Authorization": `Bearer ${apiKey}`,
+            const res = await fetchWithTimeout(
+                `${FLATKEY_BASE}/v1/images/generations`,
+                {
+                    method:  "POST",
+                    headers: {
+                        "Content-Type":  "application/json",
+                        "Authorization": `Bearer ${apiKey}`,
+                    },
+                    body: JSON.stringify({
+                        model:           GPT_IMAGE_2_MODEL,
+                        prompt,
+                        n:               1,
+                        size,
+                        response_format: "b64_json",
+                    }),
                 },
-                body: JSON.stringify({
-                    model:           GPT_IMAGE_2_MODEL,
-                    prompt,
-                    n:               1,
-                    size,
-                    response_format: "b64_json",
-                }),
-                signal: AbortSignal.timeout(120_000),
-            });
+                180_000  // 180s — gpt-image-2 takes ~50s, give plenty of headroom
+            );
 
             const rawText = await res.text();
 
@@ -180,30 +207,50 @@ async function callGptImage2(
 
 async function callGeminiImage(
     prompt:      string,
-    _aspectRatio: "1:1" | "9:16" | "16:9",
+    aspectRatio: "1:1" | "9:16" | "16:9",
     keys:        string[], // already rotated for this request
 ): Promise<string> {
     let lastErr = "";
+
+    // Enforce 9:16 portrait via a strong prompt prefix — Flatkey's Gemini model
+    // uses the OpenAI-compatible /v1/images/generations endpoint, so we pass size.
+    const orientationHint =
+        aspectRatio === "9:16"
+            ? "IMPORTANT: Generate a VERTICAL PORTRAIT image in 9:16 aspect ratio (tall, like a smartphone screen or YouTube Shorts / TikTok video). The image must be significantly taller than it is wide. "
+            : aspectRatio === "16:9"
+            ? "IMPORTANT: Generate a HORIZONTAL LANDSCAPE image in 16:9 aspect ratio (wide, like a cinema screen). The image must be significantly wider than it is tall. "
+            : "";
+
+    // Map aspect ratio to OpenAI-compatible size strings for Flatkey's Gemini endpoint
+    const geminiSize = getSizeForAspectRatio(aspectRatio);
+    const fullPrompt = orientationHint + prompt;
 
     for (let ki = 0; ki < keys.length; ki++) {
         const apiKey   = keys[ki];
         const keyLabel = ki === 0 ? "primary" : `key_${ki + 1}`;
 
         try {
-            console.log(`🎨 [flatkey-image] gemini-3-pro-image [${keyLabel}] fallback`);
+            console.log(`🎨 [flatkey-image] gemini-3-pro-image [${keyLabel}] fallback | ${aspectRatio} | ${geminiSize}`);
 
-            const endpoint = `${FLATKEY_BASE}/v1beta/models/${GEMINI_FALLBACK}:generateContent`;
-            const res = await fetch(endpoint, {
-                method:  "POST",
-                headers: {
-                    "Content-Type":  "application/json",
-                    "Authorization": `Bearer ${apiKey}`,
+            // Flatkey routes Gemini via the standard OpenAI-compatible images/generations endpoint
+            const res = await fetchWithTimeout(
+                `${FLATKEY_BASE}/v1/images/generations`,
+                {
+                    method:  "POST",
+                    headers: {
+                        "Content-Type":  "application/json",
+                        "Authorization": `Bearer ${apiKey}`,
+                    },
+                    body: JSON.stringify({
+                        model:           GEMINI_FALLBACK,
+                        prompt:          fullPrompt,
+                        n:               1,
+                        size:            geminiSize,
+                        response_format: "b64_json",
+                    }),
                 },
-                body: JSON.stringify({
-                    contents: [{ role: "user", parts: [{ text: prompt }] }],
-                }),
-                signal: AbortSignal.timeout(120_000),
-            });
+                180_000  // 180s timeout
+            );
 
             const rawText = await res.text();
 
@@ -216,13 +263,27 @@ async function callGeminiImage(
                 throw new Error(`[flatkey-image] gemini error (${res.status}): ${rawText.slice(0, 200)}`);
             }
 
-            const data   = JSON.parse(rawText);
-            const part   = data?.candidates?.[0]?.content?.parts?.find((p: any) => p.inlineData);
-            const b64    = part?.inlineData?.data;
-            if (!b64) throw new Error(`[flatkey-image] No inlineData in Gemini response`);
+            const data = JSON.parse(rawText);
 
-            if (ki > 0) console.log(`✅ [flatkey-image] gemini succeeded with [${keyLabel}]`);
-            return b64;
+            // Handle both b64_json (OpenAI-compat) and url response formats
+            const b64 = data?.data?.[0]?.b64_json;
+            const url = data?.data?.[0]?.url;
+
+            if (b64) {
+                if (ki > 0) console.log(`✅ [flatkey-image] gemini succeeded with [${keyLabel}] (b64_json)`);
+                return b64;
+            }
+            if (url) {
+                // Fetch the image URL and convert to base64
+                const imgRes = await fetchWithTimeout(url, {}, 60_000);
+                if (!imgRes.ok) throw new Error(`[flatkey-image] Failed to fetch gemini image URL: ${imgRes.status}`);
+                const arrayBuf = await imgRes.arrayBuffer();
+                const b64FromUrl = Buffer.from(arrayBuf).toString("base64");
+                if (ki > 0) console.log(`✅ [flatkey-image] gemini succeeded with [${keyLabel}] (url→b64)`);
+                return b64FromUrl;
+            }
+
+            throw new Error(`[flatkey-image] No image data in Gemini response: ${JSON.stringify(data).slice(0, 200)}`);
 
         } catch (e: any) {
             const isQuota = isQuotaError(0, e.message);
@@ -360,7 +421,7 @@ export interface NanoBananaStatusResult {
 export async function generateNanoBananaImage(
     prompt:     string,
     width:      number = 768,
-    height:     number = 1376,
+    height:     number = 1344, // 9:16 portrait — consistent with scene configs in functions.ts
     _styleUUID?: string,
     cancelSignal?: { cancelled: boolean },
     keyOffset?: number  // internal: round-robin slot for parallel calls
