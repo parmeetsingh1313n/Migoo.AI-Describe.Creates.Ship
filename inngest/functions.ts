@@ -7,7 +7,7 @@ import { generateKlingScenesParallel, submitSeedanceVideoTask, checkPolloVideoTa
 import { getMusicUrl } from "@/lib/music-urls";
 import { translateScript } from "@/lib/translate";
 import { triggerRender } from "@/lib/video-render";
-import { and, desc, eq, or } from "drizzle-orm";
+import { and, desc, eq, like, or } from "drizzle-orm";
 import { inngest } from "./client";
 import { groq } from "@/config/groq";
 import { shortsLLM } from "@/lib/shorts-llm";
@@ -502,6 +502,11 @@ export const generateShortVideo = inngest.createFunction(
     },
     async ({ event, step }) => {
         const { seriesId, customTopic, studioPayload } = event.data;
+        // Unique run ID scoped to this specific generation trigger.
+        // event.id is stable across Inngest retries of the same event, so idempotency
+        // still works on retry — but it's different for every NEW generation, preventing
+        // stale shortVideoProgress rows from a previous short being reused.
+        const runId = (event.id || `${seriesId}_${Date.now()}`).replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 40);
         // studioPayload = { scriptData, sceneAssets[], captionStyle, voice, music, contextMarkdown }
         // OR legacy:    { scriptData, sceneAssetTypes[], sceneCustomUrls[], ... }
 
@@ -1796,7 +1801,10 @@ Rewrite so it VISUALLY DEPICTS the specific event in the narration. 65-90 words.
                 }
 
                 // ── Idempotency check ────────────────────────────────────────────────
-                const stepKey = `scene_video_${i}`;
+                // stepKey is prefixed with runId so each generation run has its own
+                // isolated idempotency records — prevents stale rows from a previous
+                // short in the same series being mistakenly reused.
+                const stepKey = `${runId}_scene_video_${i}`;
                 try {
                     const [existing] = await db.select().from(shortVideoProgress)
                         .where(and(eq(shortVideoProgress.seriesId, seriesId), eq(shortVideoProgress.stepKey, stepKey)));
@@ -1881,7 +1889,7 @@ Rewrite so it VISUALLY DEPICTS the specific event in the narration. 65-90 words.
             // Each done scene gets its own isolated step (60s budget: download + FFmpeg + upload)
             for (const doneScene of videoCheckResult.done) {
                 await step.run(`process-scene-video-${doneScene.index}`, async () => {
-                    const stepKey = `scene_video_${doneScene.index}`;
+                    const stepKey = `${runId}_scene_video_${doneScene.index}`;
                     try {
                         // Idempotency: skip if already processed by a previous Inngest retry
                         const [existing] = await db.select().from(shortVideoProgress)
@@ -1919,11 +1927,17 @@ Rewrite so it VISUALLY DEPICTS the specific event in the narration. 65-90 words.
             const sceneThumbnailUrls: string[] = new Array(totalScenes).fill("");
             const sceneVideoDurations = [...videoJobSubmissions.sceneVideoDurations];
 
-            // Overlay all successfully processed scenes from DB
+            // Overlay all successfully processed scenes from DB.
+            // Filter by runId prefix so we only pick up rows from THIS generation run,
+            // not stale completed rows from a previous short in the same series.
             const rows = await db.select().from(shortVideoProgress)
-                .where(and(eq(shortVideoProgress.seriesId, seriesId), eq(shortVideoProgress.status, "complete")));
+                .where(and(
+                    eq(shortVideoProgress.seriesId, seriesId),
+                    eq(shortVideoProgress.status, "complete"),
+                    like(shortVideoProgress.stepKey, `${runId}_%`)
+                ));
             for (const row of rows) {
-                const m = row.stepKey.match(/^scene_video_(\d+)$/);
+                const m = row.stepKey.match(/scene_video_(\d+)$/);
                 if (m && row.resultUrl) {
                     const idx = parseInt(m[1]);
                     if (idx < totalScenes) {
