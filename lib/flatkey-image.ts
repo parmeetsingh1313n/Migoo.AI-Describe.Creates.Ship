@@ -2,12 +2,13 @@
  * ═══════════════════════════════════════════════════════════════════════════════
  * Flatkey AI — Image Generation Client
  *
- * PRIMARY  : openai/gpt-image-2  via /v1/images/generations  (b64_json)
+ * PRIMARY  : gemini-3.1-flash-image-preview  via /v1/chat/completions (base64)
+ * FALLBACK : gemini-3-pro-image-preview      via /v1/chat/completions (base64)
  * Key rotation: FLATKEY_API_KEY, FLATKEY_API_KEY_2 … FLATKEY_API_KEY_10
  *
  * 524 = Cloudflare timeout between caller→Flatkey — treated as rotatable,
  *       next key is tried immediately.
- * Per-key timeout: 90s (Cloudflare kills at ~100-125s, so 90s rotates faster).
+ * Per-key timeout: 45s (Gemini is fast, timeout rotated quickly).
  *
  * Drop-in replacement for lib/vercel-image.ts.
  * ═══════════════════════════════════════════════════════════════════════════════
@@ -20,7 +21,8 @@ const FLATKEY_BASE = "https://console.flatkey.ai";
 
 // ─── Models ───────────────────────────────────────────────────────────────────
 
-const GPT_IMAGE_2_MODEL  = "openai/gpt-image-2";
+const GEMINI_31_FLASH_MODEL = "gemini-3.1-flash-image-preview";
+const GEMINI_3_PRO_MODEL    = "gemini-3-pro-image-preview";
 
 // ─── Key rotation ─────────────────────────────────────────────────────────────
 
@@ -132,25 +134,35 @@ export async function uploadBase64ToAppwrite(base64Data: string, mimeType: strin
     return publicUrl;
 }
 
-// ─── PRIMARY: gpt-image-2 via /v1/images/generations ─────────────────────────
+// ─── PRIMARY: Gemini Image via Chat Completions ──────────────────────────────
 
-async function callGptImage2(
+async function callGeminiChatImage(
     prompt:      string,
     aspectRatio: "1:1" | "9:16" | "16:9",
-    keys:        string[], // already rotated for this request
-): Promise<string> {
-    const size    = getSizeForAspectRatio(aspectRatio);
-    let lastErr   = "";
+    modelName:   string,
+    keys:        string[],
+): Promise<{ b64: string, mime: string }> {
+    let lastErr = "";
+    
+    // Add orientation hints to the prompt
+    const orientationHint =
+        aspectRatio === "9:16"
+            ? " (aspect ratio 9:16, vertical portrait orientation, tall)"
+            : aspectRatio === "16:9"
+            ? " (aspect ratio 16:9, horizontal landscape orientation, wide)"
+            : " (aspect ratio 1:1, square)";
+            
+    const fullPrompt = prompt + orientationHint;
 
     for (let ki = 0; ki < keys.length; ki++) {
         const apiKey   = keys[ki];
         const keyLabel = ki === 0 ? "primary" : `key_${ki + 1}`;
 
         try {
-            console.log(`🎨 [flatkey-image] gpt-image-2 [${keyLabel}] | ${aspectRatio} | ${size}`);
+            console.log(`🎨 [flatkey-image] ${modelName} [${keyLabel}] | ${aspectRatio}`);
 
             const res = await fetchWithTimeout(
-                `${FLATKEY_BASE}/v1/images/generations`,
+                `${FLATKEY_BASE}/v1/chat/completions`,
                 {
                     method:  "POST",
                     headers: {
@@ -158,14 +170,16 @@ async function callGptImage2(
                         "Authorization": `Bearer ${apiKey}`,
                     },
                     body: JSON.stringify({
-                        model:           GPT_IMAGE_2_MODEL,
-                        prompt,
-                        n:               1,
-                        size,
-                        response_format: "b64_json",
+                        model: modelName,
+                        messages: [
+                            {
+                                role: "user",
+                                content: fullPrompt
+                            }
+                        ]
                     }),
                 },
-                90_000  // 90s — Cloudflare kills at ~100-125s, rotate faster
+                45_000  // Gemini is fast, 45s is plenty
             );
 
             const rawText = await res.text();
@@ -177,21 +191,26 @@ async function callGptImage2(
                     lastErr = rawText;
                     continue;
                 }
-                throw new Error(`[flatkey-image] gpt-image-2 error (${res.status}): ${rawText.slice(0, 200)}`);
+                throw new Error(`[flatkey-image] ${modelName} error (${res.status}): ${rawText.slice(0, 200)}`);
             }
 
             const data = JSON.parse(rawText);
-            const b64  = data?.data?.[0]?.b64_json;
-            if (!b64) {
+            const content = data?.choices?.[0]?.message?.content || "";
+            
+            // Regex to match mime type and base64
+            const match = content.match(/data:(image\/[a-zA-Z]+);base64,([a-zA-Z0-9+/=\s\r\n]+)/);
+            if (!match) {
                 const errMsg = data?.error?.message || data?.message || JSON.stringify(data);
-                throw new Error(`[flatkey-image] No b64_json in gpt-image-2 response. Detail: ${errMsg.slice(0, 200)}`);
+                throw new Error(`[flatkey-image] No base64 image data found in response content. Detail: ${content.slice(0, 150)}`);
             }
 
-            if (ki > 0) console.log(`✅ [flatkey-image] gpt-image-2 succeeded with [${keyLabel}]`);
-            return b64; // return raw base64
+            const mime = match[1];
+            const b64  = match[2].replace(/\s/g, "");
+
+            if (ki > 0) console.log(`✅ [flatkey-image] ${modelName} succeeded with [${keyLabel}]`);
+            return { b64, mime };
 
         } catch (e: any) {
-            // Treat our own timeout error as rotatable too
             const isRotatable = isQuotaError(0, e.message) || e.message?.includes("timed out");
             if (isRotatable && ki < keys.length - 1) {
                 console.warn(`⚠️ [flatkey-image] [${keyLabel}] exception (rotating to key_${ki + 2}): ${e.message.slice(0, 80)}`);
@@ -202,10 +221,10 @@ async function callGptImage2(
         }
     }
 
-    throw new Error(`[flatkey-image] All ${keys.length} gpt-image-2 key(s) exhausted. Last: ${lastErr.slice(0, 150)}`);
+    throw new Error(`[flatkey-image] All ${keys.length} ${modelName} key(s) exhausted. Last: ${lastErr.slice(0, 150)}`);
 }
 
-// ─── Core: gpt-image-2 only, returns Appwrite URL or data URL ──────────────────
+// ─── Core: Primary & Fallback Gemini Images, returns Appwrite URL or data URL ─
 
 async function generateImage(
     prompt:       string,
@@ -221,10 +240,30 @@ async function generateImage(
     const startKeyLabel = keyOffset % allKeys.length === 0 ? "primary" : `key_${(keyOffset % allKeys.length) + 1}`;
     console.log(`🔑 [flatkey-image] Using key slot [${startKeyLabel}] (offset ${keyOffset % allKeys.length} of ${allKeys.length})`);
 
-    // We only use gpt-image-2 as requested
-    const b64  = await callGptImage2(prompt, aspectRatio, keys);
-    const mime = "image/png";
-    console.log(`✅ [flatkey-image] gpt-image-2 done`);
+    let b64 = "";
+    let mime = "image/jpeg";
+
+    try {
+        const result = await callGeminiChatImage(prompt, aspectRatio, GEMINI_31_FLASH_MODEL, keys);
+        b64 = result.b64;
+        mime = result.mime;
+        console.log(`✅ [flatkey-image] ${GEMINI_31_FLASH_MODEL} done`);
+    } catch (primaryErr: any) {
+        console.warn(`⚠️ [flatkey-image] ${GEMINI_31_FLASH_MODEL} failed, trying fallback ${GEMINI_3_PRO_MODEL}: ${primaryErr.message.slice(0, 120)}`);
+
+        try {
+            const result = await callGeminiChatImage(prompt, aspectRatio, GEMINI_3_PRO_MODEL, keys);
+            b64 = result.b64;
+            mime = result.mime;
+            console.log(`✅ [flatkey-image] ${GEMINI_3_PRO_MODEL} fallback done`);
+        } catch (fallbackErr: any) {
+            throw new Error(
+                `[flatkey-image] Both Gemini image models failed.\n` +
+                `  Primary (${GEMINI_31_FLASH_MODEL}): ${primaryErr.message.slice(0, 100)}\n` +
+                `  Fallback (${GEMINI_3_PRO_MODEL}): ${fallbackErr.message.slice(0, 100)}`
+            );
+        }
+    }
 
     // Upload to Appwrite for a public HTTP URL (needed by WaveSpeed I2V etc.)
     try {
@@ -456,7 +495,7 @@ export async function submitNanoBananaJobsParallel(
                     success:      true,
                     generationId: `${URL_PREFIX}${r.value.url}`,
                     apiKey:       "flatkey",
-                    model:        "gpt-image-2",
+                    model:        "gemini-3.1-flash-image-preview",
                 });
             } else {
                 results.push({ index: scene.index, success: false, error: r.reason?.message || "Failed" });
