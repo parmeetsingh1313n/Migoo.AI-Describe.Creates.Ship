@@ -32,37 +32,7 @@ function buildShortsThumbnailPrompt(title: string, niche: string): string {
     return scenes[Math.floor(Math.random() * scenes.length)];
 }
 
-/**
- * Download image and save locally to public/thumbnails/
- */
-async function downloadAndSaveThumbnail(imageUrl: string, seriesId: string): Promise<string> {
-    const thumbnailsDir = path.join(process.cwd(), "public", "thumbnails");
-
-    if (!fs.existsSync(thumbnailsDir)) {
-        fs.mkdirSync(thumbnailsDir, { recursive: true });
-    }
-
-    const response = await fetch(imageUrl);
-    if (!response.ok) {
-        throw new Error(`Failed to download thumbnail: HTTP ${response.status}`);
-    }
-
-    const arrayBuffer = await response.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
-
-    const contentType = response.headers.get("content-type") || "";
-    let ext = "png";
-    if (contentType.includes("jpeg") || contentType.includes("jpg")) ext = "jpg";
-    else if (contentType.includes("webp")) ext = "webp";
-
-    const fileName = `short-${seriesId}.${ext}`;
-    const filePath = path.join(thumbnailsDir, fileName);
-
-    fs.writeFileSync(filePath, buffer);
-    console.log(`💾 Short series thumbnail saved: ${filePath} (${buffer.length} bytes)`);
-
-    return `/thumbnails/${fileName}`;
-}
+// (Removed downloadAndSaveThumbnail function to always use Appwrite hosting)
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // MAIN API ROUTE
@@ -110,25 +80,17 @@ export async function POST(req: NextRequest) {
         console.log('📸 Thumbnail prompt:', prompt.substring(0, 100));
 
         const signedUrl = await generateNanoBananaImage(prompt, 1024, 1024);
-        
-        let localPath = "";
-        try {
-            localPath = await downloadAndSaveThumbnail(signedUrl, seriesId);
-        } catch (downloadErr: any) {
-            console.warn(`⚠️ Local save failed (read-only filesystem on Vercel?), using Appwrite/remote URL directly: ${downloadErr.message}`);
-            localPath = signedUrl;
-        }
 
-        // Update DB
+        // Update DB with the permanent Appwrite URL
         await db.update(shortVideoSeries)
-            .set({ thumbnailUrl: localPath })
+            .set({ thumbnailUrl: signedUrl })
             .where(eq(shortVideoSeries.seriesId, seriesId));
 
-        console.log('🎉 SHORT SERIES THUMBNAIL COMPLETE:', localPath);
+        console.log('🎉 SHORT SERIES THUMBNAIL COMPLETE (Appwrite):', signedUrl);
 
         return NextResponse.json({
             success: true,
-            thumbnailUrl: localPath,
+            thumbnailUrl: signedUrl,
         });
 
     } catch (error: any) {
