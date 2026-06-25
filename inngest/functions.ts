@@ -1607,110 +1607,29 @@ Rewrite so it VISUALLY DEPICTS the specific event in the narration. 65-90 words.
             console.log("🛑 Series cancelled — skipping image generation");
             for (const { i } of scenesNeedingImages) finalImageUrls[i] = "SKIP_T2V";
         } else if (scenesNeedingImages.length > 0) {
-            // ── Step C: Submit ALL Leonardo jobs in PARALLEL in ONE fast step (~3s) ──
-            // Identical to how the normal generator submits — all jobs go out at once,
-            // no waiting for images to complete. This step always finishes in < 10s.
-            const submissions = await step.run("submit-all-image-jobs", async () => {
-                const configs: NanoBananaSceneConfig[] = scenesNeedingImages.map(({ i }: { i: number }) => ({
-                    index: i,
-                    prompt: enrichedPrompts[i] || (scriptData.scenes[i].imagePrompt || scriptData.scenes[i].narration || "Cinematic scene"),
-                    width: 768,
-                    height: 1344,
-                }));
+            // ── Step C: Generate each image in its OWN step.run ──────────────────────
+            // gpt-image-2 takes ~60s. If we batch multiple scenes into ONE step.run,
+            // the step can exceed Vercel's 60s timeout → 524 error.
+            // Fix: each scene gets its own step.run so each has a fresh 60s window.
+            console.log(`🚀 Generating ${scenesNeedingImages.length} images — one step per scene (gpt-image-2)...`);
 
-                console.log(`🚀 Submitting ${configs.length} Nano Banana image jobs in parallel...`);
-                return await submitNanoBananaJobsParallel(configs, undefined, 4);
-            });
-
-            // Mark failed submissions immediately as SKIP_T2V
-            const pendingJobs: Array<{ index: number; generationId: string; apiKey: string; model: string }> = [];
-            for (const sub of submissions) {
-                if (sub.success && sub.generationId && sub.apiKey && sub.model) {
-                    pendingJobs.push({ index: sub.index, generationId: sub.generationId, apiKey: sub.apiKey, model: sub.model });
-                } else {
-                    console.warn(`⚠️ Scene ${sub.index + 1} submission failed: ${sub.error}. Falling back to GPT Image-1.5...`);
-                    // Try GPT Image-1.5 fallback in its own step (fast, < 30s)
-                    const fallbackUrl = await step.run(`image-gpt-fallback-scene-${sub.index}`, async () => {
-                        try {
-                            const prompt = enrichedPrompts[sub.index] || "Cinematic scene illustration";
-                            const url = await generateGptImage15SingleUrl(prompt, 768, 1344);
-                            console.log(`✅ Scene ${sub.index + 1} GPT Image-1.5 fallback ready`);
-                            return url;
-                        } catch (e: any) {
-                            console.warn(`⚠️ Scene ${sub.index + 1} GPT fallback also failed: ${e?.message}`);
-                            return "SKIP_T2V";
-                        }
-                    });
-                    finalImageUrls[sub.index] = fallbackUrl;
-                }
-            }
-
-            // ── Step D: Poll ALL pending jobs using sleep → check pattern ──
-            // Each check step is fast (<5s). We sleep between checks using Inngest's
-            // native step.sleep so Vercel is never holding an open connection during waits.
-            // This is IDENTICAL to how the normal generator handles long-running polls.
-            const MAX_POLL_ROUNDS = 8;   // 8 × 30s = 4 minutes total max wait
-            const POLL_SLEEP_SEC = "30s";
-
-            let remainingJobs = [...pendingJobs];
-
-            for (let round = 0; round < MAX_POLL_ROUNDS && remainingJobs.length > 0; round++) {
-                // Sleep first — Leonardo typically takes 20-60s to generate
-                await step.sleep(`wait-for-images-round-${round}`, POLL_SLEEP_SEC);
-
-                // Check ALL remaining jobs in parallel in one fast step
-                const statusResults = await step.run(`check-image-status-round-${round}`, async () => {
-                    return await checkNanoBananaJobsStatus(remainingJobs);
-                });
-
-                const stillPending: typeof remainingJobs = [];
-                for (const result of statusResults) {
-                    if (result.status === "COMPLETE" && result.imageUrl) {
-                        console.log(`✅ Scene ${result.index + 1} image ready (round ${round + 1}): ${result.imageUrl.substring(0, 60)}...`);
-                        finalImageUrls[result.index] = result.imageUrl;
-                    } else if (result.status === "FAILED") {
-                        console.warn(`⚠️ Scene ${result.index + 1} Leonardo failed in round ${round + 1}. Trying GPT fallback...`);
-                        const fallbackUrl = await step.run(`image-gpt-fallback-scene-${result.index}-round-${round}`, async () => {
-                            try {
-                                const prompt = enrichedPrompts[result.index] || "Cinematic scene illustration";
-                                return await generateGptImage15SingleUrl(prompt, 768, 1344);
-                            } catch {
-                                return "SKIP_T2V";
-                            }
-                        });
-                        finalImageUrls[result.index] = fallbackUrl;
-                    } else {
-                        // Still pending — keep in the list for next round
-                        const originalJob = remainingJobs.find(j => j.index === result.index);
-                        if (originalJob) stillPending.push(originalJob);
-                    }
-                }
-                remainingJobs = stillPending;
-
-                if (remainingJobs.length === 0) {
-                    console.log(`✅ All images ready after round ${round + 1}`);
-                    break;
-                }
-                console.log(`🔄 Round ${round + 1}: ${remainingJobs.length} image(s) still pending...`);
-            }
-
-            // Any jobs still pending after max rounds → Try Nano Banana 2 first, then text-to-video
-            for (const job of remainingJobs) {
-                console.warn(`⚠️ Scene ${job.index + 1} timed out after ${MAX_POLL_ROUNDS} rounds. Trying Nano Banana 2 fallback...`);
-                const fallbackUrl = await step.run(`image-nanobanana2-fallback-scene-${job.index}`, async () => {
+            for (const { i } of scenesNeedingImages) {
+                const sceneImageUrl = await step.run(`generate-image-scene-${i}`, async () => {
                     try {
-                        const prompt = enrichedPrompts[job.index] || (scriptData.scenes[job.index].imagePrompt || scriptData.scenes[job.index].narration || "Cinematic scene");
-                        const url = await generateNanoBanana2Image(prompt, undefined, 768, 1344);
-                        console.log(`✅ Scene ${job.index + 1} Nano Banana 2 fallback ready: ${url.substring(0, 60)}...`);
+                        const prompt = enrichedPrompts[i] || (scriptData.scenes[i].imagePrompt || scriptData.scenes[i].narration || "Cinematic scene");
+                        console.log(`🎨 Scene ${i + 1}: Generating gpt-image-2 image...`);
+                        const url = await generateNanoBananaImage(prompt, 768, 1344);
+                        console.log(`✅ Scene ${i + 1} image ready: ${url.substring(0, 60)}...`);
                         return url;
                     } catch (e: any) {
-                        console.warn(`⚠️ Scene ${job.index + 1} Nano Banana 2 fallback failed: ${e?.message}. Falling back to text-to-video.`);
+                        console.warn(`⚠️ Scene ${i + 1} image generation failed: ${e?.message}. Marking SKIP_T2V.`);
                         return "SKIP_T2V";
                     }
                 });
-                finalImageUrls[job.index] = fallbackUrl;
+                finalImageUrls[i] = sceneImageUrl;
             }
         }
+
 
         const imageData = {
             imageUrls: finalImageUrls,
@@ -1718,37 +1637,25 @@ Rewrite so it VISUALLY DEPICTS the specific event in the narration. 65-90 words.
             sceneProbedDurations: resolvedAssets.sceneProbedDurations
         };
 
-        // ── Step 4.5a: Submit AI Thumbnail Job (fast, < 5s, no blocking poll) ──────────
-        const thumbnailJobData = await step.run("submit-thumbnail-job", async () => {
+        // ── Step 4.5: Generate Thumbnail with gpt-image-2 in its own step ─────────────
+        const thumbnailUrl = await step.run("generate-thumbnail", async () => {
             let prompt = (scriptData as any).thumbnailPrompt ||
                 `Cinematic masterpiece poster for: "${(scriptData as any).videoTitle || seriesData.title}". Epic composition, stunning lighting.`;
             prompt += " -- CRITICAL: NO TEXT, NO WORDS, NO LETTERS, NO NUMBERS. PURE IMAGE ONLY.";
-            console.log(`🖼️ Submitting thumbnail job for: "${seriesData.title}"`);
+            console.log(`🖼️ Generating thumbnail for: "${seriesData.title}"`);
             try {
-                const { taskId, apiKey } = await submitNanoBananaImageTask(prompt, 768, 1344);
-                console.log(`✅ Thumbnail task submitted: ${taskId}`);
-                return { taskId, apiKey };
+                const url = await generateNanoBananaImage(prompt, 768, 1344);
+                console.log(`✅ Thumbnail ready: ${url.substring(0, 60)}...`);
+                return url;
             } catch (err: any) {
-                console.warn(`⚠️ Thumbnail submit failed: ${err?.message}`);
-                return { taskId: null as string | null, apiKey: null as string | null };
+                console.warn(`⚠️ Thumbnail generation failed: ${err?.message}`);
+                return "";
             }
         });
 
-        // ── Step 4.5b-d: Poll thumbnail — 3 × 30s rounds (90s max) ──────────────────
-        let thumbnailUrl = "";
-        for (let tRound = 0; tRound < 3 && !thumbnailUrl && thumbnailJobData.taskId; tRound++) {
-            await step.sleep(`wait-thumbnail-r${tRound}`, "30s");
-            const tResult = await step.run(`check-thumbnail-r${tRound}`, async () =>
-                (thumbnailJobData.taskId && thumbnailJobData.apiKey)
-                    ? checkPolloTaskStatus(thumbnailJobData.taskId, thumbnailJobData.apiKey)
-                    : { status: "failed" as const }
-            );
-            if (tResult.status === "complete" && tResult.url) {
-                thumbnailUrl = tResult.url;
-                console.log(`✅ AI Thumbnail ready: ${thumbnailUrl.substring(0, 60)}...`);
-            }
-        }
         const thumbnailData = { thumbnailUrl };
+
+
 
         // Update status: generating scene videos (image → video)
         await step.run("update-status-videos", () => updateSeriesStatus(seriesId, "generating:videos"));
