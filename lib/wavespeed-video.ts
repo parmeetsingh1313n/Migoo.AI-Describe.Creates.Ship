@@ -23,11 +23,10 @@ import path from "path";
 import fs   from "fs";
 import { exec } from "child_process";
 
-// ─── Constants ────────────────────────────────────────────────────────────────
-
-const WAVESPEED_SUBMIT_URL = "https://api.wavespeed.ai/api/v3/bytedance/seedance-v1.5-pro/image-to-video";
-const WAVESPEED_POLL_BASE  = "https://api.wavespeed.ai/api/v3/predictions";
-const VIDEO_RESOLUTION     = "480p";  // $0.06 per 5s clip (no audio)
+const WAVESPEED_I2V_URL   = "https://api.wavespeed.ai/api/v3/bytedance/seedance-v1.5-pro/image-to-video";
+const WAVESPEED_T2V_URL   = "https://api.wavespeed.ai/api/v3/bytedance/seedance-v1.5-pro/text-to-video";
+const WAVESPEED_POLL_BASE = "https://api.wavespeed.ai/api/v3/predictions";
+const VIDEO_RESOLUTION    = "480p";  // $0.06 per 5s clip (no audio)
 
 // ─── Key helpers ─────────────────────────────────────────────────────────────
 
@@ -115,33 +114,40 @@ interface WaveSpeedSubmitResult {
 }
 
 async function submitWaveSpeedJob(
-    imageUrl: string,
+    imageUrl: string | undefined,
     prompt:   string,
     aspectRatio: "9:16" | "16:9" | "1:1"
 ): Promise<WaveSpeedSubmitResult> {
     const keys = getWaveSpeedKeys();
     let lastErr = "";
 
+    const isTextToVideo = !imageUrl;
+    const submitUrl = isTextToVideo ? WAVESPEED_T2V_URL : WAVESPEED_I2V_URL;
+
     for (let ki = 0; ki < keys.length; ki++) {
         const apiKey   = keys[ki];
         const keyLabel = ki === 0 ? "primary" : `key_${ki + 1}`;
         try {
-            const res = await fetch(WAVESPEED_SUBMIT_URL, {
+            const bodyParams: any = {
+                prompt,
+                duration:       5,
+                resolution:     VIDEO_RESOLUTION,
+                aspect_ratio:   aspectRatio,
+                generate_audio: false,
+                camera_fixed:   false,
+                seed:           -1,
+            };
+            if (!isTextToVideo) {
+                bodyParams.image = imageUrl;
+            }
+
+            const res = await fetch(submitUrl, {
                 method:  "POST",
                 headers: {
                     "Content-Type":  "application/json",
                     "Authorization": `Bearer ${apiKey}`,
                 },
-                body: JSON.stringify({
-                    prompt,
-                    image:          imageUrl,
-                    duration:       5,
-                    resolution:     VIDEO_RESOLUTION,
-                    aspect_ratio:   aspectRatio,
-                    generate_audio: false,
-                    camera_fixed:   false,
-                    seed:           -1,
-                }),
+                body: JSON.stringify(bodyParams),
             });
 
             if (!res.ok) {
@@ -377,23 +383,18 @@ export async function generateSeedanceVideo(
     sceneIndex:  number,
     aspectRatio: "9:16" | "16:9" | "1:1" = "9:16"
 ): Promise<{ videoUrl: string; thumbnailUrl: string; actualDurationSec: number }> {
-    console.log(`🎬 [wavespeed-video] Seedance V1.5 Pro I2V: Scene ${sceneIndex + 1} | ${aspectRatio} | ${durationSec}s`);
+    const isT2V = !imageUrl || imageUrl === "SKIP_T2V" || imageUrl === "SKIP_VEO" || imageUrl === "";
+    console.log(`🎬 [wavespeed-video] Seedance V1.5 Pro ${isT2V ? "T2V" : "I2V"}: Scene ${sceneIndex + 1} | ${aspectRatio} | ${durationSec}s`);
 
-    // Determine if we're doing text-to-video (no image)
-    const skipImage = !imageUrl || imageUrl === "SKIP_T2V" || imageUrl === "SKIP_VEO" || imageUrl === "";
     let publicImageUrl: string | undefined;
 
-    if (!skipImage) {
+    if (!isT2V) {
         publicImageUrl = await uploadImageToAppwrite(imageUrl!);
     }
 
-    if (skipImage || !publicImageUrl) {
-        // Text-to-video: WaveSpeed requires an image — use a fallback or skip
-        throw new Error(`[wavespeed-video] Text-to-video not supported by Seedance V1.5 Pro I2V endpoint. Provide an image URL.`);
-    }
-
-    // Submit job with key rotation
+    // Submit job with key rotation (publicImageUrl is undefined for T2V)
     const { predictionId, apiKey } = await submitWaveSpeedJob(publicImageUrl, prompt, aspectRatio);
+
     console.log(`✅ [wavespeed-video] Submitted prediction: ${predictionId}`);
 
     // Poll until complete
@@ -487,17 +488,17 @@ export async function submitSeedanceVideoTask(
     prompt:      string,
     aspectRatio: "9:16" | "16:9" | "1:1" = "9:16"
 ): Promise<{ taskId: string; apiKey: string }> {
-    const skipImage = !imageUrl || imageUrl === "SKIP_T2V" || imageUrl === "SKIP_VEO" || imageUrl === "";
+    const isT2V = !imageUrl || imageUrl === "SKIP_T2V" || imageUrl === "SKIP_VEO" || imageUrl === "";
 
-    if (skipImage) {
-        throw new Error(`[wavespeed-video] Text-to-video not supported. Provide an image URL.`);
+    let publicImageUrl: string | undefined;
+    if (!isT2V) {
+        // Upload image to Appwrite to get a public URL
+        publicImageUrl = await uploadImageToAppwrite(imageUrl!);
     }
-
-    // Upload image to Appwrite to get a public URL
-    const publicImageUrl = await uploadImageToAppwrite(imageUrl!);
 
     // Submit to WaveSpeed with key rotation (no polling)
     const { predictionId, apiKey } = await submitWaveSpeedJob(publicImageUrl, prompt, aspectRatio);
+
     console.log(`🚀 [wavespeed-video] Submitted prediction: ${predictionId}`);
 
     return { taskId: predictionId, apiKey };
