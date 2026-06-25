@@ -2379,9 +2379,11 @@ export const generateMotionGraphic = inngest.createFunction(
             // Generate ALL images in parallel with round-robin key rotation (same as short video generator)
             console.log(`🚀 Submitting ${imagePrompts.length} scenes for PARALLEL Nano Banana generation...`);
 
-            const isPortrait = seriesData.dimension === "portrait";
-            const isSquare = seriesData.dimension === "square";
-            const imgWidth = isPortrait ? 768 : (isSquare ? 1024 : 1344);
+            // project.dimension can be "portrait" | "square" | "landscape" — default to portrait (9:16)
+            const dimension = (project as any)?.dimension || "portrait";
+            const isPortrait = dimension === "portrait";
+            const isSquare   = dimension === "square";
+            const imgWidth  = isPortrait ? 768 : (isSquare ? 1024 : 1344);
             const imgHeight = isPortrait ? 1344 : (isSquare ? 1024 : 768);
 
             const parallelConfigs = imagePrompts.map((prompt, idx) => ({
