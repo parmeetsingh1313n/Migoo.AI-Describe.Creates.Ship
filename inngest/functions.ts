@@ -1633,7 +1633,7 @@ Rewrite so it VISUALLY DEPICTS the specific event in the narration. 65-90 words.
                     const fallbackUrl = await step.run(`image-gpt-fallback-scene-${sub.index}`, async () => {
                         try {
                             const prompt = enrichedPrompts[sub.index] || "Cinematic scene illustration";
-                            const url = await generateGptImage15SingleUrl(prompt, 1024, 1536);
+                            const url = await generateGptImage15SingleUrl(prompt, 768, 1344);
                             console.log(`✅ Scene ${sub.index + 1} GPT Image-1.5 fallback ready`);
                             return url;
                         } catch (e: any) {
@@ -1673,7 +1673,7 @@ Rewrite so it VISUALLY DEPICTS the specific event in the narration. 65-90 words.
                         const fallbackUrl = await step.run(`image-gpt-fallback-scene-${result.index}-round-${round}`, async () => {
                             try {
                                 const prompt = enrichedPrompts[result.index] || "Cinematic scene illustration";
-                                return await generateGptImage15SingleUrl(prompt, 1024, 1536);
+                                return await generateGptImage15SingleUrl(prompt, 768, 1344);
                             } catch {
                                 return "SKIP_T2V";
                             }
@@ -1725,7 +1725,7 @@ Rewrite so it VISUALLY DEPICTS the specific event in the narration. 65-90 words.
             prompt += " -- CRITICAL: NO TEXT, NO WORDS, NO LETTERS, NO NUMBERS. PURE IMAGE ONLY.";
             console.log(`🖼️ Submitting thumbnail job for: "${seriesData.title}"`);
             try {
-                const { taskId, apiKey } = await submitNanoBananaImageTask(prompt, 1024, 1024);
+                const { taskId, apiKey } = await submitNanoBananaImageTask(prompt, 768, 1344);
                 console.log(`✅ Thumbnail task submitted: ${taskId}`);
                 return { taskId, apiKey };
             } catch (err: any) {
@@ -2379,11 +2379,16 @@ export const generateMotionGraphic = inngest.createFunction(
             // Generate ALL images in parallel with round-robin key rotation (same as short video generator)
             console.log(`🚀 Submitting ${imagePrompts.length} scenes for PARALLEL Nano Banana generation...`);
 
+            const isPortrait = seriesData.dimension === "portrait";
+            const isSquare = seriesData.dimension === "square";
+            const imgWidth = isPortrait ? 768 : (isSquare ? 1024 : 1344);
+            const imgHeight = isPortrait ? 1344 : (isSquare ? 1024 : 768);
+
             const parallelConfigs = imagePrompts.map((prompt, idx) => ({
                 index: sceneIndices[idx],
                 prompt: `${prompt}. Professional motion graphic style, clean background, high contrast, vibrant colors`,
-                width: 1024,
-                height: 1024,
+                width: imgWidth,
+                height: imgHeight,
             }));
 
             const imageUrls: string[] = new Array(imagePrompts.length).fill('');

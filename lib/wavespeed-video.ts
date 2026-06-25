@@ -76,7 +76,15 @@ async function uploadImageToAppwrite(imageUrl: string): Promise<string> {
     console.log(`☁️ [wavespeed-video] Pre-uploading image to Appwrite for public URL...`);
 
     // Download the source image
-    const imgRes = await fetch(imageUrl, { signal: AbortSignal.timeout(60_000) });
+    // Use manual timeout — AbortSignal.timeout() breaks on older Node.js/Vercel runtimes
+    const imgController = new AbortController();
+    const imgTimer = setTimeout(() => imgController.abort(), 60_000);
+    let imgRes: Response;
+    try {
+        imgRes = await fetch(imageUrl, { signal: imgController.signal });
+    } finally {
+        clearTimeout(imgTimer);
+    }
     if (!imgRes.ok) throw new Error(`[wavespeed-video] Cannot download image for Appwrite upload: HTTP ${imgRes.status}`);
 
     const imgBuffer = Buffer.from(await imgRes.arrayBuffer());
@@ -284,75 +292,52 @@ async function stretchVideo(
         });
 
     // ─── Build smooth filter chain ──────────────────────────────────────────
-    // Strategy:
-    //   1. minterpolate (optical-flow MCFI) at a high synthetic fps to create
-    //      genuine in-between frames, then setpts to hit exact target duration.
-    //   2. Fallback: framerate filter (simpler blend interpolation).
-    //   3. Final fallback: raw setpts (original behaviour, still smooth for
-    //      small ratios).
+    // Strategy: pure setpts (timestamp-only stretch) — NO minterpolate.
     //
-    // We always pipe through fps=30 at the end to lock output cadence.
+    // Why NOT minterpolate:
+    //   Seedance generates 5s clips but scenes can be 8-12s (ratio 1.6x-2.4x).
+    //   At high ratios minterpolate's optical-flow creates ghosted/blurry
+    //   in-between frames that look like jerking artifacts.
+    //
+    // setpts just spreads the existing frames across the target duration —
+    // perfectly smooth slow-motion with no fake frames, no artifacts.
 
-    const syntheticFps  = 60; // oversample during interpolation then downsample
-    const outputFps     = 30;
+    const outputFps = 30;
 
-    // minterpolate filter string (motion-compensated frame interpolation)
-    const minterp = `minterpolate=fps=${syntheticFps}:mi_mode=mci:mc_mode=aobmc:vsbmc=1:scd=fdiff`;
-
-    // After interpolation, slow the result down smoothly and lock to 30 fps
+    // Core filter: lock to 30fps first, then stretch timestamps, then reset clock
     const stretchFilter = needsStretch
-        ? `${minterp},setpts=${ratio.toFixed(6)}*PTS,setpts=PTS-STARTPTS,fps=${outputFps}`
-        : `fps=${outputFps},setpts=PTS-STARTPTS`;
-
-    const fallbackStretchFilter = needsStretch
-        ? `framerate=fps=${syntheticFps}:interp_start=0:interp_end=255:scene=100,setpts=${ratio.toFixed(6)}*PTS,setpts=PTS-STARTPTS,fps=${outputFps}`
-        : `fps=${outputFps},setpts=PTS-STARTPTS`;
-
-    const rawStretchFilter = needsStretch
         ? `fps=${outputFps},setpts=${ratio.toFixed(6)}*PTS,setpts=PTS-STARTPTS`
         : `fps=${outputFps},setpts=PTS-STARTPTS`;
 
-    const buildCmd = (filterChain: string, fpsFlag: string, crf: number = 23) =>
+    const buildCmd = (fpsFlag: string, crf: number = 23) =>
         [
-            `"${ffmpegBin}"`, `-y`, `-ss 0`, `-i "${inPath}"`,
-            `-vf "${filterChain}"`, `-t ${trimPoint}`, `-r ${outputFps}`, fpsFlag, `-g ${outputFps}`,
-            `-c:v libx264`, `-pix_fmt yuv420p`, `-preset slow`, `-crf ${crf}`,
+            `"${ffmpegBin}"`, `-y`, `-i "${inPath}"`,
+            `-vf "${stretchFilter}"`, `-t ${trimPoint}`, `-r ${outputFps}`, fpsFlag, `-g ${outputFps}`,
+            `-c:v libx264`, `-pix_fmt yuv420p`, `-preset fast`, `-crf ${crf}`,
             `-an`, `-movflags +faststart`, `-avoid_negative_ts make_zero`,
             `"${outPath}"`,
         ].join(" ");
 
-    // Try minterpolate first (best quality), then framerate, then raw setpts
-    const attempts = [
-        { filter: stretchFilter,         label: "minterpolate (optical-flow)" },
-        { filter: fallbackStretchFilter, label: "framerate (blend interpolation)" },
-        { filter: rawStretchFilter,      label: "setpts (timestamp-only, no interpolation)" },
-    ];
-
     let succeeded = false;
-    for (const { filter, label } of attempts) {
-        const cmd = buildCmd(filter, `-fps_mode cfr`, 23);
-        console.log(`🎞️  [wavespeed-video] Trying: ${label}`);
+
+    // Try with -fps_mode first (modern FFmpeg), fall back to -vsync (older FFmpeg)
+    for (const fpsFlag of [`-fps_mode cfr`, `-vsync cfr`]) {
+        const cmd = buildCmd(fpsFlag, 23);
+        console.log(`🎞️  [wavespeed-video] Stretching with setpts (${fpsFlag}): ${exactActualDuration.toFixed(2)}s → ${targetDuration}s`);
         try {
             await runFFmpeg(cmd);
             if (fs.existsSync(outPath) && fs.statSync(outPath).size > 5000) {
-                console.log(`✅ [wavespeed-video] Stretch succeeded with: ${label}`);
+                console.log(`✅ [wavespeed-video] Stretch succeeded`);
                 succeeded = true;
                 break;
             }
         } catch (e: any) {
-            // If -fps_mode is not supported, retry with -vsync
-            if (e.stderr?.includes("fps_mode")) {
-                const cmd2 = buildCmd(filter, `-vsync cfr`, 23);
-                try {
-                    await runFFmpeg(cmd2);
-                    if (fs.existsSync(outPath) && fs.statSync(outPath).size > 5000) {
-                        console.log(`✅ [wavespeed-video] Stretch succeeded with: ${label} (-vsync)`);
-                        succeeded = true;
-                        break;
-                    }
-                } catch {}
+            if (!e.stderr?.includes("fps_mode") && !e.stderr?.includes("vsync")) {
+                // Real FFmpeg error — bail out immediately
+                console.warn(`⚠️  [wavespeed-video] FFmpeg error: ${(e.stderr || e.err?.message || "").slice(0, 120)}`);
+                break;
             }
-            console.warn(`⚠️  [wavespeed-video] ${label} failed, trying next...`);
+            // fps_mode/vsync flag not recognized — try the other one
         }
     }
 
