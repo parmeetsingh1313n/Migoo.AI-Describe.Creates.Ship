@@ -943,7 +943,7 @@ function VideoPlayerDialog({ video, series, onClose }: { video: VideoAsset | nul
                         {videoUrl ? (
                             <video
                                 src={videoUrl.trim().startsWith('{') || videoUrl.includes('"chunked"')
-                                    ? `/api/download-video/${video.videoId}`
+                                    ? `/api/stream-video/${video.videoId}`
                                     : videoUrl}
                                 className="w-full h-full object-contain"
                                 controls
