@@ -110,7 +110,14 @@ export async function POST(req: NextRequest) {
         console.log('📸 Thumbnail prompt:', prompt.substring(0, 100));
 
         const signedUrl = await generateNanoBananaImage(prompt, 1024, 1024);
-        const localPath = await downloadAndSaveThumbnail(signedUrl, seriesId);
+        
+        let localPath = "";
+        try {
+            localPath = await downloadAndSaveThumbnail(signedUrl, seriesId);
+        } catch (downloadErr: any) {
+            console.warn(`⚠️ Local save failed (read-only filesystem on Vercel?), using Appwrite/remote URL directly: ${downloadErr.message}`);
+            localPath = signedUrl;
+        }
 
         // Update DB
         await db.update(shortVideoSeries)
