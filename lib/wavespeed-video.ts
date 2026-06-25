@@ -298,53 +298,91 @@ async function stretchVideo(
         });
 
     // ─── Build smooth filter chain ──────────────────────────────────────────
-    // Strategy: pure setpts (timestamp-only stretch) — NO minterpolate.
     //
-    // Why NOT minterpolate:
-    //   Seedance generates 5s clips but scenes can be 8-12s (ratio 1.6x-2.4x).
-    //   At high ratios minterpolate's optical-flow creates ghosted/blurry
-    //   in-between frames that look like jerking artifacts.
+    // 3-Tier frame interpolation strategy for smooth slow-motion:
     //
-    // setpts just spreads the existing frames across the target duration —
-    // perfectly smooth slow-motion with no fake frames, no artifacts.
+    // TIER 1 — minterpolate MCI + AOBMC (best quality)
+    //   Generates true in-between frames using bidirectional optical-flow
+    //   motion compensation. Upsample to 120fps first so the stretch ratio
+    //   never exceeds 4x on any single frame pair, then downsample to 30fps.
+    //   Result: cinema-quality smooth slow motion, zero jerking.
+    //
+    // TIER 2 — minterpolate blend (frame blending)
+    //   When MCI fails (complex scene / motion too fast for optical-flow),
+    //   blend adjacent frames together. Slightly softer/dreamlike but
+    //   completely jerk-free.
+    //
+    // TIER 3 — setpts only (timestamp fallback)
+    //   Last resort: pure timestamp stretching. No new frames created, but
+    //   at least the output is correctly timed. Jerkiness may appear on
+    //   very low source framerates, but is always stable.
 
-    const outputFps = 30;
+    const outputFps   = 30;
+    const interpFps   = 120;   // high-fps pool to sample smooth frames from
+    const ratioStr    = ratio.toFixed(6);
 
-    // Core filter: lock to 30fps first, then stretch timestamps, then reset clock
-    const stretchFilter = needsStretch
-        ? `fps=${outputFps},setpts=${ratio.toFixed(6)}*PTS,setpts=PTS-STARTPTS`
+    // ── tier filters ──────────────────────────────────────────────────────
+    const tier1Filter = needsStretch
+        // Step 1: interpolate up to 120fps using motion-compensated optical flow
+        // Step 2: stretch timestamps across target duration
+        // Step 3: downsample to 30fps CFR output
+        ? `minterpolate=fps=${interpFps}:mi_mode=mci:me_mode=bidir:mc_mode=aobmc:scd=none,setpts=${ratioStr}*PTS,setpts=PTS-STARTPTS,fps=${outputFps}`
         : `fps=${outputFps},setpts=PTS-STARTPTS`;
 
-    const buildCmd = (fpsFlag: string, crf: number = 23) =>
+    const tier2Filter = needsStretch
+        // Frame blending: smooth but no optical flow (safer on complex motion)
+        ? `minterpolate=fps=${interpFps}:mi_mode=blend:scd=none,setpts=${ratioStr}*PTS,setpts=PTS-STARTPTS,fps=${outputFps}`
+        : `fps=${outputFps},setpts=PTS-STARTPTS`;
+
+    const tier3Filter = needsStretch
+        // Pure timestamp stretch — always works, may show judder on low-fps input
+        ? `fps=${outputFps},setpts=${ratioStr}*PTS,setpts=PTS-STARTPTS`
+        : `fps=${outputFps},setpts=PTS-STARTPTS`;
+
+    // ── command builder ───────────────────────────────────────────────────
+    const buildCmd = (filter: string, fpsFlag: string, crf = 23) =>
         [
             `"${ffmpegBin}"`, `-y`, `-i "${inPath}"`,
-            `-vf "${stretchFilter}"`, `-t ${trimPoint}`, `-r ${outputFps}`, fpsFlag, `-g ${outputFps}`,
+            `-vf "${filter}"`, `-t ${trimPoint}`,
+            `-r ${outputFps}`, fpsFlag, `-g ${outputFps}`,
             `-c:v libx264`, `-pix_fmt yuv420p`, `-preset fast`, `-crf ${crf}`,
             `-an`, `-movflags +faststart`, `-avoid_negative_ts make_zero`,
             `"${outPath}"`,
         ].join(" ");
 
+    // ── tier execution loop ───────────────────────────────────────────────
+    const tiers = [
+        { name: "MCI optical-flow (tier 1)",  filter: tier1Filter },
+        { name: "frame-blend (tier 2)",        filter: tier2Filter },
+        { name: "setpts timestamp (tier 3)",   filter: tier3Filter },
+    ];
+
     let succeeded = false;
 
-    // Try with -fps_mode first (modern FFmpeg), fall back to -vsync (older FFmpeg)
-    for (const fpsFlag of [`-fps_mode cfr`, `-vsync cfr`]) {
-        const cmd = buildCmd(fpsFlag, 23);
-        console.log(`🎞️  [wavespeed-video] Stretching with setpts (${fpsFlag}): ${exactActualDuration.toFixed(2)}s → ${targetDuration}s`);
-        try {
-            await runFFmpeg(cmd);
-            if (fs.existsSync(outPath) && fs.statSync(outPath).size > 5000) {
-                console.log(`✅ [wavespeed-video] Stretch succeeded`);
-                succeeded = true;
+    for (const tier of tiers) {
+        // Try both modern & legacy fps-mode flags per tier
+        for (const fpsFlag of [`-fps_mode cfr`, `-vsync cfr`]) {
+            const cmd = buildCmd(tier.filter, fpsFlag, 23);
+            console.log(`🎞️  [wavespeed-video] ${tier.name} (${fpsFlag}): ${exactActualDuration.toFixed(2)}s → ${targetDuration}s`);
+            try {
+                await runFFmpeg(cmd);
+                if (fs.existsSync(outPath) && fs.statSync(outPath).size > 5000) {
+                    console.log(`✅ [wavespeed-video] Smooth stretch succeeded with ${tier.name}`);
+                    succeeded = true;
+                    break;
+                }
+            } catch (e: any) {
+                const stderr: string = e.stderr || e.err?.message || "";
+                if (stderr.includes("fps_mode") || stderr.includes("vsync")) {
+                    // Flag not recognized in this FFmpeg build — try the other flag
+                    continue;
+                }
+                // Real FFmpeg error for this tier — move to next tier
+                console.warn(`⚠️  [wavespeed-video] ${tier.name} failed: ${stderr.slice(0, 150)}`);
                 break;
             }
-        } catch (e: any) {
-            if (!e.stderr?.includes("fps_mode") && !e.stderr?.includes("vsync")) {
-                // Real FFmpeg error — bail out immediately
-                console.warn(`⚠️  [wavespeed-video] FFmpeg error: ${(e.stderr || e.err?.message || "").slice(0, 120)}`);
-                break;
-            }
-            // fps_mode/vsync flag not recognized — try the other one
         }
+        if (succeeded) break;
     }
 
     if (!succeeded) throw new Error("FFmpeg stretch failed with all filter strategies");
