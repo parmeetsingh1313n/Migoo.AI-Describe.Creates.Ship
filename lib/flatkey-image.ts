@@ -3,17 +3,13 @@
  * Flatkey AI — Image Generation Client
  *
  * PRIMARY  : openai/gpt-image-2  via /v1/images/generations  (b64_json)
- * FALLBACK : gemini-3-pro-image-preview via /v1beta/models/:model:generateContent
- *
  * Key rotation: FLATKEY_API_KEY, FLATKEY_API_KEY_2 … FLATKEY_API_KEY_10
  *
- * Drop-in replacement for lib/vercel-image.ts.
- * All exported function names and signatures are identical so callers only
- * need to change their import path from "@/lib/vercel-image" → "@/lib/flatkey-image".
+ * 524 = Cloudflare timeout between caller→Flatkey — treated as rotatable,
+ *       next key is tried immediately.
+ * Per-key timeout: 90s (Cloudflare kills at ~100-125s, so 90s rotates faster).
  *
- * Image delivery: returns a base64 data URL (data:image/png;base64,...).
- * This works everywhere the app uses imageUrl since Next.js and Appwrite
- * accept data URLs. For WaveSpeed I2V (needs HTTP URL), use uploadImageToAppwrite().
+ * Drop-in replacement for lib/vercel-image.ts.
  * ═══════════════════════════════════════════════════════════════════════════════
  */
 
@@ -25,7 +21,6 @@ const FLATKEY_BASE = "https://console.flatkey.ai";
 // ─── Models ───────────────────────────────────────────────────────────────────
 
 const GPT_IMAGE_2_MODEL  = "openai/gpt-image-2";
-const GEMINI_FALLBACK    = "google/imagen-3"; // Flatkey model name
 
 // ─── Key rotation ─────────────────────────────────────────────────────────────
 
@@ -54,11 +49,13 @@ function rotateKeys(keys: string[], startIndex: number): string[] {
 }
 
 function isQuotaError(status: number, body: string): boolean {
-    if ([401, 402, 429, 503].includes(status)) return true;
+    // 524 = Cloudflare timeout (origin didn't respond in time) — rotate to next key
+    if ([401, 402, 429, 503, 524].includes(status)) return true;
     const b = body.toLowerCase();
     return b.includes("quota") || b.includes("insufficient") || b.includes("limit") ||
            b.includes("model_not_found") || b.includes("no available channel") ||
-           b.includes("unauthorized") || b.includes("credit");
+           b.includes("unauthorized") || b.includes("credit") ||
+           b.includes("timeout occurred") || b.includes("a timeout");
 }
 
 /**
@@ -168,14 +165,15 @@ async function callGptImage2(
                         response_format: "b64_json",
                     }),
                 },
-                180_000  // 180s — gpt-image-2 takes ~50s, give plenty of headroom
+                90_000  // 90s — Cloudflare kills at ~100-125s, rotate faster
             );
 
             const rawText = await res.text();
 
             if (!res.ok) {
-                if (isQuotaError(res.status, rawText) && ki < keys.length - 1) {
-                    console.warn(`⚠️ [flatkey-image] [${keyLabel}] quota/error (${res.status}) — rotating...`);
+                const isRotatable = isQuotaError(res.status, rawText);
+                if (isRotatable && ki < keys.length - 1) {
+                    console.warn(`⚠️ [flatkey-image] [${keyLabel}] quota/error (${res.status}) — rotating to key_${ki + 2}...`);
                     lastErr = rawText;
                     continue;
                 }
@@ -193,9 +191,10 @@ async function callGptImage2(
             return b64; // return raw base64
 
         } catch (e: any) {
-            const isQuota = isQuotaError(0, e.message);
-            if (isQuota && ki < keys.length - 1) {
-                console.warn(`⚠️ [flatkey-image] [${keyLabel}] exception (rotating): ${e.message.slice(0, 80)}`);
+            // Treat our own timeout error as rotatable too
+            const isRotatable = isQuotaError(0, e.message) || e.message?.includes("timed out");
+            if (isRotatable && ki < keys.length - 1) {
+                console.warn(`⚠️ [flatkey-image] [${keyLabel}] exception (rotating to key_${ki + 2}): ${e.message.slice(0, 80)}`);
                 lastErr = e.message;
                 continue;
             }
@@ -206,173 +205,7 @@ async function callGptImage2(
     throw new Error(`[flatkey-image] All ${keys.length} gpt-image-2 key(s) exhausted. Last: ${lastErr.slice(0, 150)}`);
 }
 
-// ─── FALLBACK: gemini-3-pro-image-preview via Gemini format ──────────────────
-
-async function callGeminiImage(
-    prompt:      string,
-    aspectRatio: "1:1" | "9:16" | "16:9",
-    keys:        string[], // already rotated for this request
-): Promise<string> {
-    let lastErr = "";
-
-    // Enforce 9:16 portrait via a strong prompt prefix — Flatkey's Gemini model
-    // uses the OpenAI-compatible /v1/images/generations endpoint, so we pass size.
-    const orientationHint =
-        aspectRatio === "9:16"
-            ? "IMPORTANT: Generate a VERTICAL PORTRAIT image in 9:16 aspect ratio (tall, like a smartphone screen or YouTube Shorts / TikTok video). The image must be significantly taller than it is wide. "
-            : aspectRatio === "16:9"
-            ? "IMPORTANT: Generate a HORIZONTAL LANDSCAPE image in 16:9 aspect ratio (wide, like a cinema screen). The image must be significantly wider than it is tall. "
-            : "";
-
-    // Map aspect ratio to OpenAI-compatible size strings for Flatkey's Gemini endpoint
-    const geminiSize = getSizeForAspectRatio(aspectRatio);
-    const fullPrompt = orientationHint + prompt;
-
-    for (let ki = 0; ki < keys.length; ki++) {
-        const apiKey   = keys[ki];
-        const keyLabel = ki === 0 ? "primary" : `key_${ki + 1}`;
-
-        try {
-            console.log(`🎨 [flatkey-image] gemini-3-pro-image [${keyLabel}] fallback | ${aspectRatio} | ${geminiSize}`);
-
-            // Flatkey routes Gemini via the standard OpenAI-compatible images/generations endpoint
-            const res = await fetchWithTimeout(
-                `${FLATKEY_BASE}/v1/images/generations`,
-                {
-                    method:  "POST",
-                    headers: {
-                        "Content-Type":  "application/json",
-                        "Authorization": `Bearer ${apiKey}`,
-                    },
-                    body: JSON.stringify({
-                        model:           GEMINI_FALLBACK,
-                        prompt:          fullPrompt,
-                        n:               1,
-                        size:            geminiSize,
-                        response_format: "b64_json",
-                    }),
-                },
-                180_000  // 180s timeout
-            );
-
-            const rawText = await res.text();
-
-            if (!res.ok) {
-                if (isQuotaError(res.status, rawText) && ki < keys.length - 1) {
-                    console.warn(`⚠️ [flatkey-image] gemini [${keyLabel}] quota (${res.status}) — rotating...`);
-                    lastErr = rawText;
-                    continue;
-                }
-                throw new Error(`[flatkey-image] gemini error (${res.status}): ${rawText.slice(0, 200)}`);
-            }
-
-            const data = JSON.parse(rawText);
-
-            // Handle both b64_json (OpenAI-compat) and url response formats
-            const b64 = data?.data?.[0]?.b64_json;
-            const url = data?.data?.[0]?.url;
-
-            if (b64) {
-                if (ki > 0) console.log(`✅ [flatkey-image] gemini succeeded with [${keyLabel}] (b64_json)`);
-                return b64;
-            }
-            if (url) {
-                // Fetch the image URL and convert to base64
-                const imgRes = await fetchWithTimeout(url, {}, 60_000);
-                if (!imgRes.ok) throw new Error(`[flatkey-image] Failed to fetch gemini image URL: ${imgRes.status}`);
-                const arrayBuf = await imgRes.arrayBuffer();
-                const b64FromUrl = Buffer.from(arrayBuf).toString("base64");
-                if (ki > 0) console.log(`✅ [flatkey-image] gemini succeeded with [${keyLabel}] (url→b64)`);
-                return b64FromUrl;
-            }
-
-            const errMsg = data?.error?.message || data?.message || JSON.stringify(data);
-            throw new Error(`[flatkey-image] No image data in Gemini response. Detail: ${errMsg.slice(0, 200)}`);
-
-        } catch (e: any) {
-            const isQuota = isQuotaError(0, e.message);
-            if (isQuota && ki < keys.length - 1) {
-                console.warn(`⚠️ [flatkey-image] gemini [${keyLabel}] exception (rotating): ${e.message.slice(0, 80)}`);
-                lastErr = e.message;
-                continue;
-            }
-            throw e;
-        }
-    }
-
-    throw new Error(`[flatkey-image] All ${keys.length} Gemini fallback key(s) exhausted. Last: ${lastErr.slice(0, 150)}`);
-}
-
-async function callGptImage15(
-    prompt:      string,
-    aspectRatio: "1:1" | "9:16" | "16:9",
-    keys:        string[], // already rotated for this request
-): Promise<string> {
-    const size    = getSizeForAspectRatio(aspectRatio);
-    let lastErr   = "";
-
-    for (let ki = 0; ki < keys.length; ki++) {
-        const apiKey   = keys[ki];
-        const keyLabel = ki === 0 ? "primary" : `key_${ki + 1}`;
-
-        try {
-            console.log(`🎨 [flatkey-image] gpt-image-1.5 [${keyLabel}] | ${aspectRatio} | ${size}`);
-
-            const res = await fetchWithTimeout(
-                `${FLATKEY_BASE}/v1/images/generations`,
-                {
-                    method:  "POST",
-                    headers: {
-                        "Content-Type":  "application/json",
-                        "Authorization": `Bearer ${apiKey}`,
-                    },
-                    body: JSON.stringify({
-                        model:           "openai/gpt-image-1.5",
-                        prompt,
-                        n:               1,
-                        size,
-                        response_format: "b64_json",
-                    }),
-                },
-                120_000  // 120s
-            );
-
-            const rawText = await res.text();
-
-            if (!res.ok) {
-                if (isQuotaError(res.status, rawText) && ki < keys.length - 1) {
-                    console.warn(`⚠️ [flatkey-image] [${keyLabel}] quota/error (${res.status}) — rotating...`);
-                    lastErr = rawText;
-                    continue;
-                }
-                throw new Error(`[flatkey-image] gpt-image-1.5 error (${res.status}): ${rawText.slice(0, 200)}`);
-            }
-
-            const data = JSON.parse(rawText);
-            const b64  = data?.data?.[0]?.b64_json;
-            if (!b64) {
-                const errMsg = data?.error?.message || data?.message || JSON.stringify(data);
-                throw new Error(`[flatkey-image] No b64_json in gpt-image-1.5 response. Detail: ${errMsg.slice(0, 200)}`);
-            }
-
-            if (ki > 0) console.log(`✅ [flatkey-image] gpt-image-1.5 succeeded with [${keyLabel}]`);
-            return b64;
-
-        } catch (e: any) {
-            const isQuota = isQuotaError(0, e.message);
-            if (isQuota && ki < keys.length - 1) {
-                console.warn(`⚠️ [flatkey-image] [${keyLabel}] exception (rotating): ${e.message.slice(0, 80)}`);
-                lastErr = e.message;
-                continue;
-            }
-            throw e;
-        }
-    }
-
-    throw new Error(`[flatkey-image] All ${keys.length} gpt-image-1.5 key(s) exhausted. Last: ${lastErr.slice(0, 150)}`);
-}
-
-// ─── Core: primary → fallback, returns Appwrite URL or data URL ───────────────
+// ─── Core: gpt-image-2 only, returns Appwrite URL or data URL ──────────────────
 
 async function generateImage(
     prompt:       string,
@@ -388,44 +221,14 @@ async function generateImage(
     const startKeyLabel = keyOffset % allKeys.length === 0 ? "primary" : `key_${(keyOffset % allKeys.length) + 1}`;
     console.log(`🔑 [flatkey-image] Using key slot [${startKeyLabel}] (offset ${keyOffset % allKeys.length} of ${allKeys.length})`);
 
-    let b64:  string | undefined;
-    let mime  = "image/png";
-
-    // ── Try gpt-image-2 first ──────────────────────────────────────────────────
-    try {
-        b64  = await callGptImage2(prompt, aspectRatio, keys);
-        mime = "image/png";
-        console.log(`✅ [flatkey-image] gpt-image-2 done`);
-    } catch (primaryErr: any) {
-        console.warn(`⚠️ [flatkey-image] gpt-image-2 failed, trying Gemini fallback: ${primaryErr.message.slice(0, 120)}`);
-
-        // ── Fallback 1: Gemini (Imagen-3) ────────────────────────────────────
-        try {
-            b64  = await callGeminiImage(prompt, aspectRatio, keys);
-            mime = "image/jpeg";
-            console.log(`✅ [flatkey-image] Gemini fallback done`);
-        } catch (fallbackErr: any) {
-            console.warn(`⚠️ [flatkey-image] Gemini fallback failed, trying GPT-Image-1.5 fallback: ${fallbackErr.message.slice(0, 120)}`);
-
-            // ── Fallback 2: GPT Image-1.5 ────────────────────────────────────
-            try {
-                b64  = await callGptImage15(prompt, aspectRatio, keys);
-                mime = "image/png";
-                console.log(`✅ [flatkey-image] GPT-Image-1.5 fallback done`);
-            } catch (fallback2Err: any) {
-                throw new Error(
-                    `[flatkey-image] All three providers failed.\n` +
-                    `  Primary (gpt-image-2): ${primaryErr.message.slice(0, 100)}\n` +
-                    `  Fallback 1 (imagen-3): ${fallbackErr.message.slice(0, 100)}\n` +
-                    `  Fallback 2 (gpt-image-1.5): ${fallback2Err.message.slice(0, 100)}`
-                );
-            }
-        }
-    }
+    // We only use gpt-image-2 as requested
+    const b64  = await callGptImage2(prompt, aspectRatio, keys);
+    const mime = "image/png";
+    console.log(`✅ [flatkey-image] gpt-image-2 done`);
 
     // Upload to Appwrite for a public HTTP URL (needed by WaveSpeed I2V etc.)
     try {
-        const publicUrl = await uploadBase64ToAppwrite(b64!, mime);
+        const publicUrl = await uploadBase64ToAppwrite(b64, mime);
         return publicUrl;
     } catch (uploadErr: any) {
         console.warn(`⚠️ [flatkey-image] Appwrite upload failed, returning data URL: ${uploadErr.message}`);
