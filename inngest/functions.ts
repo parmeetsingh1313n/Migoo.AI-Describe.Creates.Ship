@@ -1628,72 +1628,8 @@ Rewrite so it VISUALLY DEPICTS the specific event in the narration. 65-90 words.
                 });
                 finalImageUrls[i] = sceneImageUrl;
             }
-
-            // No more pending jobs needed — all done synchronously per step above.
-            // ── Thumbnail step follows ──
-            // This is IDENTICAL to how the normal generator handles long-running polls.
-            const MAX_POLL_ROUNDS = 8;   // 8 × 30s = 4 minutes total max wait
-            const POLL_SLEEP_SEC = "30s";
-
-            let remainingJobs = [...pendingJobs];
-
-            for (let round = 0; round < MAX_POLL_ROUNDS && remainingJobs.length > 0; round++) {
-                // Sleep first — Leonardo typically takes 20-60s to generate
-                await step.sleep(`wait-for-images-round-${round}`, POLL_SLEEP_SEC);
-
-                // Check ALL remaining jobs in parallel in one fast step
-                const statusResults = await step.run(`check-image-status-round-${round}`, async () => {
-                    return await checkNanoBananaJobsStatus(remainingJobs);
-                });
-
-                const stillPending: typeof remainingJobs = [];
-                for (const result of statusResults) {
-                    if (result.status === "COMPLETE" && result.imageUrl) {
-                        console.log(`✅ Scene ${result.index + 1} image ready (round ${round + 1}): ${result.imageUrl.substring(0, 60)}...`);
-                        finalImageUrls[result.index] = result.imageUrl;
-                    } else if (result.status === "FAILED") {
-                        console.warn(`⚠️ Scene ${result.index + 1} Leonardo failed in round ${round + 1}. Trying GPT fallback...`);
-                        const fallbackUrl = await step.run(`image-gpt-fallback-scene-${result.index}-round-${round}`, async () => {
-                            try {
-                                const prompt = enrichedPrompts[result.index] || "Cinematic scene illustration";
-                                return await generateGptImage15SingleUrl(prompt, 768, 1344);
-                            } catch {
-                                return "SKIP_T2V";
-                            }
-                        });
-                        finalImageUrls[result.index] = fallbackUrl;
-                    } else {
-                        // Still pending — keep in the list for next round
-                        const originalJob = remainingJobs.find(j => j.index === result.index);
-                        if (originalJob) stillPending.push(originalJob);
-                    }
-                }
-                remainingJobs = stillPending;
-
-                if (remainingJobs.length === 0) {
-                    console.log(`✅ All images ready after round ${round + 1}`);
-                    break;
-                }
-                console.log(`🔄 Round ${round + 1}: ${remainingJobs.length} image(s) still pending...`);
-            }
-
-            // Any jobs still pending after max rounds → Try Nano Banana 2 first, then text-to-video
-            for (const job of remainingJobs) {
-                console.warn(`⚠️ Scene ${job.index + 1} timed out after ${MAX_POLL_ROUNDS} rounds. Trying Nano Banana 2 fallback...`);
-                const fallbackUrl = await step.run(`image-nanobanana2-fallback-scene-${job.index}`, async () => {
-                    try {
-                        const prompt = enrichedPrompts[job.index] || (scriptData.scenes[job.index].imagePrompt || scriptData.scenes[job.index].narration || "Cinematic scene");
-                        const url = await generateNanoBanana2Image(prompt, undefined, 768, 1344);
-                        console.log(`✅ Scene ${job.index + 1} Nano Banana 2 fallback ready: ${url.substring(0, 60)}...`);
-                        return url;
-                    } catch (e: any) {
-                        console.warn(`⚠️ Scene ${job.index + 1} Nano Banana 2 fallback failed: ${e?.message}. Falling back to text-to-video.`);
-                        return "SKIP_T2V";
-                    }
-                });
-                finalImageUrls[job.index] = fallbackUrl;
-            }
         }
+
 
         const imageData = {
             imageUrls: finalImageUrls,
