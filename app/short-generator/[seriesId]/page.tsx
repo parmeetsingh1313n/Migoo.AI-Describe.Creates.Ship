@@ -880,12 +880,7 @@ function VideoPlayerDialog({ video, series, onClose }: { video: VideoAsset | nul
 
     const handleDownload = () => {
         if (!videoUrl) return;
-        window.open(
-            videoUrl.trim().startsWith('{') || videoUrl.includes('"chunked"')
-                ? `/api/download-video/${video.videoId}`
-                : videoUrl,
-            '_blank'
-        );
+        window.open(`/api/download-video/${video.videoId}`, '_blank');
     };
 
     // Sync background music with video play/pause
