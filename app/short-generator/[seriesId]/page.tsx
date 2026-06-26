@@ -942,13 +942,13 @@ function VideoPlayerDialog({ video, series, onClose }: { video: VideoAsset | nul
                         {/* Player / Video Tag */}
                         {videoUrl ? (
                             <video
-                                src={videoUrl.trim().startsWith('{') || videoUrl.includes('"chunked"')
-                                    ? `/api/download-video/${video.videoId}`
-                                    : videoUrl}
+                                key={video.videoId}
+                                src={`/api/stream-video/${video.videoId}`}
                                 className="w-full h-full object-contain"
                                 controls
                                 autoPlay
-                                loop
+                                playsInline
+                                preload="auto"
                                 onPlay={handleVideoPlay}
                                 onPause={handleVideoPause}
                                 onEnded={handleVideoPause}
