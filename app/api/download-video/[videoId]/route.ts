@@ -92,18 +92,7 @@ export async function GET(
     }
 
     // Case 2: Single Appwrite URL (plain string)
-    const response = await fetch(videoUrlStr);
-    if (!response.ok) {
-      return new Response(`Failed to fetch remote video: HTTP ${response.status}`, { status: response.status });
-    }
-
-    return new Response(response.body, {
-      headers: {
-        'Content-Type': 'video/mp4',
-        'Content-Disposition': `attachment; filename="${filename}"`,
-        'Content-Length': response.headers.get('content-length') || '',
-      },
-    });
+    return NextResponse.redirect(videoUrlStr);
 
   } catch (err: any) {
     console.error('Download video endpoint error:', err);
