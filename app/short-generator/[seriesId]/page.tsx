@@ -880,12 +880,14 @@ function VideoPlayerDialog({ video, series, onClose }: { video: VideoAsset | nul
 
     const handleDownload = () => {
         if (!videoUrl) return;
-        window.open(
-            videoUrl.trim().startsWith('{') || videoUrl.includes('"chunked"')
-                ? `/api/download-video/${video.videoId}`
-                : videoUrl,
-            '_blank'
-        );
+        // Always proxy through our download route so the browser receives
+        // the correct Content-Disposition filename (not an Appwrite UUID).
+        const a = document.createElement('a');
+        a.href = `/api/download-video/${video.videoId}`;
+        a.download = '';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
     };
 
     // Sync background music with video play/pause

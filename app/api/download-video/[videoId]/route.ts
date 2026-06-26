@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { db } from '@/config/db';
 import { shortVideoAssets } from '@/config/schema';
 import { eq } from 'drizzle-orm';
@@ -33,8 +33,17 @@ export async function GET(
       return new Response('Video not rendered yet', { status: 404 });
     }
 
-    const safeTitle = (row.videoTitle || 'video').replace(/[^a-zA-Z0-9._-]/g, '_');
+    // Preserve unicode word characters (Hindi, Hinglish, etc.).
+    // Only strip truly unsafe filename chars: / \ : * ? " < > |
+    const rawTitle = row.videoTitle || 'video';
+    const safeTitle = rawTitle
+      .replace(/[/\\:*?"<>|]/g, '')   // strip OS-illegal chars
+      .replace(/\s+/g, '_')            // spaces → underscore
+      .trim() || 'video';
     const filename = `${safeTitle}.mp4`;
+    // RFC 5987 encoded header so OS shows unicode title correctly
+    const encodedFilename = encodeURIComponent(filename);
+    const contentDisposition = `attachment; filename="${filename}"; filename*=UTF-8''${encodedFilename}`;
 
     // Case 1: Chunked Appwrite upload (JSON metadata)
     if (videoUrlStr.startsWith('{')) {
@@ -82,7 +91,7 @@ export async function GET(
           return new Response(stream, {
             headers: {
               'Content-Type': 'video/mp4',
-              'Content-Disposition': `attachment; filename="${filename}"`,
+              'Content-Disposition': contentDisposition,
             },
           });
         }
@@ -92,7 +101,18 @@ export async function GET(
     }
 
     // Case 2: Single Appwrite URL (plain string)
-    return NextResponse.redirect(videoUrlStr);
+    // Proxy through us so the browser gets the correct filename via Content-Disposition.
+    const upstream = await fetch(videoUrlStr);
+    if (!upstream.ok) {
+      return new Response(`Failed to fetch remote video: HTTP ${upstream.status}`, { status: upstream.status });
+    }
+    return new Response(upstream.body, {
+      headers: {
+        'Content-Type': 'video/mp4',
+        'Content-Disposition': contentDisposition,
+        'Content-Length': upstream.headers.get('content-length') || '',
+      },
+    });
 
   } catch (err: any) {
     console.error('Download video endpoint error:', err);
