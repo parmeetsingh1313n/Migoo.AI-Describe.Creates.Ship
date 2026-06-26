@@ -33,17 +33,23 @@ export async function GET(
       return new Response('Video not rendered yet', { status: 404 });
     }
 
-    // Preserve unicode word characters (Hindi, Hinglish, etc.).
+    // Preserve unicode word characters (Hindi, Hinglish, etc.) for the RFC 5987 part.
     // Only strip truly unsafe filename chars: / \ : * ? " < > |
     const rawTitle = row.videoTitle || 'video';
     const safeTitle = rawTitle
       .replace(/[/\\:*?"<>|]/g, '')   // strip OS-illegal chars
       .replace(/\s+/g, '_')            // spaces → underscore
       .trim() || 'video';
-    const filename = `${safeTitle}.mp4`;
-    // RFC 5987 encoded header so OS shows unicode title correctly
+
+    // HTTP headers are ByteStrings (ASCII only). The filename="" fallback must be ASCII.
+    // Non-ASCII chars (e.g. Devanagari ਅ = 2309) cause a hard "cannot convert to ByteString" crash.
+    const asciiFallback = safeTitle.replace(/[^\x00-\x7F]/g, '_').replace(/_+/g, '_').trim() || 'video';
+
+    const filename = `${safeTitle}.mp4`;              // Full unicode — used in RFC 5987 part
+    const asciiFilename = `${asciiFallback}.mp4`;     // ASCII-only  — used in filename="" fallback
+    // RFC 5987: filename*= is percent-encoded UTF-8, safe for all characters
     const encodedFilename = encodeURIComponent(filename);
-    const contentDisposition = `attachment; filename="${filename}"; filename*=UTF-8''${encodedFilename}`;
+    const contentDisposition = `attachment; filename="${asciiFilename}"; filename*=UTF-8''${encodedFilename}`;
 
     // Case 1: Chunked Appwrite upload (JSON metadata)
     if (videoUrlStr.startsWith('{')) {
