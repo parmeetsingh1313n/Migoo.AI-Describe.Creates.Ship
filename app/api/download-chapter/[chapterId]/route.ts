@@ -36,11 +36,7 @@ export async function GET(
       return new Response('Video not rendered yet', { status: 404 });
     }
 
-    const { searchParams } = new URL(req.url);
-    const rawTitle = searchParams.get('title');
-    const filename = rawTitle
-      ? `${rawTitle.replace(/[^a-zA-Z0-9._-]/g, '_')}.mp4`
-      : `chapter-${chapterId}.mp4`;
+    const filename = `chapter-${chapterId}.mp4`;
 
     // Case 1: Local render file (starts with /renders/ or doesn't have http)
     if (!videoUrlStr.startsWith('http') && !videoUrlStr.startsWith('{')) {
@@ -132,18 +128,8 @@ export async function GET(
     }
 
     // Case 3: Single Appwrite URL (plain string)
-    const response = await fetch(videoUrlStr);
-    if (!response.ok) {
-      return new Response(`Failed to fetch remote chapter video: HTTP ${response.status}`, { status: response.status });
-    }
-
-    return new Response(response.body, {
-      headers: {
-        'Content-Type': 'video/mp4',
-        'Content-Disposition': `attachment; filename="${filename}"`,
-        'Content-Length': response.headers.get('content-length') || '',
-      },
-    });
+    // Redirect browser to the raw direct file
+    return NextResponse.redirect(videoUrlStr);
 
   } catch (err: any) {
     console.error('Download chapter endpoint error:', err);

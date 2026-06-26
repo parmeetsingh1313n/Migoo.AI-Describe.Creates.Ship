@@ -880,7 +880,12 @@ function VideoPlayerDialog({ video, series, onClose }: { video: VideoAsset | nul
 
     const handleDownload = () => {
         if (!videoUrl) return;
-        window.open(`/api/download-video/${video.videoId}`, '_blank');
+        window.open(
+            videoUrl.trim().startsWith('{') || videoUrl.includes('"chunked"')
+                ? `/api/download-video/${video.videoId}`
+                : videoUrl,
+            '_blank'
+        );
     };
 
     // Sync background music with video play/pause
@@ -938,7 +943,7 @@ function VideoPlayerDialog({ video, series, onClose }: { video: VideoAsset | nul
                         {videoUrl ? (
                             <video
                                 src={videoUrl.trim().startsWith('{') || videoUrl.includes('"chunked"')
-                                    ? `/api/stream-video/${video.videoId}`
+                                    ? `/api/download-video/${video.videoId}`
                                     : videoUrl}
                                 className="w-full h-full object-contain"
                                 controls

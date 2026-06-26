@@ -99,7 +99,11 @@ function CourseChapters({ course, onRefresh }: Props) {
         const existingUrl = dlUrls[chapterId];
         if (dlStatus[chapterId] === 'completed' && existingUrl) {
             const a = document.createElement('a');
-            a.href = `/api/download-chapter/${chapterId}?title=${encodeURIComponent(chapter.chapterTitle)}`;
+            if (existingUrl.trim().startsWith('{') || existingUrl.includes('"chunked"')) {
+                a.href = `/api/download-chapter/${chapterId}`;
+            } else {
+                a.href = existingUrl;
+            }
             a.download = `${chapter.chapterTitle.replace(/[^a-z0-9]/gi, '_')}.mp4`;
             a.click();
             return;
