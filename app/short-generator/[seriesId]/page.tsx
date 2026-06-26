@@ -837,6 +837,7 @@ function VideoPlayerDialog({ video, series, onClose }: { video: VideoAsset | nul
     const [hasStartedPlaying, setHasStartedPlaying] = useState(false);
     const [videoUrl, setVideoUrl] = useState<string | null>(null);
     const [isRendering, setIsRendering] = useState(false);
+    const [isDownloading, setIsDownloading] = useState(false);
     const bgMusicRef = useRef<HTMLAudioElement | null>(null);
 
     // Resolve background music URL from series
@@ -878,16 +879,35 @@ function VideoPlayerDialog({ video, series, onClose }: { video: VideoAsset | nul
 
     if (!video) return null;
 
-    const handleDownload = () => {
-        if (!videoUrl) return;
-        // Always proxy through our download route so the browser receives
-        // the correct Content-Disposition filename (not an Appwrite UUID).
-        const a = document.createElement('a');
-        a.href = `/api/download-video/${video.videoId}`;
-        a.download = '';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
+    const handleDownload = async () => {
+        if (!videoUrl || isDownloading) return;
+        setIsDownloading(true);
+        try {
+            const response = await fetch(`/api/download-video/${video.videoId}`);
+            if (!response.ok) {
+                const errText = await response.text().catch(() => `HTTP ${response.status}`);
+                throw new Error(errText || `HTTP ${response.status}`);
+            }
+            const blob = await response.blob();
+            const objectUrl = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = objectUrl;
+            // Build a safe filename from the video title (keep unicode / hinglish chars)
+            const safeTitle = (video.videoTitle || 'video')
+                .replace(/[\/\\:*?"<>|]/g, '')
+                .replace(/\s+/g, '_')
+                .trim() || 'video';
+            a.download = `${safeTitle}.mp4`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            setTimeout(() => URL.revokeObjectURL(objectUrl), 2000);
+        } catch (err: any) {
+            console.error('Download error:', err);
+            toast.error(`Download failed: ${err.message}`);
+        } finally {
+            setIsDownloading(false);
+        }
     };
 
     // Sync background music with video play/pause
@@ -998,10 +1018,20 @@ function VideoPlayerDialog({ video, series, onClose }: { video: VideoAsset | nul
                                 initial={{ opacity: 0, scale: 0.9 }}
                                 animate={{ opacity: 1, scale: 1 }}
                                 onClick={handleDownload}
-                                className="flex-1 h-12 rounded-2xl bg-white text-black font-bold flex items-center justify-center gap-2 hover:bg-white/90 transition-all cursor-pointer shadow-lg"
+                                disabled={isDownloading}
+                                className="flex-1 h-12 rounded-2xl bg-white text-black font-bold flex items-center justify-center gap-2 hover:bg-white/90 transition-all cursor-pointer shadow-lg disabled:opacity-60 disabled:cursor-not-allowed"
                             >
-                                <Download className="w-5 h-5" />
-                                Download MP4
+                                {isDownloading ? (
+                                    <>
+                                        <Loader2 className="w-5 h-5 animate-spin" />
+                                        Downloading...
+                                    </>
+                                ) : (
+                                    <>
+                                        <Download className="w-5 h-5" />
+                                        Download MP4
+                                    </>
+                                )}
                             </motion.button>
                         ) : isRendering ? (
                             <div className="flex-1 h-12 rounded-2xl bg-white/10 text-white/50 font-medium flex items-center justify-center gap-2 border border-white/5">
