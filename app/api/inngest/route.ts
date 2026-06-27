@@ -5,8 +5,8 @@ import { serve } from "inngest/next";
 
 // Inngest requires a long maxDuration so each step.run() gets enough time.
 // Deep-crawl RAG + LLM distillation can take ~80s; script generation ~40s.
-// 900s (15 min) is the maximum supported value for serverless functions on Vercel Enterprise/Pro custom configurations.
-export const maxDuration = 900;
+// 300s (5 min) is the maximum supported value for serverless functions on Vercel Hobby plan.
+export const maxDuration = 300;
 
 export const { GET, POST, PUT } = serve({
     client: inngest,
