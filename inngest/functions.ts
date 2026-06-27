@@ -464,6 +464,78 @@ export const helloWorld = inngest.createFunction(
     }
 );
 
+// ─── Short Series Thumbnail Generator (Inngest — bypasses Vercel timeout) ─────
+// gpt-image-2 via Flatkey takes 60–90 s. Running it inside step.run() means
+// Inngest retries the step independently and Vercel never times out.
+
+export const generateShortSeriesThumbnailFn = inngest.createFunction(
+    {
+        id: "generate-short-series-thumbnail",
+        triggers: [{ event: "short-series/thumbnail.generate" }],
+        retries: 2,
+    },
+    async ({ event, step }) => {
+        const { seriesId, title, niche } = event.data as {
+            seriesId: string;
+            title: string;
+            niche: string;
+        };
+
+        console.log(`🖼️  [Inngest] Short-series thumbnail start — seriesId=${seriesId}`);
+
+        // ── Step 1: Check if thumbnail already exists ──────────────────────────
+        const existing = await step.run("check-existing", async () => {
+            const [row] = await db
+                .select({ thumbnailUrl: shortVideoSeries.thumbnailUrl })
+                .from(shortVideoSeries)
+                .where(eq(shortVideoSeries.seriesId, seriesId));
+            return row?.thumbnailUrl ?? null;
+        });
+
+        if (existing && (existing.startsWith("http") || existing.startsWith("data:"))) {
+            console.log(`✅ [Inngest] Thumbnail already exists for ${seriesId} — skipping`);
+            return { skipped: true, thumbnailUrl: existing };
+        }
+
+        // ── Step 2: Build prompt ───────────────────────────────────────────────
+        function buildShortsThumbnailPrompt(title: string, niche: string): string {
+            const stopWords = new Set(["a","an","the","and","or","but","in","on","at","for","with","about","to","from","of","is","are","how","what","why"]);
+            const words = title.split(/\s+/).filter(w => w.length > 0);
+            const keywords = words.filter(w => !stopWords.has(w.toLowerCase())).slice(0, 3).join(" ");
+
+            const scenes = [
+                `A stunning cinematic thumbnail for a "${keywords}" video series. Bold 3D neon text "${keywords}" floating over a vibrant ${niche}-themed background. Dramatic lighting, 8k resolution. STRICTLY ENSURE PERFECT SPELLING of "${keywords}".`,
+                `Cinematic wide thumbnail: "${keywords}" in large glowing letters against a dark moody backdrop with ${niche} visual elements. Electric blue and magenta tones, lens flare. STRICTLY ENSURE PERFECT SPELLING of "${keywords}". 8k.`,
+                `Hyper-modern thumbnail: "${keywords}" in bold metallic 3D typography. Floating geometric shapes, ${niche} icons, deep purple to electric blue gradient background. STRICTLY ENSURE PERFECT SPELLING of "${keywords}". 8k.`,
+                `Premium cinematic thumbnail: "${keywords}" as holographic text above a stylish ${niche}-themed scene. Glowing particles, soft bokeh, cinematic depth. STRICTLY ENSURE PERFECT SPELLING of "${keywords}". 8k.`,
+            ];
+            return scenes[Math.floor(Math.random() * scenes.length)];
+        }
+
+        const prompt = buildShortsThumbnailPrompt(title, niche || "general");
+
+        // ── Step 3: Generate image via Flatkey gpt-image-2 ────────────────────
+        // This step can take 60-90s — Inngest handles retries & has no wall-clock limit
+        const imageUrl = await step.run("generate-image", async () => {
+            console.log(`🎨 [Inngest] Generating thumbnail for "${title}" (${niche})...`);
+            const url = await generateNanoBananaImage(prompt, 1024, 1024);
+            console.log(`✅ [Inngest] Image generated: ${url.slice(0, 80)}`);
+            return url;
+        });
+
+        // ── Step 4: Save to DB ─────────────────────────────────────────────────
+        await step.run("save-thumbnail-url", async () => {
+            await db
+                .update(shortVideoSeries)
+                .set({ thumbnailUrl: imageUrl })
+                .where(eq(shortVideoSeries.seriesId, seriesId));
+            console.log(`💾 [Inngest] Thumbnail saved for series ${seriesId}`);
+        });
+
+        return { success: true, seriesId, thumbnailUrl: imageUrl };
+    }
+);
+
 // Helper to update series status in DB
 async function updateSeriesStatus(seriesId: string, status: string) {
     await db.update(shortVideoSeries)

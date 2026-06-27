@@ -5,6 +5,30 @@ import fs from 'fs';
 import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
 
+// GET — Fetch a single series by ID (used for thumbnail polling after Inngest job)
+export async function GET(
+    _req: NextRequest,
+    { params }: { params: Promise<{ seriesId: string }> }
+) {
+    try {
+        const { seriesId } = await params;
+
+        const [series] = await db
+            .select()
+            .from(shortVideoSeries)
+            .where(eq(shortVideoSeries.seriesId, seriesId));
+
+        if (!series) {
+            return NextResponse.json({ error: 'Series not found' }, { status: 404 });
+        }
+
+        return NextResponse.json({ success: true, series });
+    } catch (error: any) {
+        console.error('Error fetching series:', error);
+        return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+}
+
 // PATCH — Update a series (edit fields, pause/resume)
 export async function PATCH(
     req: NextRequest,

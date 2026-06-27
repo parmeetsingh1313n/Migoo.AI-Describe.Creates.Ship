@@ -1,6 +1,6 @@
 import { inngest } from "@/inngest/client";
 import { generateCourseImagesFn, generateCourseThumbnailFn, generateCourseVideoContentFn } from "@/inngest/course-functions";
-import { generateMotionGraphic, generateShortVideo, helloWorld, renderMotionGraphicOnly } from "@/inngest/functions";
+import { generateMotionGraphic, generateShortVideo, generateShortSeriesThumbnailFn, helloWorld, renderMotionGraphicOnly } from "@/inngest/functions";
 import { serve } from "inngest/next";
 
 // Inngest requires a long maxDuration so each step.run() gets enough time.
@@ -14,6 +14,7 @@ export const { GET, POST, PUT } = serve({
         // ── Short Video & Motion Graphics ─────────────────────────────────
         helloWorld,
         generateShortVideo,
+        generateShortSeriesThumbnailFn,
         generateMotionGraphic,
         renderMotionGraphicOnly,
 
