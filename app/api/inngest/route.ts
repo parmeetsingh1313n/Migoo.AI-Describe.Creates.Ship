@@ -7,6 +7,7 @@ import { serve } from "inngest/next";
 // Deep-crawl RAG + LLM distillation can take ~80s; script generation ~40s.
 // 300s (5 min) is the maximum supported value for serverless functions on Vercel Hobby plan.
 export const maxDuration = 300;
+// Triggering redeploy to force Vercel to pick up latest vercel-image changes.
 
 export const { GET, POST, PUT } = serve({
     client: inngest,
