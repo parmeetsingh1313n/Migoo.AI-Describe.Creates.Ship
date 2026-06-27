@@ -20,10 +20,17 @@ jobs:
       - name: Install dependencies
         run: npm ci --legacy-peer-deps
 
-      - name: Write props to file
+      - name: Fetch props from API
+        env:
+          WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
+          PROPS_URL: ${{ github.event.client_payload.propsUrl }}
         run: |
           mkdir -p tmp
-          echo '${{ toJson(github.event.client_payload.props) }}' > tmp/props.json
+          curl -sf \
+            -H "Authorization: Bearer ${WEBHOOK_SECRET}" \
+            "${PROPS_URL}" \
+            -o tmp/props.json
+          echo "✅ Props fetched ($(wc -c < tmp/props.json) bytes)"
 
       - name: Download Avatar Assets
         run: node scripts/download-assets.js
