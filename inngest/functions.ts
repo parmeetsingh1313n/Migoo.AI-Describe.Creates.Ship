@@ -1375,6 +1375,15 @@ OUTPUT: JSON object wrapped in <json> and </json> tags.`;
 
                 // ── STUDIO MODE: User provided their own asset(s) ─────────────────
                 const sceneAsset = resolveSceneAsset(i);
+
+                // type:"ai" = user wants Flatkey AI image generation (default pipeline)
+                // Leave imageUrls[i] = "" so it enters scenesNeedingImages below.
+                if (sceneAsset && sceneAsset.type === "ai") {
+                    console.log(`🤖 Studio Scene ${i + 1}: type=ai — will generate via Flatkey (normal image pipeline)`);
+                    // imageUrls[i] stays "" → picked up by scenesNeedingImages
+                    continue;
+                }
+
                 if (sceneAsset && (sceneAsset.type === "user_upload" || sceneAsset.type === "doc_image")) {
                     if (sceneAsset.type === "doc_image") {
                         const docUrl = sceneAsset.docImageUrl || sceneAsset.files?.[0]?.url || "";
