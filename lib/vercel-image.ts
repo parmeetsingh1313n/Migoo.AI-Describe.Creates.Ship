@@ -13,6 +13,8 @@
 const GATEWAY_BASE = "https://ai-gateway.vercel.sh";
 const IMAGE_MODEL  = "google/imagen-4.0-generate-001";
 
+import { putWithRotation } from "@/lib/blob";
+
 // ─── Key helper ───────────────────────────────────────────────────────────────
 
 function getGatewayKey(): string {
@@ -129,13 +131,22 @@ async function callGatewayImage(
 
     const data = await res.json() as any;
 
-    // Vercel gateway returns OpenAI-compatible shape: { data: [{ url }] }
+    // 1. Direct URL path (Google CDN / some gateway configs)
     const url = data?.data?.[0]?.url || data?.images?.[0]?.url || data?.url;
-    if (!url) {
-        throw new Error(`[vercel-image] No image URL in response: ${JSON.stringify(data).slice(0, 200)}`);
+    if (url) return url as string;
+
+    // 2. Base64 path — gateway returned b64_json instead of a URL
+    const b64 = data?.data?.[0]?.b64_json || data?.images?.[0]?.b64_json;
+    if (b64) {
+        console.log(`🖼️  [vercel-image] Got b64_json — uploading to Appwrite...`);
+        const buf = Buffer.from(b64, "base64");
+        const filename = `imagen4-${Date.now()}-${Math.random().toString(36).slice(2)}.png`;
+        const { url: appwriteUrl } = await putWithRotation(filename, buf, { contentType: "image/png" });
+        console.log(`✅ [vercel-image] Uploaded to Appwrite: ${appwriteUrl.slice(0, 80)}...`);
+        return appwriteUrl;
     }
 
-    return url as string;
+    throw new Error(`[vercel-image] No image URL or b64_json in response: ${JSON.stringify(data).slice(0, 300)}`);
 }
 
 // ─── Public API (identical signatures to lib/pollo.ts exports) ────────────────
