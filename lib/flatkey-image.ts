@@ -306,7 +306,7 @@ async function callGptImage2(
                         size: size,
                     }),
                 },
-                55_000
+                120_000
             );
 
             const rawText = await res.text();
