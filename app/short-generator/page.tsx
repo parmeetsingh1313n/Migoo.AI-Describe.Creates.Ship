@@ -100,8 +100,8 @@ function ShortGeneratorPage() {
                 throw new Error(err?.error || `HTTP ${res.status}`)
             }
 
-            // 2. Poll DB every 5 s for up to 3 min waiting for Inngest to finish
-            const MAX_WAIT_MS = 3 * 60 * 1000
+            // 2. Poll DB every 5 s for up to 10 min waiting for Inngest to finish
+            const MAX_WAIT_MS = 10 * 60 * 1000
             const POLL_INTERVAL_MS = 5_000
             const deadline = Date.now() + MAX_WAIT_MS
 
