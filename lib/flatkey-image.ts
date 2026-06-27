@@ -174,7 +174,9 @@ async function callGeminiChatImage(
 
     const fullPrompt = prompt + orientationHint;
 
-    for (let ki = 0; ki < keys.length; ki++) {
+    const maxTries = Math.min(keys.length, 3);
+
+    for (let ki = 0; ki < maxTries; ki++) {
         const apiKey = keys[ki];
         const keyLabel = ki === 0 ? "primary" : `key_${ki + 1}`;
 
@@ -199,14 +201,14 @@ async function callGeminiChatImage(
                         ]
                     }),
                 },
-                240_000  // bumped to 240s (4 mins) — image gen can take a while under heavy load
+                50_000  // Gemini is fast — timeout after 50s and rotate immediately
             );
 
             const rawText = await res.text();
 
             if (!res.ok) {
                 const isRotatable = isQuotaError(res.status, rawText);
-                if (isRotatable && ki < keys.length - 1) {
+                if (isRotatable && ki < maxTries - 1) {
                     console.warn(`⚠️ [flatkey-image] [${keyLabel}] quota/error (${res.status}) — rotating to key_${ki + 2}...`);
                     lastErr = rawText;
                     continue;
@@ -262,7 +264,7 @@ async function callGeminiChatImage(
 
         } catch (e: any) {
             const isRotatable = isQuotaError(0, e.message) || e.message?.includes("timed out");
-            if (isRotatable && ki < keys.length - 1) {
+            if (isRotatable && ki < maxTries - 1) {
                 console.warn(`⚠️ [flatkey-image] [${keyLabel}] exception (rotating to key_${ki + 2}): ${e.message.slice(0, 80)}`);
                 lastErr = e.message;
                 continue;
@@ -271,7 +273,7 @@ async function callGeminiChatImage(
         }
     }
 
-    throw new Error(`[flatkey-image] All ${keys.length} ${modelName} key(s) exhausted. Last: ${lastErr.slice(0, 150)}`);
+    throw new Error(`[flatkey-image] All ${maxTries} ${modelName} key(s) exhausted. Last: ${lastErr.slice(0, 150)}`);
 }
 
 // ─── FALLBACK: openai/gpt-image-2 via /v1/images/generations ──────────────────
@@ -282,9 +284,10 @@ async function callGptImage2(
     keys: string[],
 ): Promise<{ b64: string, mime: string }> {
     let lastErr = "";
+    const maxTries = Math.min(keys.length, 3);
     const size = getSizeForAspectRatio(aspectRatio);
 
-    for (let ki = 0; ki < keys.length; ki++) {
+    for (let ki = 0; ki < maxTries; ki++) {
         const apiKey = keys[ki];
         const keyLabel = ki === 0 ? "primary" : `key_${ki + 1}`;
 
@@ -306,14 +309,14 @@ async function callGptImage2(
                         size: size,
                     }),
                 },
-                240_000
+                75_000  // gpt-image-2 usually takes 60s. Timeout at 75s to rotate quickly if stuck or failing.
             );
 
             const rawText = await res.text();
 
             if (!res.ok) {
                 const isRotatable = isQuotaError(res.status, rawText);
-                if (isRotatable && ki < keys.length - 1) {
+                if (isRotatable && ki < maxTries - 1) {
                     console.warn(`⚠️ [flatkey-image] [${keyLabel}] quota/error (${res.status}) — rotating...`);
                     lastErr = rawText;
                     continue;
@@ -331,7 +334,7 @@ async function callGptImage2(
 
         } catch (e: any) {
             const isRotatable = isQuotaError(0, e.message) || e.message?.includes("timed out");
-            if (isRotatable && ki < keys.length - 1) {
+            if (isRotatable && ki < maxTries - 1) {
                 console.warn(`⚠️ [flatkey-image] [${keyLabel}] exception (rotating): ${e.message.slice(0, 80)}`);
                 lastErr = e.message;
                 continue;
@@ -340,7 +343,7 @@ async function callGptImage2(
         }
     }
 
-    throw new Error(`[flatkey-image] All ${keys.length} openai/gpt-image-2 key(s) exhausted. Last: ${lastErr.slice(0, 150)}`);
+    throw new Error(`[flatkey-image] All ${maxTries} openai/gpt-image-2 key(s) exhausted. Last: ${lastErr.slice(0, 150)}`);
 }
 
 // ─── Core: Primary & Fallback Gemini Images, returns Appwrite URL or data URL ─
