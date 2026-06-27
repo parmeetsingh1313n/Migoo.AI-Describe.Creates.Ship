@@ -201,7 +201,7 @@ async function callGeminiChatImage(
                         ]
                     }),
                 },
-                50_000  // Gemini is fast — timeout after 50s and rotate immediately
+                900_000  // Effectively infinite timeout — let the server/gateway determine when to close
             );
 
             const rawText = await res.text();
@@ -309,7 +309,7 @@ async function callGptImage2(
                         size: size,
                     }),
                 },
-                75_000  // gpt-image-2 usually takes 60s. Timeout at 75s to rotate quickly if stuck or failing.
+                900_000  // Effectively infinite timeout — let the server/gateway determine when to close
             );
 
             const rawText = await res.text();
