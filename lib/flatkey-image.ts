@@ -199,7 +199,7 @@ async function callGeminiChatImage(
                         ]
                     }),
                 },
-                90_000  // bumped to 90s — image gen (especially gpt-image-2) can take up to 60-70s
+                240_000  // bumped to 240s (4 mins) — image gen can take a while under heavy load
             );
 
             const rawText = await res.text();
@@ -306,7 +306,7 @@ async function callGptImage2(
                         size: size,
                     }),
                 },
-                120_000
+                240_000
             );
 
             const rawText = await res.text();
