@@ -423,6 +423,9 @@ export async function triggerRender(videoId: string, props: Record<string, any>)
 
     const webhookUrl = `${appUrl}/api/video/webhook`;
 
+    // ⚠️ GitHub repository dispatch has a hard 10 KB client_payload limit.
+    // All render props are already saved to shortVideoAssets in the DB before this is called.
+    // The GitHub runner fetches them via /api/video/props/{videoId} instead of receiving them inline.
     const response = await fetch(`https://api.github.com/repos/${repoOwner}/${repoName}/dispatches`, {
         method: 'POST',
         headers: {
@@ -432,7 +435,12 @@ export async function triggerRender(videoId: string, props: Record<string, any>)
         },
         body: JSON.stringify({
             event_type: 'render-video',
-            client_payload: { videoId, webhookUrl, props },
+            // Only videoId + webhookUrl + propsUrl — keeps payload tiny (< 500 bytes)
+            client_payload: {
+                videoId,
+                webhookUrl,
+                propsUrl: `${appUrl}/api/video/props/${videoId}`,
+            },
         }),
     });
 
