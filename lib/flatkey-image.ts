@@ -360,34 +360,34 @@ async function generateImage(
     console.log(`🔑 [flatkey-image] Using key slot [${startKeyLabel}] (offset ${keyOffset % allKeys.length} of ${allKeys.length})`);
 
     let b64 = "";
-    let mime = "image/jpeg";
+    let mime = "image/png";
 
     try {
-        const result = await callGeminiChatImage(prompt, aspectRatio, GEMINI_31_FLASH_MODEL, keys);
+        const result = await callGptImage2(prompt, aspectRatio, keys);
         b64 = result.b64;
         mime = result.mime;
-        console.log(`✅ [flatkey-image] ${GEMINI_31_FLASH_MODEL} done`);
+        console.log(`✅ [flatkey-image] ${GEMINI_31_FLASH_MODEL} fallback done (used primary openai/gpt-image-2)`);
     } catch (primaryErr: any) {
-        console.warn(`⚠️ [flatkey-image] ${GEMINI_31_FLASH_MODEL} failed, trying fallback ${GEMINI_3_PRO_MODEL}: ${primaryErr.message.slice(0, 120)}`);
+        console.warn(`⚠️ [flatkey-image] openai/gpt-image-2 failed, trying fallback ${GEMINI_31_FLASH_MODEL}: ${primaryErr.message.slice(0, 120)}`);
 
         try {
-            const result = await callGeminiChatImage(prompt, aspectRatio, GEMINI_3_PRO_MODEL, keys);
+            const result = await callGeminiChatImage(prompt, aspectRatio, GEMINI_31_FLASH_MODEL, keys);
             b64 = result.b64;
             mime = result.mime;
-            console.log(`✅ [flatkey-image] ${GEMINI_3_PRO_MODEL} fallback done`);
-        } catch (fallbackErr: any) {
-            console.warn(`⚠️ [flatkey-image] Both Gemini models failed, trying final fallback openai/gpt-image-2: ${fallbackErr.message.slice(0, 120)}`);
+            console.log(`✅ [flatkey-image] ${GEMINI_31_FLASH_MODEL} fallback done`);
+        } catch (flashErr: any) {
+            console.warn(`⚠️ [flatkey-image] ${GEMINI_31_FLASH_MODEL} failed, trying fallback ${GEMINI_3_PRO_MODEL}: ${flashErr.message.slice(0, 120)}`);
             try {
-                const result = await callGptImage2(prompt, aspectRatio, keys);
+                const result = await callGeminiChatImage(prompt, aspectRatio, GEMINI_3_PRO_MODEL, keys);
                 b64 = result.b64;
                 mime = result.mime;
-                console.log(`✅ [flatkey-image] openai/gpt-image-2 fallback done`);
-            } catch (gptErr: any) {
+                console.log(`✅ [flatkey-image] ${GEMINI_3_PRO_MODEL} fallback done`);
+            } catch (proErr: any) {
                 throw new Error(
                     `[flatkey-image] All Flatkey image models failed.\n` +
-                    `  Primary (${GEMINI_31_FLASH_MODEL}): ${primaryErr.message.slice(0, 100)}\n` +
-                    `  Fallback (${GEMINI_3_PRO_MODEL}): ${fallbackErr.message.slice(0, 100)}\n` +
-                    `  GPT-Image-2 Fallback: ${gptErr.message.slice(0, 100)}`
+                    `  Primary (openai/gpt-image-2): ${primaryErr.message.slice(0, 100)}\n` +
+                    `  Fallback (${GEMINI_31_FLASH_MODEL}): ${flashErr.message.slice(0, 100)}\n` +
+                    `  Fallback (${GEMINI_3_PRO_MODEL}): ${proErr.message.slice(0, 100)}`
                 );
             }
         }
