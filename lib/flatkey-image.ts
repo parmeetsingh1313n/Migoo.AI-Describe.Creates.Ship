@@ -274,6 +274,75 @@ async function callGeminiChatImage(
     throw new Error(`[flatkey-image] All ${keys.length} ${modelName} key(s) exhausted. Last: ${lastErr.slice(0, 150)}`);
 }
 
+// ─── FALLBACK: openai/gpt-image-2 via /v1/images/generations ──────────────────
+
+async function callGptImage2(
+    prompt:      string,
+    aspectRatio: "1:1" | "9:16" | "16:9",
+    keys:        string[],
+): Promise<{ b64: string, mime: string }> {
+    let lastErr = "";
+    const size = getSizeForAspectRatio(aspectRatio);
+
+    for (let ki = 0; ki < keys.length; ki++) {
+        const apiKey   = keys[ki];
+        const keyLabel = ki === 0 ? "primary" : `key_${ki + 1}`;
+
+        try {
+            console.log(`🎨 [flatkey-image] openai/gpt-image-2 [${keyLabel}] | ${aspectRatio}`);
+
+            const res = await fetchWithTimeout(
+                `${FLATKEY_BASE}/v1/images/generations`,
+                {
+                    method:  "POST",
+                    headers: {
+                        "Content-Type":  "application/json",
+                        "Authorization": `Bearer ${apiKey}`,
+                    },
+                    body: JSON.stringify({
+                        model: "openai/gpt-image-2",
+                        prompt: prompt,
+                        n: 1,
+                        size: size,
+                    }),
+                },
+                55_000
+            );
+
+            const rawText = await res.text();
+
+            if (!res.ok) {
+                const isRotatable = isQuotaError(res.status, rawText);
+                if (isRotatable && ki < keys.length - 1) {
+                    console.warn(`⚠️ [flatkey-image] [${keyLabel}] quota/error (${res.status}) — rotating...`);
+                    lastErr = rawText;
+                    continue;
+                }
+                throw new Error(`[flatkey-image] openai/gpt-image-2 error (${res.status}): ${rawText.slice(0, 200)}`);
+            }
+
+            const data = JSON.parse(rawText);
+            const b64 = data?.data?.[0]?.b64_json;
+            if (!b64) {
+                throw new Error(`[flatkey-image] No b64_json found in response: ${rawText.slice(0, 200)}`);
+            }
+
+            return { b64, mime: "image/png" };
+
+        } catch (e: any) {
+            const isRotatable = isQuotaError(0, e.message) || e.message?.includes("timed out");
+            if (isRotatable && ki < keys.length - 1) {
+                console.warn(`⚠️ [flatkey-image] [${keyLabel}] exception (rotating): ${e.message.slice(0, 80)}`);
+                lastErr = e.message;
+                continue;
+            }
+            throw e;
+        }
+    }
+
+    throw new Error(`[flatkey-image] All ${keys.length} openai/gpt-image-2 key(s) exhausted. Last: ${lastErr.slice(0, 150)}`);
+}
+
 // ─── Core: Primary & Fallback Gemini Images, returns Appwrite URL or data URL ─
 
 async function generateImage(
@@ -307,11 +376,20 @@ async function generateImage(
             mime = result.mime;
             console.log(`✅ [flatkey-image] ${GEMINI_3_PRO_MODEL} fallback done`);
         } catch (fallbackErr: any) {
-            throw new Error(
-                `[flatkey-image] Both Gemini image models failed.\n` +
-                `  Primary (${GEMINI_31_FLASH_MODEL}): ${primaryErr.message.slice(0, 100)}\n` +
-                `  Fallback (${GEMINI_3_PRO_MODEL}): ${fallbackErr.message.slice(0, 100)}`
-            );
+            console.warn(`⚠️ [flatkey-image] Both Gemini models failed, trying final fallback openai/gpt-image-2: ${fallbackErr.message.slice(0, 120)}`);
+            try {
+                const result = await callGptImage2(prompt, aspectRatio, keys);
+                b64 = result.b64;
+                mime = result.mime;
+                console.log(`✅ [flatkey-image] openai/gpt-image-2 fallback done`);
+            } catch (gptErr: any) {
+                throw new Error(
+                    `[flatkey-image] All Flatkey image models failed.\n` +
+                    `  Primary (${GEMINI_31_FLASH_MODEL}): ${primaryErr.message.slice(0, 100)}\n` +
+                    `  Fallback (${GEMINI_3_PRO_MODEL}): ${fallbackErr.message.slice(0, 100)}\n` +
+                    `  GPT-Image-2 Fallback: ${gptErr.message.slice(0, 100)}`
+                );
+            }
         }
     }
 
