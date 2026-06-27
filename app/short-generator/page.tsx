@@ -84,31 +84,57 @@ function ShortGeneratorPage() {
         fetchSeries()
     }, [fetchSeries])
 
-    // Manual thumbnail regeneration
+    // Manual thumbnail regeneration — fire Inngest job, then poll until URL appears
     const handleRegenThumbnail = async (s: ShortSeries) => {
         setGeneratingThumbnail(s.seriesId)
+        toast.info('Generating thumbnail… this can take 60–90 s with gpt-image-2', { duration: 8000 })
         try {
+            // 1. Fire the Inngest event (returns 202 immediately — no Vercel timeout)
             const res = await fetch('/api/short-series/generate-thumbnail', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ seriesId: s.seriesId, title: s.title, niche: s.niche }),
             })
-            const data = await res.json()
-            if (data.success && data.thumbnailUrl) {
-                setSeries(prev => prev.map(item =>
-                    item.seriesId === s.seriesId
-                        ? { ...item, thumbnailUrl: data.thumbnailUrl }
-                        : item
-                ))
-                toast.success('Thumbnail generated!')
-            } else {
-                toast.error('Thumbnail generation failed')
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}))
+                throw new Error(err?.error || `HTTP ${res.status}`)
             }
-        } catch {
-            toast.error('Thumbnail generation failed')
+
+            // 2. Poll DB every 5 s for up to 3 min waiting for Inngest to finish
+            const MAX_WAIT_MS = 3 * 60 * 1000
+            const POLL_INTERVAL_MS = 5_000
+            const deadline = Date.now() + MAX_WAIT_MS
+
+            while (Date.now() < deadline) {
+                await new Promise(r => setTimeout(r, POLL_INTERVAL_MS))
+                try {
+                    const poll = await fetch(`/api/short-series/${s.seriesId}`)
+                    const pollData = await poll.json()
+                    const url: string | null = pollData?.series?.thumbnailUrl ?? pollData?.thumbnailUrl ?? null
+                    if (url && url !== s.thumbnailUrl) {
+                        setSeries(prev => prev.map(item =>
+                            item.seriesId === s.seriesId
+                                ? { ...item, thumbnailUrl: url }
+                                : item
+                        ))
+                        toast.success('Thumbnail generated!')
+                        setGeneratingThumbnail(null)
+                        return
+                    }
+                } catch {
+                    // poll error — keep retrying until deadline
+                }
+            }
+
+            // Timed out — refresh whole list so user sees whatever was saved
+            await fetchSeries()
+            toast.warning('Thumbnail is taking longer than expected — check back in a moment')
+        } catch (err: any) {
+            toast.error(`Thumbnail generation failed: ${err?.message ?? 'Unknown error'}`)
         }
         setGeneratingThumbnail(null)
     }
+
 
     // Close popover on outside click
     useEffect(() => {
