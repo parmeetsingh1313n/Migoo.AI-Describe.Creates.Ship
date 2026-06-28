@@ -472,7 +472,7 @@ export const generateShortSeriesThumbnailFn = inngest.createFunction(
     {
         id: "generate-short-series-thumbnail",
         triggers: [{ event: "short-series/thumbnail.generate" }],
-        retries: 2,
+        retries: 3,
     },
     async ({ event, step }) => {
         const { seriesId, title, niche } = event.data as {
@@ -514,13 +514,24 @@ export const generateShortSeriesThumbnailFn = inngest.createFunction(
 
         const prompt = buildShortsThumbnailPrompt(title, niche || "general");
 
-        // ── Step 3: Generate image via Flatkey gpt-image-2 ────────────────────
-        // This step can take 60-90s — Inngest handles retries & has no wall-clock limit
+        // ── Step 3: Generate image via Vercel AI Gateway (Imagen 4) ───────────
         const imageUrl = await step.run("generate-image", async () => {
-            console.log(`🎨 [Inngest] Generating thumbnail for "${title}" (${niche})...`);
-            const url = await generateNanoBananaImage(prompt, 1024, 1024);
-            console.log(`✅ [Inngest] Image generated: ${url.slice(0, 80)}`);
-            return url;
+            console.log(`🎨 [Inngest] Calling Vercel AI Gateway (Imagen 4) for "${title}" (${niche})...`);
+            console.log(`🔑 [Inngest] AI_GATEWAY_API_KEY present: ${!!process.env.AI_GATEWAY_API_KEY}`);
+            console.log(`📝 [Inngest] Prompt: "${prompt.slice(0, 120)}..."`);
+            try {
+                const url = await generateNanoBananaImage(prompt, 1024, 1024);
+                if (!url) throw new Error("generateNanoBananaImage returned empty URL");
+                console.log(`✅ [Inngest] Image generated: ${url.slice(0, 80)}`);
+                return url;
+            } catch (err: any) {
+                // Log full error so it appears in Inngest dashboard + Vercel logs
+                console.error(`❌ [Inngest] Thumbnail generation FAILED for series ${seriesId}:`);
+                console.error(`   Error: ${err?.message}`);
+                console.error(`   Stack: ${err?.stack?.slice(0, 500)}`);
+                // Re-throw so Inngest marks step as failed and retries
+                throw new Error(`[thumbnail] Vercel AI Gateway failed: ${err?.message}`);
+            }
         });
 
         // ── Step 4: Save to DB ─────────────────────────────────────────────────
