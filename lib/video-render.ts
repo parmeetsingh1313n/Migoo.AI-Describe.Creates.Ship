@@ -6,7 +6,7 @@
 // 4. Public dir copy is skipped — avatars are downloaded fresh from local path
 
 import { db } from "@/config/db";
-import { shortVideoAssets, shortVideoSeries } from "@/config/schema";
+import { shortVideoAssets, shortVideoSeries, motionGraphicProjects, motionGraphicMessages } from "@/config/schema";
 import { generateNanoBananaImage } from "@/lib/vercel-image";
 import { eq } from "drizzle-orm";
 import { exec } from "child_process";
@@ -1513,4 +1513,275 @@ export async function ensureVideoThumbnail(videoId: string) {
         console.warn(`⚠️ Failed to ensure thumbnail for ${videoId}:`, err.message);
     }
     return null;
+}
+
+export async function triggerMotionGraphicRender(projectId: string, props: Record<string, any>) {
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL
+        || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null);
+
+    const githubToken = process.env.GH_PAT;
+    const repoOwner = process.env.GH_OWNER || "keshav-agrawal595";
+    const repoName = process.env.GH_REPO || "Migoo";
+
+    // Detect if cloud rendering can be used
+    const isCloud = !!(githubToken && process.env.GH_OWNER && process.env.GH_REPO && appUrl);
+
+    if (!isCloud) {
+        console.log(`🎬 Starting LOCAL motion graphic render for: ${projectId}`);
+        
+        await db.update(motionGraphicProjects)
+            .set({ status: 'generating:video', updatedAt: new Date() })
+            .where(eq(motionGraphicProjects.projectId, projectId));
+
+        renderMotionGraphicLocally(projectId, props).catch((err) => {
+            console.error(`❌ Local motion graphic render failed for ${projectId}:`, err);
+        });
+
+        return { success: true, mode: 'local' };
+    }
+
+    // CLOUD MODE
+    console.log(`🎬 Triggering GitHub Action motion graphic rendering for: ${projectId} via repo ${repoOwner}/${repoName}`);
+
+    const webhookUrl = `${appUrl}/api/motion-graphics/${projectId}/webhook`;
+
+    const response = await fetch(`https://api.github.com/repos/${repoOwner}/${repoName}/dispatches`, {
+        method: 'POST',
+        headers: {
+            'Authorization': `Bearer ${githubToken}`,
+            'Accept': 'application/vnd.github+json',
+            'X-GitHub-Api-Version': '2022-11-28',
+        },
+        body: JSON.stringify({
+            event_type: 'render-motion-graphic',
+            client_payload: {
+                projectId,
+                webhookUrl,
+                propsUrl: `${appUrl}/api/motion-graphics/${projectId}/props`,
+            },
+        }),
+    });
+
+    if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`GitHub dispatch failed: ${response.status} ${errorText}`);
+    }
+
+    await db.update(motionGraphicProjects)
+        .set({ status: 'generating:video', updatedAt: new Date() })
+        .where(eq(motionGraphicProjects.projectId, projectId));
+        
+    return { success: true, mode: 'cloud' };
+}
+
+async function renderMotionGraphicLocally(projectId: string, props: Record<string, any>) {
+    const cwd = process.cwd();
+    const tmpDir = path.join(cwd, 'public', 'tmp');
+    const rendersDir = path.join(cwd, 'public', 'renders');
+    if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
+    if (!fs.existsSync(rendersDir)) fs.mkdirSync(rendersDir, { recursive: true });
+
+    const remotionPubDir = path.join(cwd, 'remotion-assets-mg');
+    const assetsDirRel = `tmp/assets_mg_${projectId}`;
+    const assetsDirAbs = path.join(cwd, 'public', assetsDirRel);
+    const propsPath = path.join(tmpDir, `props-mg-${projectId}.json`);
+    
+    try {
+        // Clean up stale tmp directories
+        try {
+            const tmpEntries = fs.readdirSync(tmpDir);
+            for (const entry of tmpEntries) {
+                if (entry.startsWith('assets_mg_') && entry !== `assets_mg_${projectId}`) {
+                    const staleDir = path.join(tmpDir, entry);
+                    try { fs.rmSync(staleDir, { recursive: true, force: true }); } catch {}
+                }
+            }
+        } catch {}
+
+        if (fs.existsSync(assetsDirAbs)) {
+            try { fs.rmSync(assetsDirAbs, { recursive: true, force: true }); } catch {}
+        }
+        fs.mkdirSync(assetsDirAbs, { recursive: true });
+
+        const toLocalUrl = (absPath: string): string => {
+            const relPath = path.relative(path.join(cwd, 'public'), absPath).replace(/\\/g, '/');
+            return `http://localhost:3000/${relPath}`;
+        };
+
+        const localProps = JSON.parse(JSON.stringify(props));
+
+        // Download scenes assets
+        if (localProps.scenes && Array.isArray(localProps.scenes)) {
+            for (let i = 0; i < localProps.scenes.length; i++) {
+                const scene = localProps.scenes[i];
+                if (scene.imageUrl && scene.imageUrl.startsWith('http')) {
+                    try {
+                        const response = await fetch(scene.imageUrl);
+                        if (response.ok) {
+                            const buffer = Buffer.from(await response.arrayBuffer());
+                            const contentType = response.headers.get('content-type') || '';
+                            const isMp4Magic = buffer.length > 7 &&
+                                buffer[4] === 0x66 && buffer[5] === 0x74 &&
+                                buffer[6] === 0x79 && buffer[7] === 0x70;
+                            let ext: string;
+                            if (contentType.includes('video') || isMp4Magic) {
+                                ext = 'mp4';
+                            } else if (contentType.includes('png') || (buffer[0] === 0x89 && buffer[1] === 0x50)) {
+                                ext = 'png';
+                            } else if (contentType.includes('webp') || (buffer[0] === 0x52 && buffer[1] === 0x49)) {
+                                ext = 'webp';
+                            } else if (contentType.includes('gif') || (buffer[0] === 0x47 && buffer[1] === 0x49)) {
+                                ext = 'gif';
+                            } else {
+                                ext = 'jpg';
+                            }
+
+                            if (ext === 'mp4') {
+                                const srcMp4 = path.join(assetsDirAbs, `scene_${i}_src.mp4`);
+                                const destMp4 = path.join(assetsDirAbs, `scene_${i}.mp4`);
+                                fs.writeFileSync(srcMp4, buffer);
+                                try {
+                                    const ffmpegBin = getFFmpegPath();
+                                    const { execSync } = require('child_process');
+                                    execSync(
+                                        `"${ffmpegBin}" -y -i "${srcMp4}" -c:v libx264 -preset fast -crf 23 -profile:v baseline -level 3.1 -pix_fmt yuv420p -r 30 -g 30 -movflags +faststart -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" -an "${destMp4}"`,
+                                        { timeout: 120000, stdio: 'pipe' }
+                                    );
+                                    if (fs.existsSync(destMp4) && fs.statSync(destMp4).size > 1000) {
+                                        const localUrl = toLocalUrl(destMp4);
+                                        localProps.scenes[i] = { ...scene, imageUrl: localUrl };
+                                    } else {
+                                        localProps.scenes[i] = { ...scene, imageUrl: '' };
+                                    }
+                                } catch (transcodeErr) {
+                                    localProps.scenes[i] = { ...scene, imageUrl: '' };
+                                } finally {
+                                    try { fs.unlinkSync(srcMp4); } catch {}
+                                }
+                            } else {
+                                const destAbs = path.join(assetsDirAbs, `scene_${i}.${ext}`);
+                                fs.writeFileSync(destAbs, buffer);
+                                const localUrl = toLocalUrl(destAbs);
+                                localProps.scenes[i] = { ...scene, imageUrl: localUrl };
+                            }
+                        } else {
+                            localProps.scenes[i] = { ...scene, imageUrl: '' };
+                        }
+                    } catch (err) {
+                        localProps.scenes[i] = { ...scene, imageUrl: '' };
+                    }
+                }
+            }
+        }
+
+        // Download music locally
+        if (localProps.musicUrl && localProps.musicUrl.startsWith('http')) {
+            try {
+                const destAbs = path.join(assetsDirAbs, 'music.mp3');
+                const response = await fetch(localProps.musicUrl);
+                if (response.ok) {
+                    const buffer = Buffer.from(await response.arrayBuffer());
+                    fs.writeFileSync(destAbs, buffer);
+                    localProps.musicUrl = toLocalUrl(destAbs);
+                }
+            } catch (err) {}
+        }
+
+        // Download voiceover audio locally
+        if (localProps.audioUrl && localProps.audioUrl.startsWith('http')) {
+            try {
+                const destAbs = path.join(assetsDirAbs, 'voiceover.wav');
+                const response = await fetch(localProps.audioUrl);
+                if (response.ok) {
+                    const buffer = Buffer.from(await response.arrayBuffer());
+                    fs.writeFileSync(destAbs, buffer);
+                    if (fs.existsSync(destAbs) && fs.statSync(destAbs).size > 100) {
+                        localProps.audioUrl = toLocalUrl(destAbs);
+                    }
+                }
+            } catch (err) {}
+        }
+
+        try { if (fs.existsSync(propsPath)) fs.unlinkSync(propsPath); } catch {}
+        try { fs.rmSync(remotionPubDir, { recursive: true, force: true }); } catch {}
+        
+        const remotionAssetsDest = path.join(remotionPubDir, 'tmp', `assets_mg_${projectId}`);
+        fs.mkdirSync(remotionAssetsDest, { recursive: true });
+
+        const assetFiles = fs.readdirSync(assetsDirAbs);
+        for (const file of assetFiles) {
+            fs.copyFileSync(
+                path.join(assetsDirAbs, file),
+                path.join(remotionAssetsDest, file)
+            );
+        }
+
+        fs.writeFileSync(propsPath, JSON.stringify(localProps));
+
+        const outputPath = path.join(rendersDir, `mg_${projectId}.mp4`);
+        const propsArg = propsPath.replace(/\\/g, '/');
+        const outputArg = outputPath.replace(/\\/g, '/');
+        const publicDirArg = remotionPubDir.replace(/\\/g, '/');
+
+        const cmd = [
+            'npx remotion render MotionGraphic',
+            `"${outputArg}"`,
+            `--props="${propsArg}"`,
+            `--public-dir="${publicDirArg}"`,
+            `--timeout=120000`,
+            `--disable-web-security`,
+            `--gl=angle`,
+            `--concurrency=1`,
+            `--jpeg-quality=75`,
+        ].join(' ');
+
+        await new Promise<void>((resolve, reject) => {
+            const child = exec(cmd, { cwd }, (error) => {
+                if (error) return reject(error);
+                resolve();
+            });
+        });
+
+        // Clean up
+        try { fs.rmSync(remotionPubDir, { recursive: true, force: true }); } catch {}
+        try { fs.unlinkSync(propsPath); } catch {}
+        try { fs.rmSync(assetsDirAbs, { recursive: true, force: true }); } catch {}
+
+        const localUrl = `/renders/mg_${projectId}.mp4`;
+        
+        // Finalize DB
+        await db.update(motionGraphicProjects)
+            .set({
+                videoUrl: localUrl,
+                status: 'completed',
+                updatedAt: new Date(),
+            })
+            .where(eq(motionGraphicProjects.projectId, projectId));
+
+        await db.insert(motionGraphicMessages).values({
+            projectId,
+            role: "system",
+            content: `✅ Motion graphic video rendered locally! Your video is ready to play.`,
+            metadata: { type: "render_complete", videoUrl: localUrl },
+        });
+
+    } catch (err: any) {
+        console.error(`❌ Local motion graphic render failed for ${projectId}:`, err);
+        
+        // Clean up on failure
+        try { fs.rmSync(remotionPubDir, { recursive: true, force: true }); } catch {}
+        try { if (fs.existsSync(propsPath)) fs.unlinkSync(propsPath); } catch {}
+        try { fs.rmSync(assetsDirAbs, { recursive: true, force: true }); } catch {}
+
+        await db.update(motionGraphicProjects)
+            .set({ status: 'failed', updatedAt: new Date() })
+            .where(eq(motionGraphicProjects.projectId, projectId));
+
+        await db.insert(motionGraphicMessages).values({
+            projectId,
+            role: "system",
+            content: `❌ Video rendering failed locally.`,
+            metadata: { type: "render_failed" },
+        });
+    }
 }
