@@ -1494,7 +1494,17 @@ export async function ensureVideoThumbnail(videoId: string) {
             if (thumbUrl) {
                 await db.update(shortVideoAssets).set({ thumbnailUrl: thumbUrl }).where(eq(shortVideoAssets.videoId, videoId));
                 if (asset.seriesId) {
-                    await db.update(shortVideoSeries).set({ thumbnailUrl: thumbUrl }).where(eq(shortVideoSeries.seriesId, asset.seriesId));
+                    // ⚠️ IMPORTANT: Only set the series thumbnail if one doesn't already exist.
+                    // A series has its own independently generated thumbnail that must never
+                    // be overwritten by a per-video thumbnail. This prevents the bug where
+                    // generating a new short inside a series replaces the series thumbnail.
+                    const [seriesRow] = await db
+                        .select({ thumbnailUrl: shortVideoSeries.thumbnailUrl })
+                        .from(shortVideoSeries)
+                        .where(eq(shortVideoSeries.seriesId, asset.seriesId));
+                    if (!seriesRow?.thumbnailUrl) {
+                        await db.update(shortVideoSeries).set({ thumbnailUrl: thumbUrl }).where(eq(shortVideoSeries.seriesId, asset.seriesId));
+                    }
                 }
                 return thumbUrl;
             }
