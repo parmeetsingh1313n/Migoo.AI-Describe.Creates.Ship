@@ -1,21 +1,21 @@
 /**
  * POST /api/short-series/generate-thumbnail
  *
- * Fire-and-return dispatcher — sends a `short-series/thumbnail.generate` Inngest
- * event and responds with 202 immediately.
- *
- * Why: gpt-image-2 via Flatkey takes 60–90 s which exceeds Vercel's function
- * timeout. The actual generation runs inside `generateShortSeriesThumbnailFn`
- * (inngest/functions.ts) where each `step.run()` gets unlimited wall-clock time.
+ * Directly calls Vercel AI Gateway (Imagen 4) synchronously.
+ * Imagen 4 responds in ~5-10s — well within Vercel's 60s limit on Hobby plan.
+ * No Inngest needed for this fast path.
  *
  * The frontend polls GET /api/short-series/[seriesId] (thumbnailUrl field)
- * every 5 s until the URL is populated in the DB by the Inngest function.
+ * every 5 s until the URL is populated in the DB.
  */
 
-import { inngest } from "@/inngest/client";
+import { db } from "@/config/db";
+import { shortVideoSeries } from "@/config/schema";
+import { generateNanoBananaImage } from "@/lib/vercel-image";
+import { eq } from "drizzle-orm";
 import { NextRequest, NextResponse } from "next/server";
 
-export const maxDuration = 10; // Only needs to fire the event — very fast
+export const maxDuration = 60; // Imagen 4 is fast (~5-10s), 60s is plenty
 
 export async function POST(req: NextRequest) {
     try {
@@ -28,17 +28,42 @@ export async function POST(req: NextRequest) {
             );
         }
 
-        await inngest.send({
-            name: "short-series/thumbnail.generate",
-            data: { seriesId, title, niche: niche || "general" },
-        });
+        console.log(`🖼️  [generate-thumbnail] Starting for series: ${seriesId} — "${title}"`);
+        console.log(`🔑 [generate-thumbnail] AI_GATEWAY_API_KEY present: ${!!process.env.AI_GATEWAY_API_KEY}`);
 
-        console.log(`📤 [generate-thumbnail] Queued Inngest job for series: ${seriesId}`);
+        // Build prompt from title keywords
+        const stopWords = new Set(["a","an","the","and","or","but","in","on","at","for","with","about","to","from","of","is","are","how","what","why"]);
+        const keywords = title.split(/\s+/)
+            .filter((w: string) => w.length > 0 && !stopWords.has(w.toLowerCase()))
+            .slice(0, 3)
+            .join(" ");
+        const nicheStr = niche || "general";
 
-        return NextResponse.json({ queued: true, seriesId }, { status: 202 });
+        const prompts = [
+            `A stunning cinematic thumbnail for a "${keywords}" video series. Bold 3D neon text "${keywords}" floating over a vibrant ${nicheStr}-themed background. Dramatic lighting, 8k resolution.`,
+            `Cinematic wide thumbnail: "${keywords}" in large glowing letters against a dark moody backdrop with ${nicheStr} visual elements. Electric blue and magenta tones, lens flare. 8k.`,
+            `Hyper-modern thumbnail: "${keywords}" in bold metallic 3D typography. Floating geometric shapes, ${nicheStr} icons, deep purple to electric blue gradient background. 8k.`,
+            `Premium cinematic thumbnail: "${keywords}" as holographic text above a stylish ${nicheStr}-themed scene. Glowing particles, soft bokeh, cinematic depth. 8k.`,
+        ];
+        const prompt = prompts[Math.floor(Math.random() * prompts.length)];
+        console.log(`📝 [generate-thumbnail] Prompt: "${prompt.slice(0, 100)}..."`);
+
+        // Generate image via Vercel AI Gateway (Imagen 4) — synchronous, ~5-10s
+        const thumbnailUrl = await generateNanoBananaImage(prompt, 1024, 1024);
+        console.log(`✅ [generate-thumbnail] Generated: ${thumbnailUrl.slice(0, 80)}`);
+
+        // Save to DB
+        await db
+            .update(shortVideoSeries)
+            .set({ thumbnailUrl })
+            .where(eq(shortVideoSeries.seriesId, seriesId));
+        console.log(`💾 [generate-thumbnail] Saved to DB for series ${seriesId}`);
+
+        return NextResponse.json({ success: true, seriesId, thumbnailUrl });
 
     } catch (error: any) {
-        console.error("🔥 [generate-thumbnail] Failed to queue:", error.message);
+        console.error("🔥 [generate-thumbnail] Failed:", error.message);
+        console.error("🔥 Stack:", error.stack?.slice(0, 500));
         return NextResponse.json(
             { success: false, error: error.message },
             { status: 500 }
