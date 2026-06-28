@@ -2804,289 +2804,24 @@ export const generateMotionGraphic = inngest.createFunction(
             return props;
         });
 
-        // Step 5: Render the video with Remotion
-        const renderResult = await step.run("render-video", async () => {
-            const fs = await import("fs");
-            const path = await import("path");
-            const { exec } = await import("child_process");
-
-            const cwd = process.cwd();
-            const tmpDir = path.join(cwd, 'public', 'tmp');
-            const rendersDir = path.join(cwd, 'public', 'renders');
-            if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
-            if (!fs.existsSync(rendersDir)) fs.mkdirSync(rendersDir, { recursive: true });
-
-            // ── Pre-render: clean up ALL stale assets_mg_* dirs from previous renders ──
-            // This prevents the public/tmp folder from accumulating GBs of old scene images
-            // across multiple failed/successful renders, which caused Remotion to copy 1.1 GB.
-            try {
-                const tmpEntries = fs.readdirSync(tmpDir);
-                for (const entry of tmpEntries) {
-                    if (entry.startsWith('assets_mg_') && entry !== `assets_mg_${projectId}`) {
-                        const staleDir = path.join(tmpDir, entry);
-                        try {
-                            fs.rmSync(staleDir, { recursive: true, force: true });
-                            console.log(`🧹 Cleaned up stale tmp dir: ${entry}`);
-                        } catch {}
-                    }
-                }
-            } catch {}
-
-            // Download scene images locally to avoid remote URL issues during render
-            // Use JSON deep clone so mutations to scene.imageUrl (local path changes) do not affect remotionProps.
-            const localProps = JSON.parse(JSON.stringify(remotionProps));
-            const assetsDirRel = `tmp/assets_mg_${projectId}`;
-            const assetsDirAbs = path.join(cwd, 'public', assetsDirRel);
-
-            // On FULL regeneration: wipe old assets so stale/broken transcodes from
-            // failed previous runs can never contaminate the new render.
-            // On PARTIAL render: keep existing assets — only changed scenes are re-downloaded.
-            if (!isPartialRender && fs.existsSync(assetsDirAbs)) {
-                try {
-                    fs.rmSync(assetsDirAbs, { recursive: true, force: true });
-                    console.log(`🗑️ Cleared stale assets dir: ${assetsDirRel}`);
-                } catch (cleanErr: any) {
-                    console.warn(`⚠️ Could not clean assets dir (non-fatal): ${cleanErr.message}`);
-                }
-            }
-            if (!fs.existsSync(assetsDirAbs)) fs.mkdirSync(assetsDirAbs, { recursive: true });
-
-            // Return an http://localhost:3000/ URL for the asset.
-            // Next.js ALWAYS serves public/ at :3000 while Inngest runs.
-            // This bypasses Remotion's temp bundle copy entirely — the compositor
-            // fetches from the Next.js dev server which always has the file.
-            const toLocalUrl = (absPath: string): string => {
-                const relPath = path.relative(path.join(cwd, 'public'), absPath).replace(/\\/g, '/');
-                return `http://localhost:3000/${relPath}`;
-            };
-
-            // Download scene images/videos to local
-            if (localProps.scenes && Array.isArray(localProps.scenes)) {
-                for (let i = 0; i < localProps.scenes.length; i++) {
-                    const scene = localProps.scenes[i];
-                    if (scene.imageUrl && scene.imageUrl.startsWith('http')) {
-                        try {
-                            const isVideo = scene.imageUrl.endsWith('.mp4') || scene.imageUrl.endsWith('.webm') || scene.imageUrl.includes('video-files');
-                            const response = await fetch(scene.imageUrl);
-                            if (response.ok) {
-                                const buffer = Buffer.from(await response.arrayBuffer());
-                                const contentType = response.headers.get('content-type') || '';
-                                // Detect actual format from Content-Type + magic bytes (never trust the URL extension)
-                                // MP4 magic: bytes 4-7 are ASCII 'ftyp' (0x66 0x74 0x79 0x70)
-                                const isMp4Magic = buffer.length > 7 &&
-                                    buffer[4] === 0x66 && buffer[5] === 0x74 &&
-                                    buffer[6] === 0x79 && buffer[7] === 0x70;
-                                let ext: string;
-                                if (contentType.includes('video') || isMp4Magic) {
-                                    ext = 'mp4';
-                                } else if (contentType.includes('png') || (buffer[0] === 0x89 && buffer[1] === 0x50)) {
-                                    ext = 'png';
-                                } else if (contentType.includes('webp') || (buffer[0] === 0x52 && buffer[1] === 0x49)) {
-                                    ext = 'webp';
-                                } else if (contentType.includes('gif') || (buffer[0] === 0x47 && buffer[1] === 0x49)) {
-                                    ext = 'gif';
-                                } else {
-                                    ext = 'jpg';
-                                }
-                                // MP4 handling: Transcode ALL MP4s to H.264 using ffmpeg-static.
-                                // Kling AI returns HEVC (H.265) which crashes Remotion's compositor.
-                                // ffmpeg-static provides a bundled ffmpeg.exe — no system install needed.
-                                if (ext === 'mp4') {
-                                    const srcMp4 = path.join(assetsDirAbs, `scene_${i}_src.mp4`);
-                                    const destMp4 = path.join(assetsDirAbs, `scene_${i}.mp4`);
-                                    fs.writeFileSync(srcMp4, buffer);
-                                    try {
-                                        const { execSync } = await import('child_process');
-                                        const isWin = process.platform === 'win32';
-                                        // Resolve ffmpeg with fallbacks (string literal for bundler externalization)
-                                        let ffmpegBin = '';
-                                        try { const b = require('ffmpeg-static') as string | null; if (b && fs.existsSync(b)) ffmpegBin = b; } catch {}
-                                        if (!ffmpegBin) { const lb = path.join(cwd, 'node_modules', 'ffmpeg-static', isWin ? 'ffmpeg.exe' : 'ffmpeg'); if (fs.existsSync(lb)) ffmpegBin = lb; }
-                                        if (!ffmpegBin) { for (const p of ['/usr/bin/ffmpeg', '/usr/local/bin/ffmpeg']) { if (fs.existsSync(p)) { ffmpegBin = p; break; } } }
-                                        if (!ffmpegBin) ffmpegBin = 'ffmpeg';
-                                        // -r 30  : force output frame rate to 30fps (matches Remotion FPS)
-                                        // -g 30  : keyframe every 30 frames so compositor can seek without gaps
-                                        // -movflags +faststart : place moov atom at start for reliable seeking
-                                        execSync(
-                                            `"${ffmpegBin}" -y -i "${srcMp4}" -c:v libx264 -preset fast -crf 23 -profile:v baseline -level 3.1 -pix_fmt yuv420p -r 30 -g 30 -movflags +faststart -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" -an "${destMp4}"`,
-                                            { timeout: 120000, stdio: 'pipe' }
-                                        );
-                                        if (fs.existsSync(destMp4) && fs.statSync(destMp4).size > 1000) {
-                                            const localUrl = toLocalUrl(destMp4);
-                                            localProps.scenes[i] = { ...scene, imageUrl: localUrl };
-                                            console.log(`🎬 Scene ${i + 1} (${scene.type}): H.264 ready → ${localUrl}`);
-                                        } else {
-                                            console.warn(`⚠️ Scene ${i + 1}: transcoding produced empty file — clearing imageUrl`);
-                                            localProps.scenes[i] = { ...scene, imageUrl: '' };
-                                        }
-                                    } catch (transcodeErr: any) {
-                                        console.warn(`⚠️ Scene ${i + 1}: transcode failed (${transcodeErr.message?.slice(0, 100)}) — clearing imageUrl`);
-                                        localProps.scenes[i] = { ...scene, imageUrl: '' };
-                                    } finally {
-                                        try { fs.unlinkSync(srcMp4); } catch {}
-                                    }
-                                } else {
-                                    // For images: save and use relative path.
-                                    // staticFile() in Remotion resolves relative paths correctly.
-                                    const destAbs = path.join(assetsDirAbs, `scene_${i}.${ext}`);
-                                    fs.writeFileSync(destAbs, buffer);
-                                    const localUrl = toLocalUrl(destAbs);
-                                    localProps.scenes[i] = { ...scene, imageUrl: localUrl };
-                                    console.log(`📥 Scene ${i + 1}: saved locally (${(buffer.length / 1024).toFixed(0)}KB, ${ext}) → ${localUrl}`);
-                                }
-                            } else {
-                                console.warn(`⚠️ Failed to download scene ${i + 1} asset: HTTP ${response.status}`);
-                                localProps.scenes[i] = { ...scene, imageUrl: '' };
-                            }
-                        } catch (err: any) {
-                            console.warn(`⚠️ Failed to download scene ${i + 1} asset: ${err.message}`);
-                            localProps.scenes[i] = { ...scene, imageUrl: '' };
-                        }
-                    } else if (scene.imageUrl && !scene.imageUrl.startsWith('http') && !scene.imageUrl.startsWith('file:///')) {
-                        // Already a relative path — verify the file exists on disk
-                        const relPath = scene.imageUrl.replace(/^\//, '').replace(/^public\//, '');
-                        const absPath = path.join(cwd, 'public', relPath);
-                        if (!fs.existsSync(absPath)) {
-                            console.warn(`⚠️ Scene ${i + 1} has stale local path (${scene.imageUrl}), file missing — clearing`);
-                            localProps.scenes[i] = { ...scene, imageUrl: '' };
-                        } else {
-                            // Keep it as a relative path so Remotion can serve it port-agnostically
-                            const localUrl = toLocalUrl(absPath);
-                            localProps.scenes[i] = { ...scene, imageUrl: localUrl };
-                            console.log(`✅ Scene ${i + 1} local asset confirmed: ${localUrl}`);
-                        }
-                    }
-                }
-            }
-
-            // Download music locally
-            if (localProps.musicUrl && localProps.musicUrl.startsWith('http')) {
-                try {
-                    const destAbs = path.join(assetsDirAbs, 'music.mp3');
-                    const response = await fetch(localProps.musicUrl);
-                    if (response.ok) {
-                        const buffer = Buffer.from(await response.arrayBuffer());
-                        fs.writeFileSync(destAbs, buffer);
-                        localProps.musicUrl = toLocalUrl(destAbs);
-                        console.log(`📥 Downloaded music locally`);
-                    }
-                } catch (err: any) {
-                    console.warn(`⚠️ Failed to download music: ${err.message}`);
-                }
-            }
-
-            // Download voiceover audio locally
-            if (localProps.audioUrl && localProps.audioUrl.startsWith('http')) {
-                try {
-                    const destAbs = path.join(assetsDirAbs, 'voiceover.wav');
-                    const response = await fetch(localProps.audioUrl);
-                    if (response.ok) {
-                        const buffer = Buffer.from(await response.arrayBuffer());
-                        fs.writeFileSync(destAbs, buffer);
-                        if (fs.existsSync(destAbs) && fs.statSync(destAbs).size > 100) {
-                            localProps.audioUrl = toLocalUrl(destAbs);
-                            console.log(`📥 Downloaded voiceover locally (${fs.statSync(destAbs).size} bytes)`);
-                        } else {
-                            console.warn(`⚠️ Voiceover downloaded but file is empty or missing`);
-                        }
-                    } else {
-                        console.warn(`⚠️ Voiceover download HTTP error: ${response.status}`);
-                    }
-                } catch (err: any) {
-                    console.warn(`⚠️ Failed to download voiceover: ${err.message}`);
-                }
-            }
-
-            // Delete any stale props file from previous failed runs.
-            const propsPath = path.join(tmpDir, `props-mg-${projectId}.json`);
-            try { if (fs.existsSync(propsPath)) fs.unlinkSync(propsPath); } catch {}
-
-            // ── Build a LEAN Remotion public dir ─────────────────────────────────
-            // Remotion ALWAYS copies --public-dir into a temp bundle folder before
-            // rendering. public/ is 5.3 GB → copy races frame-0 → scene_0.mp4 is
-            // missing → 404.  Fix: give Remotion a tiny dir (~100 MB) that contains
-            // ONLY this render's assets so the copy completes in <2 s.
-            const remotionPubDir  = path.join(cwd, 'remotion-assets-mg');
-            const remotionAssetsDest = path.join(remotionPubDir, 'tmp', `assets_mg_${projectId}`);
-            try { fs.rmSync(remotionPubDir, { recursive: true, force: true }); } catch {}
-            fs.mkdirSync(remotionAssetsDest, { recursive: true });
-
-            // Copy all downloaded files into the lean public dir.
-            const assetFiles = fs.readdirSync(assetsDirAbs);
-            for (const file of assetFiles) {
-                fs.copyFileSync(
-                    path.join(assetsDirAbs, file),
-                    path.join(remotionAssetsDest, file)
-                );
-            }
-            console.log(`📂 Lean Remotion public dir ready: ${assetFiles.length} files (${(assetFiles.reduce((s, f) => s + fs.statSync(path.join(assetsDirAbs, f)).size, 0) / 1024 / 1024).toFixed(1)} MB)`);
-
-            // Write fresh props to JSON file
-            fs.writeFileSync(propsPath, JSON.stringify(localProps));
-
-            const outputPath   = path.join(rendersDir, `mg_${projectId}.mp4`);
-            const propsArg     = propsPath.replace(/\\/g, '/');
-            const outputArg    = outputPath.replace(/\\/g, '/');
-            const publicDirArg = remotionPubDir.replace(/\\/g, '/');
-
-            const cmd = [
-                'npx remotion render MotionGraphic',
-                `"${outputArg}"`,
-                `--props="${propsArg}"`,
-                `--public-dir="${publicDirArg}"`,
-                `--timeout=120000`,
-                `--disable-web-security`,
-                `--gl=angle`,
-                `--concurrency=1`,
-                `--jpeg-quality=75`,
-            ].join(' ');
-
-            console.log(`🎬 Rendering motion graphic: ${cmd.substring(0, 200)}...`);
-
-            // Execute render
-            await new Promise<void>((resolve, reject) => {
-                const child = exec(cmd, { cwd }, (error) => {
-                    if (error) return reject(error);
-                    resolve();
-                });
-                child.stdout?.on('data', (data) => console.log(`[Remotion] ${data.toString().trim()}`));
-                child.stderr?.on('data', (data) => console.log(`[Remotion] ${data.toString().trim()}`));
-            });
-
-            // Clean up: lean public dir and assets
-            try { fs.rmSync(remotionPubDir, { recursive: true, force: true }); } catch {}
-            try { fs.unlinkSync(propsPath); } catch {}
-            try { fs.rmSync(assetsDirAbs, { recursive: true, force: true }); } catch {}
-
-            const localUrl = `/renders/mg_${projectId}.mp4`;
-            console.log(`✅ Motion graphic render complete: ${localUrl}`);
-            return { videoUrl: localUrl };
-        });
-
-        // Step 6: Save props + video URL to DB and add system message
-        const saveResult = await step.run("save-and-finalize", async () => {
+        // Step 5: Save generated props and trigger GitHub Actions / Local render
+        const saveAndRenderResult = await step.run("save-props-and-trigger-render", async () => {
+            // Save props first so GitHub Actions can fetch them immediately via /props endpoint
             await db.update(motionGraphicProjects)
                 .set({
                     sceneData:       remotionProps.scenes, // Preserve the generated remote image/video URLs permanently
                     remotionProps,
-                    videoUrl: renderResult.videoUrl,
                     audioUrl: voiceData?.audioUrl || null,
                     audioDuration: voiceData?.audioDuration || null,
-                    status: "completed",
                     updatedAt: new Date(),
                 })
                 .where(eq(motionGraphicProjects.projectId, projectId));
 
-            // Add completion message
-            await db.insert(motionGraphicMessages).values({
-                projectId,
-                role: "system",
-                content: `✅ Motion graphic video generated! ${(project.sceneData as any[])?.length || 0} scenes, ${project.duration}s duration.${voiceData ? ` Voiceover: ${voiceData.audioDuration}s` : ' No voiceover.'}`,
-                metadata: { type: "generation_complete", remotionProps },
-            });
-
-            console.log(`🏁 Motion graphic project finalized: ${projectId}`);
-            return { success: true };
+            // Trigger the render (GitHub Actions cloud dispatch, or local background render fallback)
+            const { triggerMotionGraphicRender } = await import("@/lib/video-render");
+            const renderResult = await triggerMotionGraphicRender(projectId, remotionProps);
+            console.log(`🎬 Motion graphic render triggered: mode=${renderResult.mode}`);
+            return renderResult;
         });
 
         return {
@@ -3094,8 +2829,7 @@ export const generateMotionGraphic = inngest.createFunction(
             projectId,
             scenesCount: (project.sceneData as any[])?.length || 0,
             hasVoiceover: !!voiceData,
-            videoUrl: renderResult.videoUrl,
-            saveResult,
+            renderResult: saveAndRenderResult,
         };
     }
 );
@@ -3139,140 +2873,12 @@ export const renderMotionGraphicOnly = inngest.createFunction(
         await updateMotionGraphicStatus(projectId, "generating:video");
         console.log(`🔁 Render-only for ${projectId}: ${savedProps.scenes.length} scenes`);
 
-        // ── 2. Re-run render step with saved props ─────────────────────────
-        const renderResult = await step.run("render-video-only", async () => {
-            const fs   = await import("fs");
-            const path = await import("path");
-            const { exec } = await import("child_process");
-
-            const cwd        = process.cwd();
-            const tmpDir     = path.join(cwd, "public", "tmp");
-            const rendersDir = path.join(cwd, "public", "renders");
-            if (!fs.existsSync(tmpDir))     fs.mkdirSync(tmpDir,     { recursive: true });
-            if (!fs.existsSync(rendersDir)) fs.mkdirSync(rendersDir, { recursive: true });
-
-            const assetsDirRel = `tmp/assets_mg_${projectId}`;
-            const assetsDirAbs = path.join(cwd, "public", assetsDirRel);
-            if (!fs.existsSync(assetsDirAbs)) fs.mkdirSync(assetsDirAbs, { recursive: true });
-
-            // Re-download any remote http assets that may have been cleaned up
-            const localProps = { ...savedProps };
-            if (Array.isArray(localProps.scenes)) {
-                for (let i = 0; i < localProps.scenes.length; i++) {
-                    const scene = localProps.scenes[i];
-                    if (!scene.imageUrl) continue;
-
-                    const isRemote = scene.imageUrl.startsWith("http") &&
-                        !scene.imageUrl.includes("localhost") &&
-                        !scene.imageUrl.includes("127.0.0.1");
-
-                    if (isRemote) {
-                        // Remote CDN URL — re-download to local relative path
-                        try {
-                            const resp = await fetch(scene.imageUrl);
-                            if (resp.ok) {
-                                const buffer = Buffer.from(await resp.arrayBuffer());
-                                const ct = resp.headers.get("content-type") || "";
-                                const ext = ct.includes("video") ? "mp4"
-                                    : ct.includes("png")   ? "png"
-                                    : ct.includes("webp")  ? "webp"
-                                    : "jpg";
-                                const destAbs = path.join(assetsDirAbs, `scene_${i}.${ext}`);
-                                fs.writeFileSync(destAbs, buffer);
-                                const relPath = path.relative(path.join(cwd, "public"), destAbs).replace(/\\/g, "/");
-                                localProps.scenes[i] = { ...scene, imageUrl: relPath };
-                                console.log(`📥 Re-downloaded scene ${i + 1}: ${relPath}`);
-                            }
-                        } catch (e: any) {
-                            console.warn(`⚠️ Could not re-download scene ${i + 1}: ${e.message}`);
-                            localProps.scenes[i] = { ...scene, imageUrl: "" };
-                        }
-                    } else if (!scene.imageUrl.startsWith("http")) {
-                        // Relative path — verify it still exists
-                        const absPath = path.join(cwd, "public", scene.imageUrl.replace(/^\//, ""));
-                        if (!fs.existsSync(absPath)) {
-                            console.warn(`⚠️ Scene ${i + 1} local asset missing: ${scene.imageUrl} — clearing`);
-                            localProps.scenes[i] = { ...scene, imageUrl: "" };
-                        }
-                    }
-                }
-            }
-
-            // Write props file
-            const propsPath = path.join(tmpDir, `props-mg-${projectId}.json`);
-            try { if (fs.existsSync(propsPath)) fs.unlinkSync(propsPath); } catch {}
-
-            // Build lean Remotion public dir (same fix as main render path)
-            const remotionPubDir2 = path.join(cwd, 'remotion-assets-mg');
-            const remotionAssetsDest2 = path.join(remotionPubDir2, 'tmp', `assets_mg_${projectId}`);
-            try { fs.rmSync(remotionPubDir2, { recursive: true, force: true }); } catch {}
-            fs.mkdirSync(remotionAssetsDest2, { recursive: true });
-            for (const file of fs.readdirSync(assetsDirAbs)) {
-                fs.copyFileSync(path.join(assetsDirAbs, file), path.join(remotionAssetsDest2, file));
-            }
-            console.log(`📂 [Render-only] Lean public dir ready`);
-
-            fs.writeFileSync(propsPath, JSON.stringify(localProps));
-
-            const outputPath = path.join(rendersDir, `mg_${projectId}.mp4`);
-            const propsArg   = propsPath.replace(/\\/g, "/");
-            const outputArg  = outputPath.replace(/\\/g, "/");
-            const publicDirArg = remotionPubDir2.replace(/\\/g, '/');
-
-            const cmd = [
-                "npx remotion render MotionGraphic",
-                `"${outputArg}"`,
-                `--props="${propsArg}"`,
-                `--public-dir="${publicDirArg}"`,
-                "--timeout=120000",
-                "--disable-web-security",
-                "--gl=angle",
-                "--concurrency=1",
-                "--jpeg-quality=75",
-            ].join(" ");
-
-            console.log(`🎬 [Render-only] ${cmd.substring(0, 120)}...`);
-
-            await new Promise<void>((resolve, reject) => {
-                const child = exec(cmd, { cwd }, (error) => {
-                    if (error) return reject(error);
-                    resolve();
-                });
-                child.stdout?.on("data", (d) => console.log(`[Remotion] ${d.toString().trim()}`));
-                child.stderr?.on("data", (d) => console.log(`[Remotion] ${d.toString().trim()}`));
-            });
-
-            // Clean up: lean public dir, props, and assets
-            try { fs.rmSync(remotionPubDir2, { recursive: true, force: true }); } catch {}
-            try { fs.unlinkSync(propsPath); } catch {}
-            try { fs.rmSync(assetsDirAbs, { recursive: true, force: true }); } catch {}
-
-            const localUrl = `/renders/mg_${projectId}.mp4`;
-            console.log(`✅ [Render-only] complete: ${localUrl}`);
-            return { videoUrl: localUrl };
+        // ── 2. Trigger render (GitHub Actions cloud dispatch or local background render fallback) ──
+        const triggerResult = await step.run("trigger-render-only", async () => {
+            const { triggerMotionGraphicRender } = await import("@/lib/video-render");
+            return await triggerMotionGraphicRender(projectId, savedProps);
         });
 
-        // ── 3. Update DB ───────────────────────────────────────────────────
-        await step.run("save-render-result", async () => {
-            await db
-                .update(motionGraphicProjects)
-                .set({
-                    videoUrl:  renderResult.videoUrl,
-                    status:    "completed",
-                    updatedAt: new Date(),
-                })
-                .where(eq(motionGraphicProjects.projectId, projectId));
-
-            await db.insert(motionGraphicMessages).values({
-                projectId,
-                role:    "system",
-                content: `✅ Re-render complete! Video updated successfully.`,
-                metadata: { type: "render_complete" },
-            });
-
-            console.log(`🏁 [Render-only] finalized: ${projectId}`);
-        });
-
-        return { success: true, projectId, videoUrl: renderResult.videoUrl };
+        return { success: true, projectId, triggerResult };
     }
 );

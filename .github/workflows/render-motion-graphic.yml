@@ -1,0 +1,81 @@
+name: Render Motion Graphic
+
+# Triggered by POST https://api.github.com/repos/{owner}/{repo}/dispatches
+# with event_type = "render-motion-graphic"
+#
+# client_payload fields:
+#   projectId   - motion graphic project ID (e.g. "mg_abc123")
+#   propsUrl    - Full URL to GET Remotion props from (e.g. https://app.vercel.app/api/motion-graphics/{projectId}/props)
+#   webhookUrl  - Full URL to PATCH results back to (e.g. https://app.vercel.app/api/motion-graphics/{projectId}/webhook)
+
+on:
+  repository_dispatch:
+    types: [render-motion-graphic]
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      # ── 1. Checkout ──────────────────────────────────────────────────────────
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── 2. Node.js ───────────────────────────────────────────────────────────
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      # ── 3. Install dependencies ───────────────────────────────────────────────
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+
+      # ── 4. Fetch Remotion props from API ──────────────────────────────────────
+      - name: Fetch props from API
+        env:
+          WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
+          PROPS_URL: ${{ github.event.client_payload.propsUrl }}
+        run: |
+          mkdir -p tmp out
+          curl -sf \
+            -H "Authorization: Bearer ${WEBHOOK_SECRET}" \
+            "${PROPS_URL}" \
+            -o tmp/props.json
+          echo "✅ Props fetched ($(wc -c < tmp/props.json) bytes)"
+
+      # ── 5. Render Motion Graphic video with Remotion ──────────────────────────
+      - name: Render Motion Graphic
+        run: |
+          npx remotion render MotionGraphic out/video.mp4 \
+            --props="./tmp/props.json" \
+            --timeout=300000 \
+            --disable-web-security \
+            --concurrency=4 \
+            --offthread-video-cache-size-in-bytes=3221225472 \
+            --jpeg-quality=75
+
+      # ── 6. Upload to Appwrite Storage & Notify Webhook ────────────────────────
+      - name: Upload to Appwrite Storage & Notify Webhook
+        env:
+          APPWRITE_ENDPOINT:   ${{ secrets.APPWRITE_VIDEO_ENDPOINT || secrets.APPWRITE_ENDPOINT }}
+          APPWRITE_PROJECT_ID: ${{ secrets.APPWRITE_VIDEO_PROJECT_ID || secrets.APPWRITE_PROJECT_ID }}
+          APPWRITE_API_KEY:    ${{ secrets.APPWRITE_VIDEO_API_KEY || secrets.APPWRITE_API_KEY }}
+          APPWRITE_BUCKET_ID:  ${{ secrets.APPWRITE_VIDEO_BUCKET_ID || secrets.APPWRITE_BUCKET_ID }}
+          PROJECT_ID:          ${{ github.event.client_payload.projectId }}
+          WEBHOOK_URL:         ${{ github.event.client_payload.webhookUrl }}
+          WEBHOOK_SECRET:      ${{ secrets.WEBHOOK_SECRET }}
+        run: node scripts/upload-motion-graphic.js
+
+      # ── 7. Failure notification ───────────────────────────────────────────────
+      - name: Notify Failure
+        if: failure()
+        env:
+          WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
+        run: |
+          curl -s -X PATCH "${{ github.event.client_payload.webhookUrl }}" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${WEBHOOK_SECRET}" \
+            -d '{"status": "failed"}'
