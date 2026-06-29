@@ -327,7 +327,7 @@ async function stretchSceneVideoToFit(
 
     const baseArgs = [
         `"${ffmpegBin}" -y -i "${srcPath}"`,
-        `-vf "setpts=${ratio}*PTS,tpad=stop=6:stop_mode=clone"`,  // stretch + 6 boundary clone frames
+        `-vf "setpts=${ratio}*PTS,minterpolate=fps=30:mi_mode=blend:scd=none,tpad=stop=6:stop_mode=clone"`,  // smooth blend stretch + 6 boundary clone frames
         `-c:v libx264 -preset fast -crf 23`,
         `-g 1 -bf 0 -pix_fmt yuv420p`,
         `-r 30 -fps_mode cfr`,
