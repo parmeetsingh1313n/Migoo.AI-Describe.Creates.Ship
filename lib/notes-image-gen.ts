@@ -14,26 +14,11 @@ import { notesProjects } from "@/config/schema";
 import { groq } from "@/config/groq";
 import { eq } from "drizzle-orm";
 import {
-    uploadImageToLeonardo,
-    generateGptImage15,
     generateNanoBananaImage,
     NANO_BANANA_STYLES,
-} from "@/lib/vercel-image";
+} from "@/lib/apify-image";
 
 const NOTES_STYLE_UUID = NANO_BANANA_STYLES["Illustration"];
-
-// ─── Helpers ─────────────────────────────────────────────────
-function getFirstLeonardoKey(): string {
-    const keyNames = [
-        "LEONARDO_API_KEY", "LEONARDO_API_KEY1", "LEONARDO_API_KEY2",
-        "LEONARDO_API_KEY3", "LEONARDO_API_KEY4",
-    ];
-    for (const name of keyNames) {
-        const v = process.env[name];
-        if (v && v.length > 0) return v;
-    }
-    throw new Error("No LEONARDO_API_KEY found in environment");
-}
 
 /**
  * Use Groq to plan image placements across pages.
@@ -206,27 +191,9 @@ export async function generateNotesImages(noteId: string): Promise<{
         const SECTIONS_PER_PAGE = 4;
         const totalPages = Math.max(1, Math.ceil(sections.length / SECTIONS_PER_PAGE));
 
-        const hasUserImage = imageAssets.length > 0;
-        const modelChoice = hasUserImage ? "GPT Image-1.5" : "Nano Banana 2";
+        const modelChoice = "Apify Gemini";
 
         console.log(`🖼️ Image pipeline: noteId=${noteId}, pages=${totalPages}, sections=${sections.length}, model=${modelChoice}`);
-
-        // ── Step 2: Upload user image if present ─────────────
-        let refImageId: string | null = null;
-        let userImageDescription = "";
-
-        if (hasUserImage) {
-            const primaryAsset = imageAssets[0];
-            const apiKey = getFirstLeonardoKey();
-            try {
-                console.log(`⬆️ Uploading user image to Leonardo: ${primaryAsset.name}`);
-                refImageId = await uploadImageToLeonardo(primaryAsset.url, apiKey);
-                userImageDescription = primaryAsset.name || "user uploaded reference image";
-                console.log(`✅ User image uploaded, refId=${refImageId}`);
-            } catch (uploadErr) {
-                console.warn("⚠️ Failed to upload user image, falling back to Nano Banana 2:", uploadErr);
-            }
-        }
 
         // ── Step 3: Plan images with OpenRouter ──────────────
         console.log("🧠 OpenRouter planning image placements...");
@@ -234,8 +201,8 @@ export async function generateNotesImages(noteId: string): Promise<{
             project.title,
             sections,
             totalPages,
-            hasUserImage,
-            userImageDescription
+            false,
+            ""
         );
 
         console.log(`📋 Image plan: ${imagePlan.length} images across ${totalPages} pages`);
@@ -248,45 +215,15 @@ export async function generateNotesImages(noteId: string): Promise<{
             model: string;
         }> = [];
 
-        // Add user's uploaded image
-        if (hasUserImage) {
-            pageImages.push({
-                pageIndex: generatedData.imagePosition ?? 0,
-                imageUrl: imageAssets[0].url,
-                prompt: "User uploaded reference image",
-                model: "user-upload",
-            });
-        }
-
         for (const plan of imagePlan) {
             try {
                 let imageUrl: string;
-                let usedModel: string;
+                let usedModel = "apify-gemini";
 
-                if (refImageId) {
-                    // Try GPT Image-1.5 first, fall back to Nano Banana if it fails
-                    try {
-                        console.log(`🎨 GPT Image-1.5 → page ${plan.pageIndex + 1}...`);
-                        const urls = await generateGptImage15(
-                            plan.prompt, refImageId, 1, "MEDIUM", 1024, 1024
-                        );
-                        imageUrl = urls[0];
-                        usedModel = "gpt-image-1.5";
-                    } catch (gptErr: any) {
-                        console.warn(`⚠️ GPT Image-1.5 failed for page ${plan.pageIndex + 1}: ${gptErr?.message?.substring(0, 120)}`);
-                        console.log(`🍌 Falling back to Nano Banana 2 → page ${plan.pageIndex + 1}...`);
-                        imageUrl = await generateNanoBananaImage(
-                            plan.prompt, 1024, 1024, NOTES_STYLE_UUID
-                        );
-                        usedModel = "nano-banana-2";
-                    }
-                } else {
-                    console.log(`🍌 Nano Banana 2 → page ${plan.pageIndex + 1}...`);
-                    imageUrl = await generateNanoBananaImage(
-                        plan.prompt, 1024, 1024, NOTES_STYLE_UUID
-                    );
-                    usedModel = "nano-banana-2";
-                }
+                console.log(`🍌 Apify Gemini → page ${plan.pageIndex + 1}...`);
+                imageUrl = await generateNanoBananaImage(
+                    plan.prompt, 1376, 768, NOTES_STYLE_UUID
+                );
 
                 pageImages.push({
                     pageIndex: plan.pageIndex,
@@ -314,7 +251,7 @@ export async function generateNotesImages(noteId: string): Promise<{
             ...latestGenData,
             pageImages,
             imagesGeneratedAt: new Date().toISOString(),
-            imageModel: refImageId ? "gpt-image-1.5" : "nano-banana-2",
+            imageModel: "apify-gemini",
         };
 
         await dbRetry(() =>
