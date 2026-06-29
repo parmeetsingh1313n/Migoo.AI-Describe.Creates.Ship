@@ -39,11 +39,20 @@ const envSchema = z.object({
   // ── Storage ───────────────────────────────────────────────────
   BLOB_READ_WRITE_TOKEN: z.string().min(1).optional(),
 
-  // ── Image Generation (Nano Banana uses GEMINI_API_KEY above) ─
-  LEONARDO_API_KEY: z.string().min(1).optional(),
-
-  // ── Video Generation (Leonardo Seedance) ───────────────────────
-  // Leonardo keys are already covered by LEONARDO_API_KEY above
+  // ── Apify Image & Video Generation (10 rotating tokens) ──────
+  // Primary: google/gemini-2.5-flash-image
+  // Fallback: google/gemini-3.1-flash-image-preview
+  // Video: Wan 2.2 I2V (actor p215uhRBVXpONQfS8)
+  APIFY_TOKEN_1: z.string().min(1).optional(),
+  APIFY_TOKEN_2: z.string().min(1).optional(),
+  APIFY_TOKEN_3: z.string().min(1).optional(),
+  APIFY_TOKEN_4: z.string().min(1).optional(),
+  APIFY_TOKEN_5: z.string().min(1).optional(),
+  APIFY_TOKEN_6: z.string().min(1).optional(),
+  APIFY_TOKEN_7: z.string().min(1).optional(),
+  APIFY_TOKEN_8: z.string().min(1).optional(),
+  APIFY_TOKEN_9: z.string().min(1).optional(),
+  APIFY_TOKEN_10: z.string().min(1).optional(),
 
   // ── Application ───────────────────────────────────────────────
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),

@@ -2,8 +2,8 @@ import { aiFallback } from "@/config/ai-fallback";
 import { db } from "@/config/db";
 import { shortVideoAssets, shortVideoProgress, shortVideoSeries } from "@/config/schema";
 import { putWithRotation } from "@/lib/blob";
-import { generateNanoBananaImage, generateNanoBananaImagesParallel, submitNanoBananaJobsParallel, checkNanoBananaJobsStatus, NanoBananaSceneConfig, generateGptImage15SingleUrl, generateNanoBanana2Image, submitNanoBananaImageTask, checkPolloTaskStatus } from "@/lib/vercel-image";
-import { generateKlingScenesParallel, submitSeedanceVideoTask, checkPolloVideoTaskStatus, processSeedanceVideoResult } from "@/lib/wavespeed-video";
+import { generateNanoBananaImage, generateNanoBananaImagesParallel, generateApifyImage, generateApifyImagesParallel } from "@/lib/apify-image";
+import { submitSeedanceVideoTask, checkPolloVideoTaskStatus, processSeedanceVideoResult } from "@/lib/apify-video";
 import { getMusicUrl } from "@/lib/music-urls";
 import { translateScript } from "@/lib/translate";
 import { triggerRender } from "@/lib/video-render";
@@ -1609,16 +1609,7 @@ OUTPUT: JSON object wrapped in <json> and </json> tags.`;
                     continue;
                 }
 
-                let attemptMode = scene.sceneCategory || "general";
-                if (attemptMode === "monument") {
-                    attemptMode = "real_entity";
-                }
 
-                if (attemptMode === "living_thing" || attemptMode === "general") {
-                    console.log(`🎬 Scene ${i + 1} features '${attemptMode}', skipping image generation for direct Text-to-Video.`);
-                    imageUrls[i] = "SKIP_T2V";
-                    continue;
-                }
             }
 
             return { imageUrls, sceneOverrides, sceneProbedDurations };
@@ -1694,28 +1685,27 @@ Rewrite so it VISUALLY DEPICTS the specific event in the narration. 65-90 words.
 
         if (isCancelledBeforeSubmit) {
             console.log("🛑 Series cancelled — skipping image generation");
-            for (const { i } of scenesNeedingImages) finalImageUrls[i] = "SKIP_T2V";
+            for (const { i } of scenesNeedingImages) finalImageUrls[i] = ""; // empty = skip video too
         } else if (scenesNeedingImages.length > 0) {
-            // ── Step C: Generate each image in its OWN step.run ──────────────────────
-            // gpt-image-2 takes ~60s. If we batch multiple scenes into ONE step.run,
-            // the step can exceed Vercel's 60s timeout → 524 error.
-            // Fix: each scene gets its own step.run so each has a fresh 60s window.
-            console.log(`🚀 Generating ${scenesNeedingImages.length} images — one step per scene (gpt-image-2)...`);
+            // ── Step C: Generate all scene images in parallel (using rotating Apify tokens) ──
+            console.log(`🚀 Generating ${scenesNeedingImages.length} images in parallel using Apify...`);
+            const apifyResults = await step.run("generate-all-scene-images", async () => {
+                const scenesInput = scenesNeedingImages.map(({ scene, i }: { scene: any; i: number }) => ({
+                    index: i,
+                    prompt: enrichedPrompts[i] || scene.imagePrompt || scene.narration || "Cinematic scene",
+                    aspectRatio: "9:16"
+                }));
+                return await generateApifyImagesParallel(scenesInput);
+            });
 
-            for (const { i } of scenesNeedingImages) {
-                const sceneImageUrl = await step.run(`generate-image-scene-${i}`, async () => {
-                    try {
-                        const prompt = enrichedPrompts[i] || (scriptData.scenes[i].imagePrompt || scriptData.scenes[i].narration || "Cinematic scene");
-                        console.log(`🎨 Scene ${i + 1}: Generating gpt-image-2 image...`);
-                        const url = await generateNanoBananaImage(prompt, 768, 1344);
-                        console.log(`✅ Scene ${i + 1} image ready: ${url.substring(0, 60)}...`);
-                        return url;
-                    } catch (e: any) {
-                        console.warn(`⚠️ Scene ${i + 1} image generation failed: ${e?.message}. Marking SKIP_T2V.`);
-                        return "SKIP_T2V";
-                    }
-                });
-                finalImageUrls[i] = sceneImageUrl;
+            // Map results back to finalImageUrls
+            for (const res of apifyResults) {
+                if (res.success && res.imageUrl) {
+                    finalImageUrls[res.index] = res.imageUrl;
+                } else {
+                    console.warn(`⚠️ Scene ${res.index + 1} image generation failed: ${res.error}. Falling back to default placeholder.`);
+                    finalImageUrls[res.index] = "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe"; // safe generic fallback
+                }
             }
         }
 
@@ -1733,7 +1723,7 @@ Rewrite so it VISUALLY DEPICTS the specific event in the narration. 65-90 words.
             prompt += " -- CRITICAL: NO TEXT, NO WORDS, NO LETTERS, NO NUMBERS. PURE IMAGE ONLY.";
             console.log(`🖼️ Generating thumbnail for: "${seriesData.title}"`);
             try {
-                const url = await generateNanoBananaImage(prompt, 768, 1344);
+                const url = await generateApifyImage(prompt, { aspectRatio: "9:16", sceneIndex: -1 });
                 console.log(`✅ Thumbnail ready: ${url.substring(0, 60)}...`);
                 return url;
             } catch (err: any) {
@@ -1775,6 +1765,13 @@ Rewrite so it VISUALLY DEPICTS the specific event in the narration. 65-90 words.
 
                 if (!sceneImageUrl || sceneImageUrl === "") continue;
 
+                // SKIP_T2V / SKIP_VEO — no image available (cancelled, Studio doc_image, etc.)
+                // With Apify Wan 2.2, we ONLY support image-to-video. Skip these scenes.
+                if (sceneImageUrl === "SKIP_T2V" || sceneImageUrl === "SKIP_VEO") {
+                    console.log(`⏭️ Scene ${i + 1} has no image (${sceneImageUrl}) — skipping video generation.`);
+                    continue;
+                }
+
                 // Studio split/composite override — already a final video URL
                 const splitOverride = imageData.sceneOverrides?.[i];
                 if (splitOverride) {
@@ -1790,7 +1787,7 @@ Rewrite so it VISUALLY DEPICTS the specific event in the narration. 65-90 words.
                 } catch {}
 
                 // Direct user-uploaded video — use as-is
-                if (sceneImageUrl !== "SKIP_T2V" && sceneImageUrl !== "SKIP_VEO" && /\.(mp4|mov|webm)/i.test(sceneImageUrl)) {
+                if (/\.(mp4|mov|webm)/i.test(sceneImageUrl)) {
                     sceneVideoUrls[i] = sceneImageUrl;
                     sceneVideoDurations[i] = imageData.sceneProbedDurations?.[i] || sceneDuration;
                     continue;
@@ -1837,12 +1834,12 @@ Rewrite so it VISUALLY DEPICTS the specific event in the narration. 65-90 words.
                 videoPrompt += " Absolutely no text, titles, words, writing, captions, labels, or overlays.";
 
                 // ── Submit new Pollo Seedance task ───────────────────────────────────
-                const isTextToVideo = sceneImageUrl === "SKIP_T2V" || sceneImageUrl === "SKIP_VEO";
                 try {
                     const { taskId, apiKey } = await submitSeedanceVideoTask(
-                        isTextToVideo ? undefined : sceneImageUrl,
+                        sceneImageUrl,
                         videoPrompt,
-                        "9:16"
+                        "9:16",
+                        i
                     );
                     // Persist immediately so retries find it
                     try {

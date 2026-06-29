@@ -1,5 +1,5 @@
 import { groq } from "@/config/groq";
-import { generateSeedanceVideo } from "@/lib/wavespeed-video";
+import { generateApifyVideoSync } from "@/lib/apify-video";
 import { NextRequest, NextResponse } from "next/server";
 import * as zlib from "node:zlib";
 
@@ -526,25 +526,20 @@ export async function processImgToVideo({
     const motionPrompt = await buildKlingPrompt(caption, sceneNarration);
     console.log(`📝 [img-to-video] Final Seedance prompt: "${motionPrompt.slice(0, 120)}..."`);
 
-    // ── Step 4: Pollo Seedance 1.5 Pro — img2vid ──────────────────────────
-    // generateSeedanceVideo handles: submission → polling → download → FFmpeg stretch → blob upload
-    console.log(`🎬 [img-to-video] Step 3: Submitting to Pollo Seedance 1.5 Pro...`);
-    const seriesId = `studio_${Date.now()}`; // ephemeral series ID for blob path
-    const result = await generateSeedanceVideo(
+    // ── Step 4: Apify Wan 2.2 Image-to-Video ──────────────────────────
+    console.log(`🎬 [img-to-video] Step 3: Submitting to Apify Wan 2.2 actor...`);
+    const videoUrl = await generateApifyVideoSync(
         imageUrl,
         motionPrompt,
-        duration,
-        seriesId,
-        sceneIndex,
-        aspectRatio
+        sceneIndex
     );
 
-    console.log(`🎉 [img-to-video] Seedance complete: ${result.videoUrl.slice(0, 80)}`);
+    console.log(`🎉 [img-to-video] Apify Wan 2.2 complete: ${videoUrl.slice(0, 80)}`);
 
     return {
         ok: true,
-        videoUrl: result.videoUrl,
-        durationSec: result.actualDurationSec,
+        videoUrl: videoUrl,
+        durationSec: 5,
         isKlingFallback: false,
         isShorts: forceShorts,
     };

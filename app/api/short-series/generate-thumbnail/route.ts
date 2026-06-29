@@ -11,7 +11,7 @@
 
 import { db } from "@/config/db";
 import { shortVideoSeries } from "@/config/schema";
-import { generateNanoBananaImage } from "@/lib/vercel-image";
+import { generateApifyImageForThumbnail } from "@/lib/apify-image";
 import { eq } from "drizzle-orm";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -48,8 +48,8 @@ export async function POST(req: NextRequest) {
         const prompt = prompts[Math.floor(Math.random() * prompts.length)];
         console.log(`📝 [generate-thumbnail] Prompt: "${prompt.slice(0, 100)}..."`);
 
-        // Generate image via Vercel AI Gateway (Imagen 4) — synchronous, ~5-10s
-        const thumbnailUrl = await generateNanoBananaImage(prompt, 1024, 1024);
+        // Generate image via Apify (Gemini 2.5 Flash / 3.1 Flash) — synchronous
+        const thumbnailUrl = await generateApifyImageForThumbnail(prompt);
         console.log(`✅ [generate-thumbnail] Generated: ${thumbnailUrl.slice(0, 80)}`);
 
         // Save to DB

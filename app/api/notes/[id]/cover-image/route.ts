@@ -9,7 +9,7 @@
 
 import { currentUser } from "@clerk/nextjs/server"
 import { NextRequest, NextResponse } from "next/server"
-import { generateNanoBananaImage, NANO_BANANA_STYLES } from "@/lib/vercel-image"
+import { generateApifyImageForNotes } from "@/lib/apify-image"
 import { db } from "@/config/db"
 import { notesProjects } from "@/config/schema"
 import { eq } from "drizzle-orm"
@@ -49,12 +49,10 @@ export async function POST(
             NO numbers, purely visual abstract art, flat design style, 
             vibrant colors, clean composition.`
 
-        // 3. Generate new image (1024x1024 is safe for Nano Banana 2)
-        const imageUrl = await generateNanoBananaImage(
+        // 3. Generate new image (landscape 16:9 for cover image)
+        const imageUrl = await generateApifyImageForNotes(
             prompt,
-            1024,
-            1024,
-            NANO_BANANA_STYLES["Illustration"]
+            0
         )
 
         // 4. Save to DB
