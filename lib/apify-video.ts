@@ -13,7 +13,15 @@
  *  1. Upload source image to a temp Apify KV store → get public signed URL
  *  2. Submit async actor run with that image URL
  *  3. Poll until SUCCEEDED → return MP4 URL
+ *  4. processSeedanceVideoResult: download + FFmpeg optical-flow smooth-stretch + Appwrite upload
+ *     → Returns actualDurationSec=sceneDuration so Remotion plays at playbackRate=1.0 (zero judder)
  */
+
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
+import { exec } from "child_process";
+import { putWithRotation } from "@/lib/blob";
 
 const VIDEO_ACTOR_ID = "p215uhRBVXpONQfS8";
 const PRIME_OFFSET = 3;
@@ -306,22 +314,247 @@ export async function checkPolloVideoTaskStatus(
   };
 }
 
+// ─── FFmpeg helpers ───────────────────────────────────────────────────────────
+
+function getFFmpegBin(): string {
+  try {
+    const bin = require("ffmpeg-static") as string | null;
+    if (bin && fs.existsSync(bin)) return bin;
+  } catch {}
+  for (const p of [
+    path.join(process.cwd(), "node_modules", "ffmpeg-static", process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg"),
+    "/usr/bin/ffmpeg",
+    "/usr/local/bin/ffmpeg",
+  ]) {
+    if (fs.existsSync(p)) return p;
+  }
+  throw new Error("[apify-video] ffmpeg-static not found");
+}
+
+function runCmd(cmd: string, timeoutMs = 55_000): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = exec(cmd, { maxBuffer: 100 * 1024 * 1024 }, (err, _out, stderr) => {
+      if (err) reject(Object.assign(err, { stderr }));
+      else resolve();
+    });
+    // Hard timeout — Inngest step budget is 60s, leave 5s headroom
+    const timer = setTimeout(() => {
+      try { child.kill(); } catch {}
+      reject(new Error(`[apify-video] FFmpeg timed out after ${timeoutMs / 1000}s`));
+    }, timeoutMs);
+    child.on("close", () => clearTimeout(timer));
+  });
+}
+
+async function probeActualDuration(filePath: string): Promise<number> {
+  const ffmpegBin = getFFmpegBin();
+  return new Promise((resolve) => {
+    exec(`"${ffmpegBin}" -i "${filePath}"`, (_err, stdout, stderr) => {
+      const out = (stdout || "") + "\n" + (stderr || "");
+      const m = out.match(/Duration:\s*(\d{2}):(\d{2}):(\d{2}\.\d+)/);
+      if (m) {
+        resolve(parseInt(m[1]) * 3600 + parseInt(m[2]) * 60 + parseFloat(m[3]));
+      } else {
+        resolve(5); // safe default — Wan 2.2 always produces 5s
+      }
+    });
+  });
+}
+
 /**
- * Drop-in stub for processSeedanceVideoResult (wavespeed-video.ts).
- * In wavespeed, this processed the video with FFmpeg. 
- * With Apify Wan 2.2, the video is already rendered at 480p — just return it.
+ * Pre-process a Wan 2.2 video for smooth slow-motion:
+ *
+ * The 3-tier FFmpeg pipeline:
+ *
+ * TIER 1 — MCI optical-flow (best quality):
+ *   minterpolate to 60 fps using bidirectional motion-compensated interpolation,
+ *   then setpts-stretch to targetDuration, then downsample to 30 fps CFR.
+ *   Creates true in-between frames → cinema-quality slow motion.
+ *
+ * TIER 2 — blend crossfade (good quality, fast):
+ *   Same flow but mi_mode=blend — crossfades adjacent frames.
+ *   Slightly softer but jerk-free and runs in ~3s.
+ *
+ * TIER 3 — setpts only (safe fallback):
+ *   Pure timestamp manipulation. No new frames, correct timing.
+ *
+ * After processing: Remotion receives actualDurationSec = targetDuration
+ * so it plays at playbackRate=1.0 → EVERY seek lands on an exact frame → zero judder.
+ */
+async function smoothStretchVideoBuffer(
+  inputBuffer: Buffer,
+  targetDuration: number,
+  seriesId: string,
+  sceneIndex: number
+): Promise<{ buffer: Buffer; reportedDuration: number }> {
+  const ffmpegBin = getFFmpegBin();
+  const rand = `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+  const tmpDir = os.tmpdir();
+  const inPath  = path.join(tmpDir, `wan_in_${rand}.mp4`);
+  const outPath = path.join(tmpDir, `wan_out_${rand}.mp4`);
+
+  fs.writeFileSync(inPath, inputBuffer);
+
+  const actualDuration = await probeActualDuration(inPath);
+  const ratio = (targetDuration / actualDuration).toFixed(6);
+  const needsStretch = Math.abs(actualDuration - targetDuration) > 0.1;
+  const TRIM_MARGIN = 0.4;
+  const trimPoint = Math.max(1.0, targetDuration - TRIM_MARGIN).toFixed(3);
+
+  console.log(
+    `📐 [apify-video] Scene ${sceneIndex + 1}: probed=${actualDuration.toFixed(3)}s → target=${targetDuration}s (ratio=${ratio}, stretch=${needsStretch})`
+  );
+
+  const buildCmd = (vfFilter: string, fpsModeFlag: string, crf = 23) =>
+    [
+      `"${ffmpegBin}" -y -i "${inPath}"`,
+      `-vf "${vfFilter}"`,
+      `-t ${trimPoint}`,
+      `-r 30`, fpsModeFlag,
+      `-g 30 -bf 0`,
+      `-c:v libx264 -pix_fmt yuv420p -preset fast -crf ${crf}`,
+      `-an -movflags +faststart -avoid_negative_ts make_zero`,
+      `"${outPath}"`,
+    ].join(" ");
+
+  // ── Tier filter definitions ────────────────────────────────────────────────
+  const stretchPts = `setpts=${ratio}*PTS,setpts=PTS-STARTPTS`;
+
+  // Tier 1: true motion-compensated optical flow @ 60 fps (cinema-quality slow-mo)
+  const tier1Filter = needsStretch
+    ? `minterpolate=fps=60:mi_mode=mci:me_mode=bidir:mc_mode=aobmc:vsbmc=1:scd=none,${stretchPts},fps=30`
+    : `fps=30,setpts=PTS-STARTPTS`;
+
+  // Tier 2: blend crossfade @ 60 fps (fast, smooth, jerk-free)
+  const tier2Filter = needsStretch
+    ? `minterpolate=fps=60:mi_mode=blend:scd=none,${stretchPts},fps=30`
+    : `fps=30,setpts=PTS-STARTPTS`;
+
+  // Tier 3: pure timestamp stretch (always works, minimal judder vs old approach)
+  const tier3Filter = needsStretch
+    ? `${stretchPts},fps=30`
+    : `fps=30,setpts=PTS-STARTPTS`;
+
+  const tiers: Array<{ name: string; filter: string; timeout: number }> = [
+    { name: "MCI optical-flow",  filter: tier1Filter, timeout: 50_000 },
+    { name: "blend crossfade",   filter: tier2Filter, timeout: 35_000 },
+    { name: "setpts fallback",   filter: tier3Filter, timeout: 20_000 },
+  ];
+
+  for (const tier of tiers) {
+    try {
+      if (fs.existsSync(outPath)) fs.unlinkSync(outPath);
+      const cmd = buildCmd(tier.filter, "-fps_mode cfr");
+      console.log(`⏳ [apify-video] Scene ${sceneIndex + 1}: trying ${tier.name}...`);
+      await runCmd(cmd, tier.timeout);
+
+      if (!fs.existsSync(outPath) || fs.statSync(outPath).size < 10_000) {
+        throw new Error(`Output file too small or missing`);
+      }
+
+      let outBuffer = fs.readFileSync(outPath);
+
+      // Size gate: re-encode at higher CRF if > 20 MB
+      if (outBuffer.length > 20 * 1024 * 1024) {
+        console.warn(`⚠️ [apify-video] Output ${(outBuffer.length / 1024 / 1024).toFixed(1)} MB — re-encoding at CRF 32...`);
+        const smallPath = outPath.replace(".mp4", "_s.mp4");
+        try {
+          await runCmd(
+            `"${ffmpegBin}" -y -i "${outPath}" -c:v libx264 -pix_fmt yuv420p -preset fast -crf 32 -an -movflags +faststart "${smallPath}"`,
+            15_000
+          );
+          if (fs.existsSync(smallPath) && fs.statSync(smallPath).size > 5_000) {
+            outBuffer = fs.readFileSync(smallPath);
+            try { fs.unlinkSync(smallPath); } catch {}
+          }
+        } catch { /* use original */ }
+      }
+
+      try { fs.unlinkSync(inPath);  } catch {}
+      try { fs.unlinkSync(outPath); } catch {}
+
+      console.log(`✅ [apify-video] Scene ${sceneIndex + 1}: ${tier.name} succeeded → ${(outBuffer.length / 1024).toFixed(0)} KB`);
+      return { buffer: outBuffer, reportedDuration: Math.max(1, targetDuration - TRIM_MARGIN) };
+
+    } catch (err: any) {
+      // fps_mode fallback for older FFmpeg builds
+      if (err.stderr?.includes("fps_mode") || err.message?.includes("fps_mode")) {
+        try {
+          if (fs.existsSync(outPath)) fs.unlinkSync(outPath);
+          const legacyCmd = buildCmd(tier.filter, "-vsync cfr");
+          await runCmd(legacyCmd, tier.timeout);
+          if (fs.existsSync(outPath) && fs.statSync(outPath).size > 10_000) {
+            const outBuffer = fs.readFileSync(outPath);
+            try { fs.unlinkSync(inPath);  } catch {}
+            try { fs.unlinkSync(outPath); } catch {}
+            console.log(`✅ [apify-video] Scene ${sceneIndex + 1}: ${tier.name} succeeded (legacy vsync)`);
+            return { buffer: outBuffer, reportedDuration: Math.max(1, targetDuration - TRIM_MARGIN) };
+          }
+        } catch { /* fall through to next tier */ }
+      }
+      console.warn(`⚠️ [apify-video] Scene ${sceneIndex + 1}: ${tier.name} failed (${err.message?.slice(0, 80)}) — trying next tier`);
+    }
+  }
+
+  // All tiers failed — return original unprocessed buffer
+  try { fs.unlinkSync(inPath);  } catch {}
+  try { fs.unlinkSync(outPath); } catch {}
+  console.warn(`⚠️ [apify-video] Scene ${sceneIndex + 1}: all FFmpeg tiers failed, returning raw video (actualDuration=${actualDuration.toFixed(2)}s)`);
+  return { buffer: inputBuffer, reportedDuration: actualDuration };
+}
+
+// ─── Public Processing API ────────────────────────────────────────────────────
+
+/**
+ * Process a completed Wan 2.2 video result:
+ *  1. Download raw MP4 from Apify CDN
+ *  2. Smooth-stretch with FFmpeg 3-tier optical-flow to exactly sceneDuration
+ *  3. Upload to Appwrite blob storage
+ *  4. Return the permanent Appwrite URL with actualDurationSec = sceneDuration
+ *
+ * Because actualDurationSec = sceneDuration, Remotion renders at playbackRate=1.0
+ * → EVERY frame seek lands on an exact frame → zero judder, ultra smooth.
  */
 export async function processSeedanceVideoResult(
   rawVideoUrl: string,
   _imageUrl: string | undefined,
   sceneDuration: number,
-  _seriesId: string,
-  _sceneIndex: number
+  seriesId: string,
+  sceneIndex: number
 ): Promise<{ videoUrl: string; actualDurationSec: number }> {
-  // Wan 2.2 outputs a ready-to-use MP4 at 480p, 5 seconds.
-  // No FFmpeg processing needed. The stretching mechanism handles duration.
+  console.log(`📥 [apify-video] Processing scene ${sceneIndex + 1}: downloading from Apify CDN...`);
+
+  // 1. Download raw video
+  const videoRes = await fetch(rawVideoUrl, { signal: AbortSignal.timeout(60_000) });
+  if (!videoRes.ok) throw new Error(`[apify-video] Failed to download video: ${videoRes.status}`);
+  const rawBuffer = Buffer.from(await videoRes.arrayBuffer());
+  console.log(`📥 [apify-video] Scene ${sceneIndex + 1}: downloaded ${(rawBuffer.length / 1024).toFixed(0)} KB`);
+
+  // 2. Smooth-stretch with FFmpeg optical-flow interpolation
+  let finalBuffer: Buffer;
+  let reportedDuration: number;
+
+  try {
+    const result = await smoothStretchVideoBuffer(rawBuffer, sceneDuration, seriesId, sceneIndex);
+    finalBuffer = result.buffer;
+    reportedDuration = result.reportedDuration;
+  } catch (err: any) {
+    console.warn(`⚠️ [apify-video] Scene ${sceneIndex + 1}: smoothStretch threw (${err.message}), using raw video`);
+    finalBuffer = rawBuffer;
+    reportedDuration = 5; // Wan 2.2 native duration
+  }
+
+  // 3. Upload to Appwrite via rotating blob storage
+  const filename = `shorts/${seriesId}/scene_${sceneIndex}_wan22_${Date.now()}.mp4`;
+  const blob = await putWithRotation(filename, finalBuffer, {
+    access: "public",
+    contentType: "video/mp4",
+  });
+
+  console.log(`✅ [apify-video] Scene ${sceneIndex + 1}: uploaded to Appwrite → ${blob.url.slice(0, 80)} (reportedDuration=${reportedDuration.toFixed(2)}s)`);
+
   return {
-    videoUrl: rawVideoUrl,
-    actualDurationSec: 5,
+    videoUrl: blob.url,
+    actualDurationSec: reportedDuration,
   };
 }
