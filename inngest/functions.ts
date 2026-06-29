@@ -1625,21 +1625,20 @@ OUTPUT: JSON object wrapped in <json> and </json> tags.`;
             .map((scene: any, i: number) => ({ scene, i }))
             .filter(({ i }: { i: number }) => resolvedAssets.imageUrls[i] === "");
 
-        // ── Step A: Enrich ALL prompts in ONE step (sequential LLM calls, ~5s/scene) ──
-        const enrichedPrompts: Record<number, string> = await step.run("enrich-all-image-prompts", async () => {
-            const result: Record<number, string> = {};
+        // ── Step A: Enrich prompts (Each scene in its own step.run to prevent Vercel 504 timeouts) ──
+        const enrichedPrompts: Record<number, string> = {};
+        for (const { scene, i } of scenesNeedingImages) {
+            const originalPrompt = scene.imagePrompt || scene.narration || "Cinematic scene illustration";
+            const wordCount = originalPrompt.split(/\s+/).length;
+            const alreadyRich = wordCount >= 70 && /photorealistic|cinematic|8k|ultra detailed/i.test(originalPrompt);
 
-            for (const { scene, i } of scenesNeedingImages) {
-                const originalPrompt = scene.imagePrompt || scene.narration || "Cinematic scene illustration";
-                const wordCount = originalPrompt.split(/\s+/).length;
-                const alreadyRich = wordCount >= 70 && /photorealistic|cinematic|8k|ultra detailed/i.test(originalPrompt);
+            if (alreadyRich) {
+                console.log(`  ✅ Scene ${i + 1}: prompt already rich (${wordCount} words), skipping enrichment`);
+                enrichedPrompts[i] = originalPrompt;
+                continue;
+            }
 
-                if (alreadyRich) {
-                    console.log(`  ✅ Scene ${i + 1}: prompt already rich (${wordCount} words), skipping enrichment`);
-                    result[i] = originalPrompt;
-                    continue;
-                }
-
+            enrichedPrompts[i] = await step.run(`enrich-prompt-scene-${i}`, async () => {
                 try {
                     const systemPrompt = `You are an expert AI image prompt engineer specialising in photorealistic image generation for Nano Banana 2 (Leonardo AI). Rewrite the scene description into a SINGLE rich image prompt.
 
@@ -1652,26 +1651,19 @@ ORIGINAL PROMPT: "${originalPrompt}"
 
 Rewrite so it VISUALLY DEPICTS the specific event in the narration. 65-90 words. No explanation.`;
 
+                    console.log(`🤖 Enriching prompt for scene ${i + 1}...`);
                     const enriched = await shortsLLM.enrich(systemPrompt, userPrompt, { temperature: 0.4, maxTokens: 300 });
                     if (enriched && enriched.trim().split(/\s+/).length > wordCount) {
                         console.log(`  ✨ Scene ${i + 1}: prompt enriched ${wordCount}→${enriched.trim().split(/\s+/).length} words`);
-                        result[i] = enriched.trim();
-                    } else {
-                        result[i] = originalPrompt;
+                        return enriched.trim();
                     }
+                    return originalPrompt;
                 } catch (err: any) {
                     console.warn(`  ⚠️ Scene ${i + 1}: enrichment failed (${err?.message?.slice(0, 60)}), using original`);
-                    result[i] = originalPrompt;
+                    return originalPrompt;
                 }
-
-                // Small cooldown between sequential LLM calls to avoid rate limits
-                if (i < scenesNeedingImages[scenesNeedingImages.length - 1].i) {
-                    await new Promise(r => setTimeout(r, 1500));
-                }
-            }
-
-            return result;
-        });
+            });
+        }
 
         // ── Step B: Cancel check before submitting jobs ──
         const isCancelledBeforeSubmit = await step.run("check-cancel-before-image-submit", async () => {
