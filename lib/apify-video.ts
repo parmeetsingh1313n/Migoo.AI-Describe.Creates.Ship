@@ -396,13 +396,16 @@ async function smoothStretchVideoBuffer(
   fs.writeFileSync(inPath, inputBuffer);
 
   const actualDuration = await probeActualDuration(inPath);
-  const ratio = (targetDuration / actualDuration).toFixed(6);
-  const needsStretch = Math.abs(actualDuration - targetDuration) > 0.1;
-  const TRIM_MARGIN = 0.4;
-  const trimPoint = Math.max(1.0, targetDuration - TRIM_MARGIN).toFixed(3);
+  // We want the pre-stretched video to have exactly targetDuration + 0.6s
+  // so it satisfies the local check in lib/video-render.ts (needed = targetSec + 0.6)
+  // and plays at pbRate = 1.0 in Composition.tsx.
+  const needed = targetDuration + 0.6;
+  const ratio = (needed / actualDuration).toFixed(6);
+  const needsStretch = Math.abs(actualDuration - needed) > 0.1;
+  const trimPoint = needed.toFixed(3);
 
   console.log(
-    `📐 [apify-video] Scene ${sceneIndex + 1}: probed=${actualDuration.toFixed(3)}s → target=${targetDuration}s (ratio=${ratio}, stretch=${needsStretch})`
+    `📐 [apify-video] Scene ${sceneIndex + 1}: probed=${actualDuration.toFixed(3)}s → target=${needed.toFixed(2)}s (ratio=${ratio}, stretch=${needsStretch})`
   );
 
   const buildCmd = (vfFilter: string, fpsModeFlag: string, crf = 23) =>
@@ -417,23 +420,22 @@ async function smoothStretchVideoBuffer(
       `"${outPath}"`,
     ].join(" ");
 
-  // ── Tier filter definitions ────────────────────────────────────────────────
-  const stretchPts = `setpts=${ratio}*PTS,setpts=PTS-STARTPTS`;
+  const targetFps = (30 * parseFloat(ratio)).toFixed(3);
 
-  // Tier 1: true motion-compensated optical flow @ 60 fps (cinema-quality slow-mo)
+  // Tier 1: true motion-compensated optical flow - interpolate before stretching PTS
   const tier1Filter = needsStretch
-    ? `minterpolate=fps=60:mi_mode=mci:me_mode=bidir:mc_mode=aobmc:vsbmc=1:scd=none,${stretchPts},fps=30`
-    : `fps=30,setpts=PTS-STARTPTS`;
+    ? `minterpolate=fps=${targetFps}:mi_mode=mci:me_mode=bidir:mc_mode=aobmc:vsbmc=1:scd=none,setpts=${ratio}*PTS,tpad=stop=6:stop_mode=clone`
+    : `fps=30,setpts=PTS-STARTPTS,tpad=stop=6:stop_mode=clone`;
 
-  // Tier 2: blend crossfade @ 60 fps (fast, smooth, jerk-free)
+  // Tier 2: blend crossfade - fast, smooth fallback
   const tier2Filter = needsStretch
-    ? `minterpolate=fps=60:mi_mode=blend:scd=none,${stretchPts},fps=30`
-    : `fps=30,setpts=PTS-STARTPTS`;
+    ? `minterpolate=fps=${targetFps}:mi_mode=blend:scd=none,setpts=${ratio}*PTS,tpad=stop=6:stop_mode=clone`
+    : `fps=30,setpts=PTS-STARTPTS,tpad=stop=6:stop_mode=clone`;
 
-  // Tier 3: pure timestamp stretch (always works, minimal judder vs old approach)
+  // Tier 3: pure timestamp stretch - safe fallback
   const tier3Filter = needsStretch
-    ? `${stretchPts},fps=30`
-    : `fps=30,setpts=PTS-STARTPTS`;
+    ? `setpts=${ratio}*PTS,tpad=stop=6:stop_mode=clone`
+    : `fps=30,setpts=PTS-STARTPTS,tpad=stop=6:stop_mode=clone`;
 
   const tiers: Array<{ name: string; filter: string; timeout: number }> = [
     { name: "MCI optical-flow",  filter: tier1Filter, timeout: 50_000 },
@@ -474,7 +476,7 @@ async function smoothStretchVideoBuffer(
       try { fs.unlinkSync(outPath); } catch {}
 
       console.log(`✅ [apify-video] Scene ${sceneIndex + 1}: ${tier.name} succeeded → ${(outBuffer.length / 1024).toFixed(0)} KB`);
-      return { buffer: outBuffer, reportedDuration: Math.max(1, targetDuration - TRIM_MARGIN) };
+      return { buffer: outBuffer, reportedDuration: needed };
 
     } catch (err: any) {
       // fps_mode fallback for older FFmpeg builds
@@ -488,7 +490,7 @@ async function smoothStretchVideoBuffer(
             try { fs.unlinkSync(inPath);  } catch {}
             try { fs.unlinkSync(outPath); } catch {}
             console.log(`✅ [apify-video] Scene ${sceneIndex + 1}: ${tier.name} succeeded (legacy vsync)`);
-            return { buffer: outBuffer, reportedDuration: Math.max(1, targetDuration - TRIM_MARGIN) };
+            return { buffer: outBuffer, reportedDuration: needed };
           }
         } catch { /* fall through to next tier */ }
       }

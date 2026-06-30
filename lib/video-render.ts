@@ -325,55 +325,89 @@ async function stretchSceneVideoToFit(
 
     console.log(`⏩ Stretching scene video: ${probedDur.toFixed(2)}s → ${needed.toFixed(2)}s (×${ratio})`);
 
-    const baseArgs = [
+    const buildCmd = (vfFilter: string, fpsModeFlag: string) => [
         `"${ffmpegBin}" -y -i "${srcPath}"`,
-        `-vf "setpts=${ratio}*PTS,minterpolate=fps=30:mi_mode=blend:scd=none,tpad=stop=6:stop_mode=clone"`,  // smooth blend stretch + 6 boundary clone frames
+        `-vf "${vfFilter}"`,
         `-c:v libx264 -preset fast -crf 23`,
         `-g 1 -bf 0 -pix_fmt yuv420p`,
-        `-r 30 -fps_mode cfr`,
+        `-r 30 ${fpsModeFlag}`,
         `-video_track_timescale 30`,   // PTS = integers 0,1,2,... → no seek misses
         `-an -movflags +faststart -avoid_negative_ts make_zero`,
         `"${tmpPath}"`,
+    ].join(' ');
+
+    const targetFps = (30 * parseFloat(ratio)).toFixed(3);
+
+    // Tier 1: True motion-compensated optical flow (MCI) - interpolate before stretching PTS
+    const tier1Filter = `minterpolate=fps=${targetFps}:mi_mode=mci:me_mode=bidir:mc_mode=aobmc:vsbmc=1:scd=none,setpts=${ratio}*PTS,tpad=stop=6:stop_mode=clone`;
+    // Tier 2: Blend crossfade - fast and smooth fallback
+    const tier2Filter = `minterpolate=fps=${targetFps}:mi_mode=blend:scd=none,setpts=${ratio}*PTS,tpad=stop=6:stop_mode=clone`;
+    // Tier 3: Pure timestamp stretch - safe fallback
+    const tier3Filter = `setpts=${ratio}*PTS,tpad=stop=6:stop_mode=clone`;
+
+    const tiers = [
+        { name: "MCI optical-flow", filter: tier1Filter, timeout: 50_000 },
+        { name: "blend crossfade", filter: tier2Filter, timeout: 35_000 },
+        { name: "setpts fallback", filter: tier3Filter, timeout: 20_000 }
     ];
 
-    return new Promise<number | undefined>((resolve) => {
-        const cmd = baseArgs.join(' ');
-        exec(cmd, { maxBuffer: 100 * 1024 * 1024 }, async (err, _out, stderr) => {
-            const tryLegacy = !!err && stderr?.includes('fps_mode');
-            const run = (c: string) => new Promise<boolean>(res => {
-                exec(c, { maxBuffer: 100 * 1024 * 1024 }, async (e2) => {
-                    if (e2 || !fs.existsSync(tmpPath) || fs.statSync(tmpPath).size < 10_000) {
-                        try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch {}
-                        res(false);
-                    } else {
-                        res(true);
-                    }
-                });
+    const runCmd = (cmd: string, timeoutMs: number): Promise<void> => {
+        return new Promise((resolve, reject) => {
+            const child = exec(cmd, { maxBuffer: 100 * 1024 * 1024 }, (err, _out, stderr) => {
+                if (err) reject(Object.assign(err, { stderr }));
+                else resolve();
             });
-
-            const ok = err
-                ? (tryLegacy ? await run(cmd.replace('-fps_mode cfr', '-vsync cfr')) : false)
-                : (fs.existsSync(tmpPath) && fs.statSync(tmpPath).size > 10_000);
-
-            if (!ok) {
-                console.warn(`⚠️ stretchSceneVideoToFit failed, using original duration ${probedDur.toFixed(2)}s`);
-                resolve(probedDur);
-                return;
-            }
-
-            // Swap files
-            try { fs.unlinkSync(srcPath); } catch {}
-            try { fs.renameSync(tmpPath, srcPath); }
-            catch {
-                fs.copyFileSync(tmpPath, srcPath);
-                try { fs.unlinkSync(tmpPath); } catch {}
-            }
-
-            const newDur = await probeVideoDuration(srcPath);
-            console.log(`✅ Scene video stretched → ${(newDur ?? 0).toFixed(2)}s`);
-            resolve(newDur);
+            const timer = setTimeout(() => {
+                try { child.kill(); } catch {}
+                reject(new Error(`FFmpeg timed out after ${timeoutMs / 1000}s`));
+            }, timeoutMs);
+            child.on("close", () => clearTimeout(timer));
         });
-    });
+    };
+
+    for (const tier of tiers) {
+        try {
+            if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
+            const cmd = buildCmd(tier.filter, "-fps_mode cfr");
+            console.log(`⏳ Trying ${tier.name} stretching...`);
+            await runCmd(cmd, tier.timeout);
+
+            if (fs.existsSync(tmpPath) && fs.statSync(tmpPath).size > 10_000) {
+                // Success! Swap files
+                try { fs.unlinkSync(srcPath); } catch {}
+                try { fs.renameSync(tmpPath, srcPath); } catch {
+                    fs.copyFileSync(tmpPath, srcPath);
+                    try { fs.unlinkSync(tmpPath); } catch {}
+                }
+                const newDur = await probeVideoDuration(srcPath);
+                console.log(`✅ Scene video stretched via ${tier.name} → ${(newDur ?? 0).toFixed(2)}s`);
+                return newDur;
+            }
+        } catch (err: any) {
+            // Try legacy -vsync flag if -fps_mode is not supported
+            if (err.stderr?.includes('fps_mode') || err.message?.includes('fps_mode')) {
+                try {
+                    if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
+                    const cmdLegacy = buildCmd(tier.filter, "-vsync cfr");
+                    await runCmd(cmdLegacy, tier.timeout);
+                    if (fs.existsSync(tmpPath) && fs.statSync(tmpPath).size > 10_000) {
+                        try { fs.unlinkSync(srcPath); } catch {}
+                        try { fs.renameSync(tmpPath, srcPath); } catch {
+                            fs.copyFileSync(tmpPath, srcPath);
+                            try { fs.unlinkSync(tmpPath); } catch {}
+                        }
+                        const newDur = await probeVideoDuration(srcPath);
+                        console.log(`✅ Scene video stretched via ${tier.name} (legacy vsync) → ${(newDur ?? 0).toFixed(2)}s`);
+                        return newDur;
+                    }
+                } catch { /* proceed to next tier */ }
+            }
+            console.warn(`⚠️ ${tier.name} stretching failed: ${err.message?.slice(0, 80)} — trying next tier`);
+        }
+    }
+
+    console.warn(`⚠️ All stretching tiers failed, using original duration ${probedDur.toFixed(2)}s`);
+    return probedDur;
 }
 
 const activeRenders = new Set<string>();
