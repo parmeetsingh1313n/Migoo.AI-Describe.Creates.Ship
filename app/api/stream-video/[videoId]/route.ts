@@ -83,7 +83,22 @@ export async function GET(
         const metadata = JSON.parse(videoUrlStr);
         if (metadata.chunked && Array.isArray(metadata.ids)) {
           const { ids, bucketId, endpoint, projectId } = metadata;
-          const apiKey = process.env.APPWRITE_VIDEO_API_KEY || process.env.APPWRITE_API_KEY || '';
+          
+          // Match the API key with the projectId stored in metadata
+          let apiKey = '';
+          if (projectId === (process.env.APPWRITE_VIDEO_PROJECT_ID || process.env.APPWRITE_PROJECT_ID)) {
+            apiKey = process.env.APPWRITE_VIDEO_API_KEY || process.env.APPWRITE_API_KEY || '';
+          } else {
+            for (let i = 1; i <= 5; i++) {
+              if (projectId === process.env[`APPWRITE_PROJECT_ID${i}`]) {
+                apiKey = process.env[`APPWRITE_API_KEY${i}`] || '';
+                break;
+              }
+            }
+          }
+          if (!apiKey) {
+            apiKey = process.env.APPWRITE_VIDEO_API_KEY || process.env.APPWRITE_API_KEY || '';
+          }
 
           // We need to know total size to serve range requests properly.
           // Fetch everything into memory (short video, should be <100 MB).
@@ -128,7 +143,9 @@ export async function GET(
         }
       } catch (jsonErr: any) {
         console.error('stream-video: Failed to parse/stream chunked metadata:', jsonErr.message);
+        return new Response(`Error streaming chunked video: ${jsonErr.message}`, { status: 500 });
       }
+      return new Response('Failed to parse chunked video metadata', { status: 500 });
     }
 
     // ── Case 2: Single direct Appwrite URL ────────────────────────────────────
