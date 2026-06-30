@@ -54,49 +54,32 @@ function pickToken(sceneIndex: number, tokens: string[]): { token: string; token
  * Upload an image to a temporary Apify KV store and return a publicly-accessible
  * signed URL. The Wan 2.2 actor requires a public HTTP URL — Apify signed URLs work.
  */
+/**
+ * Upload an image to Appwrite storage and return a publicly-accessible URL.
+ * The Wan 2.2 actor requires a public HTTP URL — Appwrite view URLs work.
+ */
 async function uploadImageForVideo(
-  imageUrl: string,
-  token: string
+  imageUrl: string
 ): Promise<string> {
-  // Create temp KV store (no name = auto-generated, avoids parallel collision)
-  const createRes = await fetch(`https://api.apify.com/v2/key-value-stores?token=${token}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({}),
-  });
-
-  if (!createRes.ok) {
-    throw new Error(`[apify-video] KV store create failed (${createRes.status})`);
-  }
-  const storeId: string = (await createRes.json()).data?.id;
-  if (!storeId) throw new Error("[apify-video] No KV store ID returned");
-
   // Fetch the image bytes
   const imgRes = await fetch(imageUrl, { signal: AbortSignal.timeout(30_000) });
-  if (!imgRes.ok) throw new Error(`[apify-video] Failed to fetch source image (${imgRes.status})`);
-
-  const contentType = imgRes.headers.get("content-type") || "image/png";
-  const imageBuffer = Buffer.from(await imgRes.arrayBuffer());
-
-  // Upload to KV store
-  const uploadRes = await fetch(
-    `https://api.apify.com/v2/key-value-stores/${storeId}/records/scene-image?token=${token}`,
-    {
-      method: "PUT",
-      headers: { "Content-Type": contentType },
-      body: imageBuffer,
-    }
-  );
-
-  if (!uploadRes.ok) {
-    throw new Error(`[apify-video] KV upload failed (${uploadRes.status})`);
+  if (!imgRes.ok) {
+    throw new Error(`[apify-video] Failed to fetch source image (${imgRes.status})`);
   }
 
-  // Return the signed public URL (accessible without auth)
-  // Apify KV records with token appended ARE publicly accessible
-  const publicUrl = `https://api.apify.com/v2/key-value-stores/${storeId}/records/scene-image?token=${token}`;
-  console.log(`📤 [apify-video] Image uploaded to KV: ${storeId}`);
-  return publicUrl;
+  const contentType = imgRes.headers.get("content-type") || "image/jpeg";
+  const imageBuffer = Buffer.from(await imgRes.arrayBuffer());
+
+  // Upload to Appwrite storage (uses key rotation internally to balance/avoid limits)
+  const rand = `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+  const pathname = `temp/video_src_${rand}.jpg`;
+
+  const uploadResult = await putWithRotation(pathname, imageBuffer, {
+    contentType,
+  });
+
+  console.log(`📤 [apify-video] Image uploaded to Appwrite: ${uploadResult.url}`);
+  return uploadResult.url;
 }
 
 // ─── Video Task Submission ────────────────────────────────────────────────────
@@ -120,7 +103,7 @@ export async function submitApifyVideoTask(
   const { token, tokenIdx } = pickToken(sceneIndex, tokens);
 
   // Upload image so Wan 2.2 can fetch it
-  const publicImageUrl = await uploadImageForVideo(imageUrl, token);
+  const publicImageUrl = await uploadImageForVideo(imageUrl);
 
   const runUrl = `https://api.apify.com/v2/actors/${VIDEO_ACTOR_ID}/runs?token=${token}`;
   const input = {
