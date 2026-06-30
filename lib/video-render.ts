@@ -313,9 +313,9 @@ async function stretchSceneVideoToFit(
     const probedDur = await probeVideoDuration(srcPath);
     if (!probedDur || probedDur <= 0) return probedDur;
 
-    // Only stretch when video is shorter than the target scene duration.
-    // Add 0.6s buffer so safeLength (dur - 0.4s) always exceeds targetSec
-    // → Remotion uses playbackRate=1.0 → no fractional PTS seeks.
+    // Stretch to exactly targetSec + 0.6s so:
+    //   safeLength = (targetSec + 0.6) - 0.5 = targetSec + 0.1 > targetSec
+    //   → Remotion uses playbackRate = 1.0 → zero fractional PTS seeks → no judder.
     const needed = targetSec + 0.6;
     if (probedDur >= needed) return probedDur; // already long enough
 
@@ -336,13 +336,25 @@ async function stretchSceneVideoToFit(
         `"${tmpPath}"`,
     ].join(' ');
 
-    const targetFps = (30 * parseFloat(ratio)).toFixed(3);
+    // ── CORRECT FILTER ORDER (eliminates fractional-resampling jerk) ───────
+    // WRONG: minterpolate=fps=199 → setpts=6.6 → -r 30
+    //   Resamples 199fps→30fps taking every 6.6th frame: FRACTIONAL!
+    //   Alternates 6 frames then 7 → uneven timing = visible stutter.
+    //
+    // CORRECT: minterpolate=fps=30 → setpts=ratio → -r 30 (cfr hold)
+    //   Step 1: Convert VFR ~16fps → smooth 30fps CFR at native speed.
+    //           ~150 frames only. Fast (< 25s for a 5s clip).
+    //   Step 2: setpts scales timestamps (150 frames span targetSec+0.6s).
+    //           Pure metadata — zero additional computation.
+    //   Step 3: -r 30 -fps_mode cfr holds each smooth frame for ratio output
+    //           frames. 6-vs-7 frame holds at 33ms are imperceptible.
+    // ─────────────────────────────────────────────────────────────────────────
 
-    // Tier 1: True motion-compensated optical flow (MCI) - interpolate before stretching PTS
-    const tier1Filter = `minterpolate=fps=${targetFps}:mi_mode=mci:me_mode=bidir:mc_mode=aobmc:vsbmc=1:scd=none,setpts=${ratio}*PTS,tpad=stop=6:stop_mode=clone`;
-    // Tier 2: Blend crossfade - fast and smooth fallback
-    const tier2Filter = `minterpolate=fps=${targetFps}:mi_mode=blend:scd=none,setpts=${ratio}*PTS,tpad=stop=6:stop_mode=clone`;
-    // Tier 3: Pure timestamp stretch - safe fallback
+    // Tier 1: MCI optical flow at 30fps → smoothest source, then stretch timestamps
+    const tier1Filter = `minterpolate=fps=30:mi_mode=mci:scd=none,setpts=${ratio}*PTS,tpad=stop=6:stop_mode=clone`;
+    // Tier 2: Blend crossfade at 30fps → fast, smooth fallback
+    const tier2Filter = `minterpolate=fps=30:mi_mode=blend:scd=none,setpts=${ratio}*PTS,tpad=stop=6:stop_mode=clone`;
+    // Tier 3: Pure timestamp stretch — always works
     const tier3Filter = `setpts=${ratio}*PTS,tpad=stop=6:stop_mode=clone`;
 
     const tiers = [
