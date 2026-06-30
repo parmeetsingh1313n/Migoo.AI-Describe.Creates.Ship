@@ -1858,7 +1858,7 @@ Rewrite so it VISUALLY DEPICTS the specific event in the narration. 65-90 words.
                 const done: Array<{ index: number; rawUrl: string }> = [];
                 const stillPending: typeof pendingVideoJobs = [];
                 for (const job of pendingVideoJobs) {
-                    const result = await checkPolloVideoTaskStatus(job.taskId, job.apiKey);
+                    const result = await checkPolloVideoTaskStatus(job.taskId, job.apiKey, job.index);
                     if (result.status === "complete" && result.url) {
                         done.push({ index: job.index, rawUrl: result.url });
                     } else if (result.status !== "failed") {

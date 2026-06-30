@@ -304,10 +304,11 @@ export async function submitSeedanceVideoTask(
  */
 export async function checkPolloVideoTaskStatus(
   taskId: string,
-  apiKey: string
+  apiKey: string,
+  sceneIndex = 0
 ): Promise<{ status: "complete" | "failed" | "pending"; url?: string }> {
   const tokenIdx = parseInt(apiKey, 10) || 0;
-  const result = await checkApifyVideoTask({ runId: taskId, tokenIdx, sceneIndex: 0 });
+  const result = await checkApifyVideoTask({ runId: taskId, tokenIdx, sceneIndex });
   return {
     status: result.status,
     url: result.videoUrl,
