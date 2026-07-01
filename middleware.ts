@@ -112,7 +112,7 @@ export const config = {
     matcher: [
         // Skip Next.js internals and all static files, unless found in search params
         '/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest|mp4|webm|wav|mp3|m4a|ogg|avatars|tmp)).*)',
-        // Always run for API routes
-        '/(api|trpc)(.*)',
+        // Run for API routes EXCEPT /api/stream-video/* (must be fully public for video players)
+        '/(api(?!/stream-video)|trpc)(.*)',
     ],
 }

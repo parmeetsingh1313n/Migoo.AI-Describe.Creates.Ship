@@ -150,8 +150,36 @@ export async function GET(
 
     // ── Case 2: Single direct Appwrite URL ────────────────────────────────────
     // Proxy the request, forwarding Range header so Appwrite can do byte-range serving.
+    // Also inject Appwrite auth headers so private buckets don't return 401.
     const upstreamHeaders: Record<string, string> = {};
     if (rangeHeader) upstreamHeaders['Range'] = rangeHeader;
+
+    // Determine which Appwrite project this URL belongs to and attach auth headers
+    try {
+      const urlObj = new URL(videoUrlStr);
+      const projectParam = urlObj.searchParams.get('project');
+      if (projectParam) {
+        // Find the matching API key for this project
+        let matchedKey: string | undefined;
+        const mainProjectId = process.env.APPWRITE_VIDEO_PROJECT_ID || process.env.APPWRITE_PROJECT_ID;
+        if (projectParam === mainProjectId) {
+          matchedKey = process.env.APPWRITE_VIDEO_API_KEY || process.env.APPWRITE_API_KEY;
+        } else {
+          for (let i = 1; i <= 5; i++) {
+            if (projectParam === process.env[`APPWRITE_PROJECT_ID${i}`]) {
+              matchedKey = process.env[`APPWRITE_API_KEY${i}`];
+              break;
+            }
+          }
+          // Fallback to primary key
+          if (!matchedKey) matchedKey = process.env.APPWRITE_VIDEO_API_KEY || process.env.APPWRITE_API_KEY;
+        }
+        if (matchedKey) {
+          upstreamHeaders['X-Appwrite-Project'] = projectParam;
+          upstreamHeaders['X-Appwrite-Key']     = matchedKey;
+        }
+      }
+    } catch { /* not a parseable URL — skip auth injection */ }
 
     const upstream = await fetch(videoUrlStr, { headers: upstreamHeaders });
 
