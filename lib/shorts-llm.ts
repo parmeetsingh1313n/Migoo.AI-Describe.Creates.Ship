@@ -19,9 +19,9 @@ const MODELS_TEXT: string[] = [
 ];
 
 const MODELS_JSON: string[] = [
-    'nvidia/nemotron-3-super-120b-a12b:free',
-    'openai/gpt-oss-120b:free',
-    'nvidia/nemotron-3-ultra-550b-a55b:free',
+    'openai/gpt-oss-120b:free',           // Primary: fast (~15-30s), 32K output, strong JSON
+    'nvidia/nemotron-3-super-120b-a12b:free', // Fallback: slower (~3min), 8K cap — only if gpt-oss fails
+    'nvidia/nemotron-3-ultra-550b-a55b:free', // Last resort
 ];
 
 // Translation model list — excludes openai/gpt-oss-120b:free which consistently
