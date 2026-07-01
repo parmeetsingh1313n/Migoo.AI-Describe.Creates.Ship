@@ -2,8 +2,8 @@
  * @module shorts-llm
  * @description OpenRouter LLM client for Shorts script + web-search fact distillation.
  *
- * Primary:   openai/gpt-oss-120b:free  (117B MoE, free, no TPM limit like Groq)
- * Fallback1: qwen/qwen3-next-80b-a3b-instruct:free (262K ctx, free)
+ * Primary:   openai/gpt-oss-120b:free  (117B MoE, free, strong reasoning)
+ * Fallback1: nvidia/nemotron-3-ultra-550b-a55b:free (550B MoE, 1M ctx, free)
  * Fallback2: meta-llama/llama-3.3-70b-instruct:free
  *
  * Drop-in replacement for groq.text() / aiFallback.json().
@@ -14,16 +14,14 @@ const OPENROUTER_BASE = 'https://openrouter.ai/api/v1/chat/completions';
 
 const MODELS_TEXT: string[] = [
     'openai/gpt-oss-120b:free',
-    'openrouter/owl-alpha',
-    'nex-agi/nex-n2-pro:free',
-    'meta-llama/llama-3.3-70b-instruct:free',
+    'nvidia/nemotron-3-super-120b-a12b:free',
+    'nvidia/nemotron-3-ultra-550b-a55b:free',
 ];
 
 const MODELS_JSON: string[] = [
     'openai/gpt-oss-120b:free',
-    'openrouter/owl-alpha',
-    'nex-agi/nex-n2-pro:free',
-    'meta-llama/llama-3.3-70b-instruct:free',
+    'nvidia/nemotron-3-super-120b-a12b:free',
+    'nvidia/nemotron-3-ultra-550b-a55b:free',
 ];
 
 // Translation model list — excludes openai/gpt-oss-120b:free which consistently
@@ -40,7 +38,7 @@ const MODELS_TRANSLATE: string[] = [
 // None of these have violence/graphic moderation filters.
 const MODELS_ENRICH: string[] = [
     'nvidia/nemotron-3-ultra-550b-a55b:free',     // Primary: 550B MoE, best free model, zero moderation, fresh window
-    'nex-agi/nex-n2-pro:free',                     // Last resort
+    'nvidia/nemotron-3-super-120b-a12b:free',     // Fallback
 ];
 
 // ── Key rotation (in-process) ─────────────────────────────────────────────────

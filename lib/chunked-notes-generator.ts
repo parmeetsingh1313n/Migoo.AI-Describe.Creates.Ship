@@ -33,8 +33,17 @@ interface ModelTier {
 
 const TIERS: ModelTier[] = [
     {
-        // Tier 1: openrouter/owl-alpha (1M context)
-        model: "openrouter/owl-alpha",
+        // Tier 1: openai/gpt-oss-120b:free (131K context, 117B MoE)
+        model: "openai/gpt-oss-120b:free",
+        maxContentChars: 300_000,
+        maxOutputTokens: 12_000,
+        headChars: 10_000,
+        tailChars: 5_000,
+        minCharsPerSection: 2_000,
+    },
+    {
+        // Tier 2: nvidia/nemotron-3-super-120b-a12b:free (1M context, 120B MoE)
+        model: "nvidia/nemotron-3-super-120b-a12b:free",
         maxContentChars: 1_200_000,
         maxOutputTokens: 12_000,
         headChars: 10_000,
@@ -42,9 +51,9 @@ const TIERS: ModelTier[] = [
         minCharsPerSection: 2_000,
     },
     {
-        // Tier 2: nex-agi/nex-n2-pro:free (fallback, 262K context)
-        model: "nex-agi/nex-n2-pro:free",
-        maxContentChars: 350_000, // SiliconFlow rejects ~480K chars as >262K tokens, so 350K is safe
+        // Tier 3: nvidia/nemotron-3-ultra-550b-a55b:free (1M context, 550B MoE)
+        model: "nvidia/nemotron-3-ultra-550b-a55b:free",
+        maxContentChars: 1_200_000,
         maxOutputTokens: 12_000,
         headChars: 10_000,
         tailChars: 5_000,

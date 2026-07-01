@@ -697,7 +697,7 @@ export const generateCourseVideoContentFn = inngest.createFunction(
                 let slideContent: any = null;
                 let slideError: any = null;
                 const MAX_RETRIES = 3;
-                const MODEL = "openrouter/owl-alpha";
+                const MODEL = "openai/gpt-oss-120b:free";
                 for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
                     try {
                         console.log(`🎬 ${TAG} Slide ${si + 1}/${totalSlides} via ${MODEL} (attempt ${attempt}/${MAX_RETRIES})...`);

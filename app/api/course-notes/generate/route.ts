@@ -326,31 +326,41 @@ Return ONLY the raw JSON array of strings.`;
 
         try {
             const [notesResult, promptsResult] = await Promise.all([
-                // 1. Notes Content Generation (Owl Alpha with Nex N2 Pro fallback)
+                // 1. Notes Content Generation (gpt-oss-120b with Nemotron fallbacks)
                 (async () => {
                     try {
-                        return await callOpenRouter('openrouter/owl-alpha');
+                        return await callOpenRouter('openai/gpt-oss-120b:free');
                     } catch (primaryErr) {
-                        console.warn('⚠️ Owl Alpha failed, falling back to Nex N2 Pro for notes:', primaryErr);
-                        return await callOpenRouter('nex-agi/nex-n2-pro:free');
+                        console.warn('⚠️ gpt-oss-120b failed, falling back to Nemotron Super for notes:', primaryErr);
+                        try {
+                            return await callOpenRouter('nvidia/nemotron-3-super-120b-a12b:free');
+                        } catch (superErr) {
+                            console.warn('⚠️ Nemotron Super failed, falling back to Nemotron Ultra for notes:', superErr);
+                            return await callOpenRouter('nvidia/nemotron-3-ultra-550b-a55b:free');
+                        }
                     }
                 })(),
-                // 2. Prompts Generation via Owl Alpha with Nex N2 Pro fallback
+                // 2. Prompts Generation via gpt-oss-120b with Nemotron fallbacks
                 (async () => {
                     try {
-                        return await callOpenRouterForPrompts('openrouter/owl-alpha', chapterTitle, slideContents);
+                        return await callOpenRouterForPrompts('openai/gpt-oss-120b:free', chapterTitle, slideContents);
                     } catch (err) {
-                        console.warn('⚠️ Owl Alpha prompts generation failed, trying Nex N2 Pro:', err);
+                        console.warn('⚠️ gpt-oss-120b prompts generation failed, trying Nemotron Super:', err);
                         try {
-                            return await callOpenRouterForPrompts('nex-agi/nex-n2-pro:free', chapterTitle, slideContents);
-                        } catch (fallbackErr) {
-                            console.error('⚠️ Fallback prompts generation failed, using defaults:', fallbackErr);
-                            return [
-                                `Flat design educational infographic representing ${chapterTitle}, modern minimal, soft colors, white background, vector quality, no text`,
-                                `Concept map showing components of ${chapterTitle}, clean flat design vector, pastel harmonious color palette, light background, no text`,
-                                `Isometric 2D textbook diagram illustrating ${chapterTitle}, modern minimal, dusty teal and lavender colors, soft lighting, no text`,
-                                `Annotated abstract schematic of ${chapterTitle} systems, flat style vector illustration, clean lines, white background, no text`
-                            ];
+                            return await callOpenRouterForPrompts('nvidia/nemotron-3-super-120b-a12b:free', chapterTitle, slideContents);
+                        } catch (superErr) {
+                            console.warn('⚠️ Nemotron Super prompts generation failed, trying Nemotron Ultra:', superErr);
+                            try {
+                                return await callOpenRouterForPrompts('nvidia/nemotron-3-ultra-550b-a55b:free', chapterTitle, slideContents);
+                            } catch (fallbackErr) {
+                                console.error('⚠️ Fallback prompts generation failed, using defaults:', fallbackErr);
+                                return [
+                                    `Flat design educational infographic representing ${chapterTitle}, modern minimal, soft colors, white background, vector quality, no text`,
+                                    `Concept map showing components of ${chapterTitle}, clean flat design vector, pastel harmonious color palette, light background, no text`,
+                                    `Isometric 2D textbook diagram illustrating ${chapterTitle}, modern minimal, dusty teal and lavender colors, soft lighting, no text`,
+                                    `Annotated abstract schematic of ${chapterTitle} systems, flat style vector illustration, clean lines, white background, no text`
+                                ];
+                            }
                         }
                     }
                 })()

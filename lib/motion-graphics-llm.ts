@@ -2,8 +2,8 @@
  * @module motion-graphics-llm
  * @description OpenRouter LLM client dedicated to the Motion Graphics pipeline.
  *
- * Primary:  openrouter/owl-alpha     (high-capacity reasoning model)
- * Fallback: nex-agi/nex-n2-pro:free   (free fallback model)
+ * Primary:  openai/gpt-oss-120b:free  (117B MoE, strong reasoning)
+ * Fallback: nvidia/nemotron-3-ultra-550b-a55b:free (550B MoE, 1M ctx, agentic)
  *
  * NOTE: This file is intentionally separate from:
  *   - config/openrouter.ts  → used by the Course Slide generator (heavy JSON + HTML repair)
@@ -16,10 +16,11 @@
 const OPENROUTER_BASE = 'https://openrouter.ai/api/v1/chat/completions';
 
 // ── Model priority ────────────────────────────────────────────────────────────
-const MG_PRIMARY_MODEL    = 'openrouter/owl-alpha';
-const MG_FALLBACK_MODEL   = 'nex-agi/nex-n2-pro:free';
+const MG_PRIMARY_MODEL     = 'openai/gpt-oss-120b:free';
+const MG_FALLBACK_MODEL    = 'nvidia/nemotron-3-super-120b-a12b:free';
+const MG_LAST_RESORT_MODEL = 'nvidia/nemotron-3-ultra-550b-a55b:free';
 // Premium 120B model dedicated to cinematic voiceover rewriting
-const MG_VOICEOVER_MODEL  = 'openai/gpt-oss-120b:free';
+const MG_VOICEOVER_MODEL   = 'openai/gpt-oss-120b:free';
 
 // ── Key rotation (in-process, shared across requests in this server session) ──
 let _mgKeyIdx = 0;
@@ -251,7 +252,7 @@ export const motionGraphicsLLM = {
             '\n\nReturn ONLY valid JSON. No markdown. No extra text.';
 
         const raw = await tryMgModels(
-            [MG_PRIMARY_MODEL, MG_FALLBACK_MODEL],
+            [MG_PRIMARY_MODEL, MG_FALLBACK_MODEL, MG_LAST_RESORT_MODEL],
             sysWithRule,
             userWithRule,
             temperature,
@@ -364,7 +365,7 @@ export const motionGraphicsLLM = {
             `Return JSON with "reply" and "patches". Include ONLY the specific field(s) that need to change.`;
 
         const raw = await tryMgModels(
-            [MG_PRIMARY_MODEL, MG_FALLBACK_MODEL],
+            [MG_PRIMARY_MODEL, MG_FALLBACK_MODEL, MG_LAST_RESORT_MODEL],
             PATCH_SYSTEM,
             userMsg,
             temperature,
@@ -465,7 +466,7 @@ export const motionGraphicsLLM = {
 
             try {
                 const raw = await tryMgModels(
-                    [MG_PRIMARY_MODEL, MG_FALLBACK_MODEL],
+                    [MG_PRIMARY_MODEL, MG_FALLBACK_MODEL, MG_LAST_RESORT_MODEL],
                     CHUNK_SYSTEM,
                     chunkUser,
                     temperature,

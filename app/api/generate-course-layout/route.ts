@@ -71,7 +71,7 @@ export async function POST(req: NextRequest) {
         // Generate comprehensive course layout
         // ═══════════════════════════════════════════════════════════════════
         console.log('🤖 Generating comprehensive course layout with OpenRouter AI...');
-        console.log('Model: openrouter/owl-alpha');
+        console.log('Model: openai/gpt-oss-120b:free');
         console.log('Temperature: 0.7 (balanced creativity)');
         console.log('Max Tokens: 8000 (increased for detailed courses)');
 
@@ -79,7 +79,7 @@ export async function POST(req: NextRequest) {
             COURSE_CONFIG_PROMPT,
             userInput,
             {
-                model: 'openrouter/owl-alpha',
+                model: 'openai/gpt-oss-120b:free',
                 temperature: 0.7,
                 maxTokens: 8000,
             }
@@ -177,7 +177,7 @@ export async function POST(req: NextRequest) {
             course: courseResult[0],
             metadata: {
                 generatedAt: new Date().toISOString(),
-                model: 'openrouter/owl-alpha',
+                model: 'cohere/north-mini-code:free',
                 courseId,
                 type,
                 courseName: result.courseName,

@@ -1,6 +1,6 @@
 /**
  * OpenRouter API Configuration
- * Primary: openrouter/owl-alpha  |  Fallback: nex-agi/nex-n2-pro:free
+ * Primary: openai/gpt-oss-120b:free  |  Fallback: nvidia/nemotron-3-ultra-550b-a55b:free
  * Enhanced JSON parsing with HTML quote handling
  */
 
@@ -21,8 +21,9 @@ interface OpenRouterResponse {
 
 class OpenRouterClient {
     private baseUrl: string = 'https://openrouter.ai/api/v1';
-    private model: string = 'openrouter/owl-alpha';
-    private fallbackModel: string = 'nex-agi/nex-n2-pro:free';
+    private model: string = 'openai/gpt-oss-120b:free';
+    private fallbackModel: string = 'nvidia/nemotron-3-super-120b-a12b:free';
+    private lastFallbackModel: string = 'nvidia/nemotron-3-ultra-550b-a55b:free';
 
     // Key rotation state (in-memory for this server session)
     private currentKeyIndex: number = 0;
@@ -167,7 +168,7 @@ class OpenRouterClient {
 
         const userMessage = userInput + outputRules;
         // Filter out empty strings so a blank fallbackModel never reaches the API
-        const modelsToTry = [primaryModel, this.fallbackModel].filter(m => m && m.trim() !== '');
+        const modelsToTry = [primaryModel, this.fallbackModel, this.lastFallbackModel].filter(m => m && m.trim() !== '');
         if (modelsToTry.length === 0) throw new Error('No OpenRouter model configured');
         const allKeys = this.getAllKeys();
 
@@ -229,7 +230,7 @@ CRITICAL STRUCTURAL & DESIGN MANDATES (override defaults):
             for (let keyAttempt = 0; keyAttempt < allKeys.length; keyAttempt++) {
                 const apiKey = this.getActiveKey();
                 // Model-specific token caps — use max supported to avoid ANY truncation
-                const modelMaxTokens = model.includes('gpt-oss-120b') || model.includes('nex-n2-pro') || model.includes('cobuddy') || model.includes('owl-alpha')
+                const modelMaxTokens = model.includes('gpt-oss-120b') || model.includes('nemotron-3-super') || model.includes('nemotron-3-ultra') || model.includes('nex-n2-pro') || model.includes('cobuddy') || model.includes('owl-alpha') || model.includes('north-mini-code') || model.includes('llama-3.3')
                     ? 65536
                     : model.includes('gpt-oss-20b')
                         ? 32768

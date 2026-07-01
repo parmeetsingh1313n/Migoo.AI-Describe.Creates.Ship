@@ -137,7 +137,7 @@ Total pages: ${totalPages}
 Page breakdown:
 ${pagesSummary}`;
 
-    const models = ["openrouter/owl-alpha", "nex-agi/nex-n2-pro:free"];
+    const models = ["openai/gpt-oss-120b:free", "nvidia/nemotron-3-super-120b-a12b:free", "nvidia/nemotron-3-ultra-550b-a55b:free"];
     let lastError: any = null;
 
     for (const model of models) {
