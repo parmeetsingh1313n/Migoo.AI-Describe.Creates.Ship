@@ -13,15 +13,15 @@
 const OPENROUTER_BASE = 'https://openrouter.ai/api/v1/chat/completions';
 
 const MODELS_TEXT: string[] = [
-    'nvidia/nemotron-3-super-120b-a12b:free',
     'openai/gpt-oss-120b:free',
+    'nvidia/nemotron-3-super-120b-a12b:free',
     'nvidia/nemotron-3-ultra-550b-a55b:free',
 ];
 
 const MODELS_JSON: string[] = [
-    'openai/gpt-oss-120b:free',           // Primary: fast (~15-30s), 32K output, strong JSON
-    'nvidia/nemotron-3-super-120b-a12b:free', // Fallback: slower (~3min), 8K cap — only if gpt-oss fails
-    'nvidia/nemotron-3-ultra-550b-a55b:free', // Last resort
+    'openai/gpt-oss-120b:free',
+    'nvidia/nemotron-3-super-120b-a12b:free',
+    'nvidia/nemotron-3-ultra-550b-a55b:free',
 ];
 
 // Translation model list — excludes openai/gpt-oss-120b:free which consistently
@@ -269,11 +269,6 @@ export const shortsLLM = {
     /**
      * Generate and parse JSON (replaces aiFallback.json() / groq.json()).
      * Injects a mandatory JSON-output instruction into the system prompt.
-     *
-     * RETRY STRATEGY:
-     *   - Short non-JSON responses (model refusal/refusal) → skip to next model
-     *   - finish=length (output truncated) + repair failure → skip to next model
-     *   - Rate limit / 429 / 403 → rotate key and try same model, then next model
      */
     async json(
         systemPrompt: string,
@@ -286,65 +281,20 @@ export const shortsLLM = {
         const userWithRule = userPrompt +
             '\n\nReturn ONLY valid JSON. No markdown code fences. No extra text.';
 
-        const keys       = getAllKeys();
-        const maxTokens  = options?.maxTokens ?? 32768; // OpenRouter clamps to each model's hard max automatically
-        const temperature = options?.temperature ?? 0.7;
-        let lastErr: any;
+        const { text: raw, finishReason } = await tryModels(
+            MODELS_JSON,
+            sysWithRule,
+            userWithRule,
+            options?.temperature ?? 0.7,
+            options?.maxTokens ?? 8192,
+        );
 
-        for (const model of MODELS_JSON) {
-            for (let ki = 0; ki < keys.length; ki++) {
-                const apiKey = getKey();
-                console.log(`🤖 [shorts-llm] model=${model} key=${_keyIdx + 1}/${keys.length} temp=${temperature}`);
+        // Detect truncation: explicit finish=length OR JSON visibly unclosed
+        const explicitTrunc = finishReason === 'length';
+        const wasTruncated  = explicitTrunc || (raw.trimEnd().slice(-1) !== '}' && raw.trimEnd().slice(-1) !== ']');
+        if (wasTruncated) console.warn(`⚠️ [shorts-llm] Truncation detected (finish=${finishReason}) — engaging repair...`);
 
-                let text = '';
-                let finishReason: string | null = null;
-
-                try {
-                    const result = await callModel(model, sysWithRule, userWithRule, temperature, maxTokens, apiKey);
-                    text = result.text;
-                    finishReason = result.finishReason ?? null;
-                } catch (err: any) {
-                    lastErr = err;
-                    if (err.isRateLimit) { rotateKey(); continue; }
-                    console.error(`❌ [shorts-llm] [${model}] non-rate error: ${err.message}`);
-                    break; // move to next model
-                }
-
-                // ── Guard: reject short non-JSON refusals ───────────────────
-                // If model returned < 100 chars with no '{', it refused / gave a
-                // plain-text message instead of JSON. Skip to next model.
-                if (text.trim().length < 100 && !text.includes('{')) {
-                    console.warn(`⚠️ [shorts-llm] [${model}] short non-JSON response (${text.trim().length} chars) — skipping model: ${text.trim().slice(0, 80)}`);
-                    lastErr = new Error(`[shorts-llm] non-JSON refusal from [${model}]`);
-                    break; // try next model
-                }
-
-                // ── Detect truncation ────────────────────────────────────────
-                // Only mark as truncated when the model explicitly reports finish=length.
-                // Don't flag a short plain-text refusal as truncated.
-                const wasTruncated = finishReason === 'length';
-                if (wasTruncated) {
-                    console.warn(`⚠️ [shorts-llm] Truncation detected (finish=length, ${text.length} chars) — attempting JSON repair...`);
-                }
-
-                // ── Try to parse JSON (with optional repair) ─────────────────
-                try {
-                    return extractJSON(text, wasTruncated);
-                } catch (parseErr: any) {
-                    lastErr = parseErr;
-                    if (wasTruncated) {
-                        // Truncated beyond repair — try next model
-                        console.warn(`⚠️ [shorts-llm] [${model}] truncation repair failed (${text.length} chars) — trying next model`);
-                        break;
-                    }
-                    // Non-truncation parse error: try next model too
-                    console.error(`❌ [shorts-llm] [${model}] JSON parse failed: ${parseErr.message?.slice(0, 120)}`);
-                    break;
-                }
-            }
-        }
-
-        throw lastErr ?? new Error('[shorts-llm] all models exhausted for JSON generation');
+        return extractJSON(raw, wasTruncated);
     },
 
     /**
