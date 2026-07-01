@@ -61,24 +61,9 @@ jobs:
       - name: Upload to Appwrite Storage & Notify Webhook
         env:
           APPWRITE_ENDPOINT:   ${{ secrets.APPWRITE_VIDEO_ENDPOINT || secrets.APPWRITE_ENDPOINT }}
-          APPWRITE_PROJECT_ID: ${{ secrets.APPWRITE_VIDEO_PROJECT_ID || secrets.APPWRITE_PROJECT_ID }}
-          APPWRITE_API_KEY:    ${{ secrets.APPWRITE_VIDEO_API_KEY || secrets.APPWRITE_API_KEY }}
-          APPWRITE_BUCKET_ID:  ${{ secrets.APPWRITE_VIDEO_BUCKET_ID || secrets.APPWRITE_BUCKET_ID }}
-          APPWRITE_PROJECT_ID1: ${{ secrets.APPWRITE_PROJECT_ID1 }}
-          APPWRITE_API_KEY1:    ${{ secrets.APPWRITE_API_KEY1 }}
-          APPWRITE_BUCKET_ID1:  ${{ secrets.APPWRITE_BUCKET_ID1 || secrets.APPWRITE_VIDEO_BUCKET_ID || secrets.APPWRITE_BUCKET_ID }}
-          APPWRITE_PROJECT_ID2: ${{ secrets.APPWRITE_PROJECT_ID2 }}
-          APPWRITE_API_KEY2:    ${{ secrets.APPWRITE_API_KEY2 }}
-          APPWRITE_BUCKET_ID2:  ${{ secrets.APPWRITE_BUCKET_ID2 || secrets.APPWRITE_VIDEO_BUCKET_ID || secrets.APPWRITE_BUCKET_ID }}
-          APPWRITE_PROJECT_ID3: ${{ secrets.APPWRITE_PROJECT_ID3 }}
-          APPWRITE_API_KEY3:    ${{ secrets.APPWRITE_API_KEY3 }}
-          APPWRITE_BUCKET_ID3:  ${{ secrets.APPWRITE_BUCKET_ID3 || secrets.APPWRITE_VIDEO_BUCKET_ID || secrets.APPWRITE_BUCKET_ID }}
-          APPWRITE_PROJECT_ID4: ${{ secrets.APPWRITE_PROJECT_ID4 }}
-          APPWRITE_API_KEY4:    ${{ secrets.APPWRITE_API_KEY4 }}
-          APPWRITE_BUCKET_ID4:  ${{ secrets.APPWRITE_BUCKET_ID4 || secrets.APPWRITE_VIDEO_BUCKET_ID || secrets.APPWRITE_BUCKET_ID }}
-          APPWRITE_PROJECT_ID5: ${{ secrets.APPWRITE_PROJECT_ID5 }}
-          APPWRITE_API_KEY5:    ${{ secrets.APPWRITE_API_KEY5 }}
-          APPWRITE_BUCKET_ID5:  ${{ secrets.APPWRITE_BUCKET_ID5 || secrets.APPWRITE_VIDEO_BUCKET_ID || secrets.APPWRITE_BUCKET_ID }}
+          APPWRITE_PROJECT_ID: ${{ secrets.APPWRITE_VIDEO_PROJECT_ID }}
+          APPWRITE_API_KEY:    ${{ secrets.APPWRITE_VIDEO_API_KEY }}
+          APPWRITE_BUCKET_ID:  ${{ secrets.APPWRITE_VIDEO_BUCKET_ID }}
           PROJECT_ID:          ${{ github.event.client_payload.projectId }}
           WEBHOOK_URL:         ${{ github.event.client_payload.webhookUrl }}
           WEBHOOK_SECRET:      ${{ secrets.WEBHOOK_SECRET }}
