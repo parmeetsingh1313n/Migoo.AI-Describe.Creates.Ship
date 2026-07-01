@@ -666,7 +666,11 @@ export const generateShortVideo = inngest.createFunction(
                 ? `\nHere are the video topics already covered in this series (NEVER repeat these or talk about these exact things):\n${coveredTitles.map((t: string) => `- ${t}`).join('\n')}`
                 : '';
 
-            const systemPrompt = `You are a viral content strategist for short-form videos. Your job is to choose ONE highly unique, engaging, and specific video topic/title.`;
+            const systemPrompt = `You are a viral content strategist for short-form videos. Your job is to choose ONE highly unique, engaging, and specific video topic/title.
+Return a JSON object with a single key "topic":
+{
+  "topic": "The Chosen Title Here"
+}`;
             const userPrompt = `Series Title/Theme: "${seriesData.title}"
 Niche: "${seriesData.niche}"
 ${alreadyCoveredText}
@@ -680,15 +684,16 @@ Pick ONE highly specific, fascinating, and unique video topic or title that:
 3. Offers unique/bizarre/surprising facts or stories grounded in the real-time web research provided.
 4. Avoids generic overviews (like "overview of Golden Temple") and instead picks a highly specific aspect (e.g., "The mysterious foundation stone laid by a Muslim Sufi saint", "The legendary missing treasures of Amritsar").
 5. Reads like an engaging, click-worthy YouTube Shorts title.
+6. Max 12 words.
 
-Reply with ONLY the chosen topic/title. Do NOT include any markdown code blocks, quotes, punctuation at the end, or explanation. Max 12 words.`;
+Return ONLY a valid JSON object matching the schema above.`;
 
             try {
-                const result = await shortsLLM.text(systemPrompt, userPrompt, {
+                const result = await shortsLLM.json(systemPrompt, userPrompt, {
                     temperature: 0.9,
-                    maxTokens: 50,
+                    maxTokens: 150,
                 });
-                const picked = result?.trim().replace(/^[\"']|[\"']$/g, '') || '';
+                const picked = result?.topic?.trim().replace(/^[\"']|[\"']$/g, '') || '';
                 console.log(`🎯 AI chose unique topic: "${picked}"`);
                 return picked || seriesData.title;
             } catch (err: any) {
