@@ -13,14 +13,14 @@
 const OPENROUTER_BASE = 'https://openrouter.ai/api/v1/chat/completions';
 
 const MODELS_TEXT: string[] = [
-    'openai/gpt-oss-120b:free',
     'nvidia/nemotron-3-super-120b-a12b:free',
+    'openai/gpt-oss-120b:free',
     'nvidia/nemotron-3-ultra-550b-a55b:free',
 ];
 
 const MODELS_JSON: string[] = [
-    'openai/gpt-oss-120b:free',
     'nvidia/nemotron-3-super-120b-a12b:free',
+    'openai/gpt-oss-120b:free',
     'nvidia/nemotron-3-ultra-550b-a55b:free',
 ];
 
