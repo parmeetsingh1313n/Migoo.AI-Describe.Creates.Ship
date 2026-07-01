@@ -24,146 +24,165 @@ async function upload() {
     const videoId    = process.env.VIDEO_ID;
     const webhookUrl = process.env.WEBHOOK_URL;
 
-    const endpoint   = (process.env.APPWRITE_VIDEO_ENDPOINT || process.env.APPWRITE_ENDPOINT || '').replace(/\/$/, '');
-    const projectId  = process.env.APPWRITE_VIDEO_PROJECT_ID || process.env.APPWRITE_PROJECT_ID;
-    const apiKey     = process.env.APPWRITE_VIDEO_API_KEY || process.env.APPWRITE_API_KEY;
-    const bucketId   = process.env.APPWRITE_VIDEO_BUCKET_ID || process.env.APPWRITE_BUCKET_ID;
-
     // ── Guard: required env vars ─────────────────────────────────────────────
     if (!videoId) {
         console.error('❌ Missing VIDEO_ID');
         process.exit(1);
     }
-    if (!endpoint || !projectId || !apiKey || !bucketId) {
-        console.error('❌ Missing one or more Appwrite env vars: APPWRITE_ENDPOINT, APPWRITE_PROJECT_ID, APPWRITE_API_KEY, APPWRITE_BUCKET_ID');
-        if (webhookUrl) await notifyWebhook(webhookUrl, videoId, null, 'failed');
-        process.exit(1);
-    }
-
-    // ── Guard: file must exist ───────────────────────────────────────────────
     if (!fs.existsSync(filePath)) {
         console.error('❌ Rendered file not found:', filePath);
         if (webhookUrl) await notifyWebhook(webhookUrl, videoId, null, 'failed');
         process.exit(1);
     }
 
-    // ── Appwrite client ──────────────────────────────────────────────────────
-    const client = new sdk.Client()
-        .setEndpoint(endpoint)
-        .setProject(projectId)
-        .setKey(apiKey);
+    // ── Gather all Appwrite credentials for rotation ──────────────────────────
+    const pairs = [];
+    const mainEndpoint = (process.env.APPWRITE_VIDEO_ENDPOINT || process.env.APPWRITE_ENDPOINT || '').replace(/\/$/, '');
+    const mainProjectId = process.env.APPWRITE_VIDEO_PROJECT_ID || process.env.APPWRITE_PROJECT_ID;
+    const mainApiKey    = process.env.APPWRITE_VIDEO_API_KEY || process.env.APPWRITE_API_KEY;
+    const mainBucketId  = process.env.APPWRITE_VIDEO_BUCKET_ID || process.env.APPWRITE_BUCKET_ID;
 
-    const storage = new sdk.Storage(client);
+    if (mainEndpoint && mainProjectId && mainApiKey && mainBucketId) {
+        pairs.push({ endpoint: mainEndpoint, projectId: mainProjectId, apiKey: mainApiKey, bucketId: mainBucketId, name: 'primary' });
+    }
 
-    console.log(`☁️  Uploading ${filePath} → Appwrite Storage (bucket: ${bucketId})...`);
-    const filename   = `${videoId}.mp4`;
+    for (let i = 1; i <= 5; i++) {
+        const p = process.env[`APPWRITE_PROJECT_ID${i}`];
+        const k = process.env[`APPWRITE_API_KEY${i}`];
+        const b = process.env[`APPWRITE_BUCKET_ID${i}`] || mainBucketId;
+        if (mainEndpoint && p && k && b) {
+            pairs.push({ endpoint: mainEndpoint, projectId: p, apiKey: k, bucketId: b, name: `fallback-${i}` });
+        }
+    }
 
-    try {
-        const CHUNK_SIZE_BYTES = 44 * 1024 * 1024; // 44 MB raw chunks (stays under Appwrite 50MB limit)
-        const finalSizeBytes = fs.existsSync(filePath) ? fs.statSync(filePath).size : 0;
-        const fileSizeMB = (finalSizeBytes / 1024 / 1024).toFixed(1);
+    if (pairs.length === 0) {
+        console.error('❌ Missing one or more Appwrite env vars: APPWRITE_ENDPOINT, APPWRITE_PROJECT_ID, APPWRITE_API_KEY, APPWRITE_BUCKET_ID');
+        if (webhookUrl) await notifyWebhook(webhookUrl, videoId, null, 'failed');
+        process.exit(1);
+    }
 
-        if (finalSizeBytes > CHUNK_SIZE_BYTES) {
-            const totalChunks = Math.ceil(finalSizeBytes / CHUNK_SIZE_BYTES);
-            console.log(`✂️  Raw-binary splitting ${fileSizeMB} MB → ${totalChunks} raw chunks of ≤44 MB...`);
+    const finalSizeBytes = fs.statSync(filePath).size;
+    const fileSizeMB = (finalSizeBytes / 1024 / 1024).toFixed(1);
+    const CHUNK_SIZE_BYTES = 44 * 1024 * 1024; // 44 MB raw chunks (stays under Appwrite 50MB limit)
 
-            const chunksDir = path.join(path.dirname(filePath), 'video-chunks');
-            fs.mkdirSync(chunksDir, { recursive: true });
+    // Try each credentials pair in sequence
+    for (let idx = 0; idx < pairs.length; idx++) {
+        const { endpoint, projectId, apiKey, bucketId, name } = pairs[idx];
+        console.log(`\n🔑 [Appwrite Key Rotation] Attempt ${idx + 1}/${pairs.length} using ${name} project ID: ${projectId}...`);
 
-            const inFd = fs.openSync(filePath, 'r');
-            const chunkFiles = [];
-            const chunkIds = [];
-            const BUF_SIZE = 8 * 1024 * 1024; // 8 MB read buffer
-            const buf = Buffer.allocUnsafe(BUF_SIZE);
+        const client = new sdk.Client()
+            .setEndpoint(endpoint)
+            .setProject(projectId)
+            .setKey(apiKey);
 
-            try {
-                for (let i = 0; i < totalChunks; i++) {
-                    const chunkName = `chunk-${String(i).padStart(3, '0')}.bin`;
-                    const chunkPath = path.join(chunksDir, chunkName);
-                    const outFd = fs.openSync(chunkPath, 'w');
-                    let bytesWritten = 0;
+        const storage = new sdk.Storage(client);
 
-                    while (bytesWritten < CHUNK_SIZE_BYTES) {
-                        const toRead = Math.min(BUF_SIZE, CHUNK_SIZE_BYTES - bytesWritten);
-                        const bytesRead = fs.readSync(inFd, buf, 0, toRead, null);
-                        if (bytesRead === 0) break;
-                        fs.writeSync(outFd, buf, 0, bytesRead);
-                        bytesWritten += bytesRead;
+        try {
+            if (finalSizeBytes > CHUNK_SIZE_BYTES) {
+                const totalChunks = Math.ceil(finalSizeBytes / CHUNK_SIZE_BYTES);
+                console.log(`   ✂️  Raw-binary splitting ${fileSizeMB} MB → ${totalChunks} raw chunks of ≤44 MB...`);
+
+                const chunksDir = path.join(path.dirname(filePath), 'video-chunks');
+                fs.mkdirSync(chunksDir, { recursive: true });
+
+                const inFd = fs.openSync(filePath, 'r');
+                const chunkFiles = [];
+                const chunkIds = [];
+                const BUF_SIZE = 8 * 1024 * 1024; // 8 MB read buffer
+                const buf = Buffer.allocUnsafe(BUF_SIZE);
+
+                try {
+                    for (let i = 0; i < totalChunks; i++) {
+                        const chunkName = `chunk-${String(i).padStart(3, '0')}.bin`;
+                        const chunkPath = path.join(chunksDir, chunkName);
+                        const outFd = fs.openSync(chunkPath, 'w');
+                        let bytesWritten = 0;
+
+                        while (bytesWritten < CHUNK_SIZE_BYTES) {
+                            const toRead = Math.min(BUF_SIZE, CHUNK_SIZE_BYTES - bytesWritten);
+                            const bytesRead = fs.readSync(inFd, buf, 0, toRead, null);
+                            if (bytesRead === 0) break;
+                            fs.writeSync(outFd, buf, 0, bytesRead);
+                            bytesWritten += bytesRead;
+                        }
+                        fs.closeSync(outFd);
+                        chunkFiles.push(chunkPath);
+
+                        const cleanVideoId = videoId.replace(/[^a-zA-Z0-9._-]/g, '-');
+                        const chunkFileId = `v-${cleanVideoId.slice(0, 28)}-${i}`.slice(0, 36);
+
+                        // Delete stale file if it already exists (idempotent retry support)
+                        try { await storage.deleteFile({ bucketId, fileId: chunkFileId }); } catch { /* not found — fine */ }
+
+                        console.log(`      [${i + 1}/${totalChunks}] Uploading ${chunkName} as ${chunkFileId}...`);
+                        await storage.createFile({
+                            bucketId,
+                            fileId: chunkFileId,
+                            file: InputFile.fromPath(chunkPath, chunkName),
+                        });
+                        chunkIds.push(chunkFileId);
                     }
-                    fs.closeSync(outFd);
-                    chunkFiles.push(chunkPath);
+                    fs.closeSync(inFd);
 
-                    const cleanVideoId = videoId.replace(/[^a-zA-Z0-9._-]/g, '-');
-                    const chunkFileId = `v-${cleanVideoId.slice(0, 28)}-${i}`.slice(0, 36);
-
-                    // Delete stale file if it already exists (idempotent retry support)
-                    try { await storage.deleteFile({ bucketId, fileId: chunkFileId }); } catch { /* not found — fine */ }
-
-                    console.log(`   [${i + 1}/${totalChunks}] Uploading ${chunkName} as ${chunkFileId}...`);
-                    await storage.createFile({
+                    const videoUrl = JSON.stringify({
+                        chunked: true,
+                        rawBinary: true,
+                        count: totalChunks,
+                        ids: chunkIds,
                         bucketId,
-                        fileId: chunkFileId,
-                        file: InputFile.fromPath(chunkPath, chunkName),
+                        endpoint,
+                        projectId,
                     });
-                    chunkIds.push(chunkFileId);
-                }
-                fs.closeSync(inFd);
 
-                const videoUrl = JSON.stringify({
-                    chunked: true,
-                    rawBinary: true,
-                    count: totalChunks,
-                    ids: chunkIds,
+                    console.log('   ✅ Chunked upload complete. videoUrl metadata:', videoUrl);
+
+                    if (webhookUrl) {
+                        await notifyWebhook(webhookUrl, videoId, videoUrl, 'completed');
+                    }
+
+                    // Clean up chunks directory
+                    try { fs.rmSync(chunksDir, { recursive: true, force: true }); } catch {}
+
+                    console.log('🎉 Done!');
+                    process.exit(0);
+                } catch (chunkErr) {
+                    try { fs.closeSync(inFd); } catch {}
+                    try { fs.rmSync(chunksDir, { recursive: true, force: true }); } catch {}
+                    throw chunkErr;
+                }
+            } else {
+                console.log(`   ☁️  Uploading single file ${filePath} (${fileSizeMB} MB) → Appwrite Storage (bucket: ${bucketId})...`);
+                const filename = `${videoId}.mp4`;
+                const cleanVideoId = videoId.replace(/[^a-zA-Z0-9._-]/g, '-').slice(0, 36);
+
+                // Delete stale file if it already exists (idempotent retry support)
+                try { await storage.deleteFile({ bucketId, fileId: cleanVideoId }); } catch { /* not found — fine */ }
+
+                const result = await storage.createFile({
                     bucketId,
-                    endpoint,
-                    projectId,
+                    fileId: cleanVideoId,
+                    file: InputFile.fromPath(filePath, filename),
                 });
 
-                console.log('✅ Chunked upload complete. videoUrl metadata:', videoUrl);
+                // Construct public view URL
+                const videoUrl = `${endpoint}/storage/buckets/${bucketId}/files/${result.$id}/view?project=${projectId}`;
+                console.log('   ✅ Video uploaded successfully:', videoUrl);
 
                 if (webhookUrl) {
                     await notifyWebhook(webhookUrl, videoId, videoUrl, 'completed');
                 }
 
-                // Clean up chunks directory
-                try { fs.rmSync(chunksDir, { recursive: true, force: true }); } catch {}
-
                 console.log('🎉 Done!');
                 process.exit(0);
-            } catch (chunkErr) {
-                try { fs.closeSync(inFd); } catch {}
-                try { fs.rmSync(chunksDir, { recursive: true, force: true }); } catch {}
-                throw chunkErr;
             }
-        } else {
-            console.log(`☁️  Uploading single file ${filePath} (${fileSizeMB} MB) → Appwrite Storage (bucket: ${bucketId})...`);
-            const filename = `${videoId}.mp4`;
-            const cleanVideoId = videoId.replace(/[^a-zA-Z0-9._-]/g, '-').slice(0, 36);
-
-            // Delete stale file if it already exists (idempotent retry support)
-            try { await storage.deleteFile({ bucketId, fileId: cleanVideoId }); } catch { /* not found — fine */ }
-
-            const result = await storage.createFile({
-                bucketId,
-                fileId: cleanVideoId,
-                file: InputFile.fromPath(filePath, filename),
-            });
-
-            // Construct public view URL
-            const videoUrl = `${endpoint}/storage/buckets/${bucketId}/files/${result.$id}/view?project=${projectId}`;
-            console.log('✅ Video uploaded successfully:', videoUrl);
-
-            if (webhookUrl) {
-                await notifyWebhook(webhookUrl, videoId, videoUrl, 'completed');
+        } catch (error) {
+            console.warn(`⚠️  Upload failed with ${name} project ID ${projectId}: ${error?.message ?? error}`);
+            if (idx === pairs.length - 1) {
+                console.error('❌ All Appwrite keys and projects exhausted. Upload failed.');
+                if (webhookUrl) await notifyWebhook(webhookUrl, videoId, null, 'failed');
+                process.exit(1);
             }
-
-            console.log('🎉 Done!');
-            process.exit(0);
         }
-    } catch (error) {
-        console.error('❌ Upload failed:', error?.message ?? error);
-        if (webhookUrl) await notifyWebhook(webhookUrl, videoId, null, 'failed');
-        process.exit(1);
     }
 }
 

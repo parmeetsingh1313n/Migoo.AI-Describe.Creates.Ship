@@ -85,6 +85,21 @@ jobs:
           APPWRITE_API_KEY:    ${{ secrets.APPWRITE_VIDEO_API_KEY || secrets.APPWRITE_API_KEY }}
           # Use a dedicated bucket for rendered chapter videos
           APPWRITE_BUCKET_ID:  ${{ secrets.APPWRITE_VIDEO_BUCKET_ID || secrets.APPWRITE_BUCKET_ID }}
+          APPWRITE_PROJECT_ID1: ${{ secrets.APPWRITE_PROJECT_ID1 }}
+          APPWRITE_API_KEY1:    ${{ secrets.APPWRITE_API_KEY1 }}
+          APPWRITE_BUCKET_ID1:  ${{ secrets.APPWRITE_BUCKET_ID1 || secrets.APPWRITE_VIDEO_BUCKET_ID || secrets.APPWRITE_BUCKET_ID }}
+          APPWRITE_PROJECT_ID2: ${{ secrets.APPWRITE_PROJECT_ID2 }}
+          APPWRITE_API_KEY2:    ${{ secrets.APPWRITE_API_KEY2 }}
+          APPWRITE_BUCKET_ID2:  ${{ secrets.APPWRITE_BUCKET_ID2 || secrets.APPWRITE_VIDEO_BUCKET_ID || secrets.APPWRITE_BUCKET_ID }}
+          APPWRITE_PROJECT_ID3: ${{ secrets.APPWRITE_PROJECT_ID3 }}
+          APPWRITE_API_KEY3:    ${{ secrets.APPWRITE_API_KEY3 }}
+          APPWRITE_BUCKET_ID3:  ${{ secrets.APPWRITE_BUCKET_ID3 || secrets.APPWRITE_VIDEO_BUCKET_ID || secrets.APPWRITE_BUCKET_ID }}
+          APPWRITE_PROJECT_ID4: ${{ secrets.APPWRITE_PROJECT_ID4 }}
+          APPWRITE_API_KEY4:    ${{ secrets.APPWRITE_API_KEY4 }}
+          APPWRITE_BUCKET_ID4:  ${{ secrets.APPWRITE_BUCKET_ID4 || secrets.APPWRITE_VIDEO_BUCKET_ID || secrets.APPWRITE_BUCKET_ID }}
+          APPWRITE_PROJECT_ID5: ${{ secrets.APPWRITE_PROJECT_ID5 }}
+          APPWRITE_API_KEY5:    ${{ secrets.APPWRITE_API_KEY5 }}
+          APPWRITE_BUCKET_ID5:  ${{ secrets.APPWRITE_BUCKET_ID5 || secrets.APPWRITE_VIDEO_BUCKET_ID || secrets.APPWRITE_BUCKET_ID }}
           CHAPTER_ID:          ${{ github.event.client_payload.chapterId }}
           WEBHOOK_URL:         ${{ github.event.client_payload.webhookUrl }}
         run: node scripts/upload-chapter-render.js
