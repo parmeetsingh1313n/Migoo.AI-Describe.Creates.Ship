@@ -111,7 +111,7 @@ export async function submitApifyVideoTask(
     prompt: videoPrompt,
     resolution: "480p",
     aspectRatio: "9:16",
-    duration: 5,
+    duration: 10, // 10s native → trim for short scenes, minimal stretch for long ones
     negativePrompt: "blur, distort, low quality, shaky camera, fast movement, text, watermark",
     cfgScale: 1,
   };
@@ -339,31 +339,23 @@ async function probeActualDuration(filePath: string): Promise<number> {
       if (m) {
         resolve(parseInt(m[1]) * 3600 + parseInt(m[2]) * 60 + parseFloat(m[3]));
       } else {
-        resolve(5); // safe default — Wan 2.2 always produces 5s
+        resolve(10); // safe default — Wan 2.2 now produces 10s
       }
     });
   });
 }
 
 /**
- * Pre-process a Wan 2.2 video for smooth slow-motion:
+ * Pre-process a Wan 2.2 video for smooth playback:
  *
- * The 3-tier FFmpeg pipeline:
+ * SMART TRIM vs STRETCH:
+ *   If nativeVideo (10s) >= sceneDuration  →  TRIM only (zero interpolation, perfect quality)
+ *   If nativeVideo (10s) < sceneDuration   →  STRETCH with much smaller ratio (~1.x vs old 2x)
  *
- * TIER 1 — MCI optical-flow (best quality):
- *   minterpolate to 60 fps using bidirectional motion-compensated interpolation,
- *   then setpts-stretch to targetDuration, then downsample to 30 fps CFR.
- *   Creates true in-between frames → cinema-quality slow motion.
- *
- * TIER 2 — blend crossfade (good quality, fast):
- *   Same flow but mi_mode=blend — crossfades adjacent frames.
- *   Slightly softer but jerk-free and runs in ~3s.
- *
- * TIER 3 — setpts only (safe fallback):
- *   Pure timestamp manipulation. No new frames, correct timing.
- *
- * After processing: Remotion receives actualDurationSec = targetDuration
- * so it plays at playbackRate=1.0 → EVERY seek lands on an exact frame → zero judder.
+ * Stretch pipeline (3 tiers, only used when native is shorter than scene):
+ *   TIER 1 — MCI optical-flow at 30fps → setpts stretch → CFR
+ *   TIER 2 — blend crossfade at 30fps  → setpts stretch → CFR
+ *   TIER 3 — setpts only (safe fallback)
  */
 async function smoothStretchVideoBuffer(
   inputBuffer: Buffer,
@@ -380,16 +372,46 @@ async function smoothStretchVideoBuffer(
   fs.writeFileSync(inPath, inputBuffer);
 
   const actualDuration = await probeActualDuration(inPath);
-  // Stretch to exactly targetDuration + 0.6s so the local renderer's check
-  // (needed = targetSec + 0.6) passes without secondary re-stretching,
-  // and Remotion plays at playbackRate = 1.0 → zero seek judder.
+
+  console.log(
+    `📐 [apify-video] Scene ${sceneIndex + 1}: native=${actualDuration.toFixed(2)}s target=${targetDuration.toFixed(2)}s`
+  );
+
+  // ── TRIM PATH: native video is already long enough ──────────────────────────
+  if (actualDuration >= targetDuration - 0.1) {
+    const trimPoint = targetDuration.toFixed(3);
+    const trimCmd = [
+      `"${ffmpegBin}" -y -i "${inPath}"`,
+      `-t ${trimPoint}`,
+      `-c:v libx264 -pix_fmt yuv420p -preset fast -crf 23`,
+      `-an -movflags +faststart -avoid_negative_ts make_zero`,
+      `"${outPath}"`,
+    ].join(" ");
+
+    try {
+      console.log(`✂️  [apify-video] Scene ${sceneIndex + 1}: trimming ${actualDuration.toFixed(2)}s → ${trimPoint}s (zero interpolation)`);
+      await runCmd(trimCmd, 20_000);
+
+      if (fs.existsSync(outPath) && fs.statSync(outPath).size > 10_000) {
+        const outBuffer = fs.readFileSync(outPath);
+        try { fs.unlinkSync(inPath);  } catch {}
+        try { fs.unlinkSync(outPath); } catch {}
+        console.log(`✅ [apify-video] Scene ${sceneIndex + 1}: trim succeeded → ${(outBuffer.length / 1024).toFixed(0)} KB`);
+        return { buffer: outBuffer, reportedDuration: targetDuration };
+      }
+    } catch (err: any) {
+      console.warn(`⚠️ [apify-video] Scene ${sceneIndex + 1}: trim failed (${err.message}) — falling back to stretch`);
+    }
+  }
+
+  // ── STRETCH PATH: native video is shorter than scene (minimal ratio now ~1.x) ─
   const needed = targetDuration + 0.6;
   const ratio = (needed / actualDuration).toFixed(6);
   const needsStretch = Math.abs(actualDuration - needed) > 0.1;
   const trimPoint = needed.toFixed(3);
 
   console.log(
-    `📐 [apify-video] Scene ${sceneIndex + 1}: probed=${actualDuration.toFixed(3)}s → target=${needed.toFixed(2)}s (ratio=${ratio}, stretch=${needsStretch})`
+    `📐 [apify-video] Scene ${sceneIndex + 1}: stretching → target=${needed.toFixed(2)}s (ratio=${ratio})`
   );
 
   const buildCmd = (vfFilter: string, fpsModeFlag: string, crf = 23) =>
@@ -404,32 +426,14 @@ async function smoothStretchVideoBuffer(
       `"${outPath}"`,
     ].join(" ");
 
-  // ─── CORRECT FILTER ORDER (eliminates fractional-resampling jerk) ──────────
-  // WRONG (causes jerk): minterpolate=fps=198 → setpts=6.6 → -r 30
-  //   FFmpeg resamples 198fps→30fps by taking every 6.6th frame: fractional!
-  //   Alternates taking 6 frames then 7 → uneven timing = visible stutter.
-  //
-  // CORRECT (smooth): minterpolate=fps=30 → setpts=6.6 → -r 30 (cfr hold)
-  //   Step 1: minterpolate converts ~16fps VFR → perfectly smooth 30fps CFR
-  //           at NATIVE speed. Only ~150 frames. FAST (< 25s for 5s clip).
-  //   Step 2: setpts scales timestamps → 150 frames now span targetDuration.
-  //           No computation — just metadata change.
-  //   Step 3: -r 30 -fps_mode cfr holds each of the 150 smooth frames for
-  //           exactly ratio output frames (6 or 7 per frame at 33ms each).
-  //           The 6-vs-7 difference is at ~33ms — imperceptible to human eye.
-  // ─────────────────────────────────────────────────────────────────────────
-
-  // Tier 1: MCI optical flow at 30fps → smoothest possible source, then stretch
   const tier1Filter = needsStretch
     ? `minterpolate=fps=30:mi_mode=mci:scd=none,setpts=${ratio}*PTS,tpad=stop=6:stop_mode=clone`
     : `fps=30,setpts=PTS-STARTPTS,tpad=stop=6:stop_mode=clone`;
 
-  // Tier 2: Blend crossfade at 30fps → smooth fallback, fast
   const tier2Filter = needsStretch
     ? `minterpolate=fps=30:mi_mode=blend:scd=none,setpts=${ratio}*PTS,tpad=stop=6:stop_mode=clone`
     : `fps=30,setpts=PTS-STARTPTS,tpad=stop=6:stop_mode=clone`;
 
-  // Tier 3: Pure timestamp stretch — safe, always works
   const tier3Filter = needsStretch
     ? `setpts=${ratio}*PTS,tpad=stop=6:stop_mode=clone`
     : `fps=30,setpts=PTS-STARTPTS,tpad=stop=6:stop_mode=clone`;
@@ -540,7 +544,7 @@ export async function processSeedanceVideoResult(
   } catch (err: any) {
     console.warn(`⚠️ [apify-video] Scene ${sceneIndex + 1}: smoothStretch threw (${err.message}), using raw video`);
     finalBuffer = rawBuffer;
-    reportedDuration = 5; // Wan 2.2 native duration
+    reportedDuration = 10; // Wan 2.2 native duration (now 10s)
   }
 
   // 3. Upload to Appwrite via rotating blob storage
