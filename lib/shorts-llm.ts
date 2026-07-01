@@ -150,7 +150,7 @@ async function tryModels(
     userMessage: string,
     temperature: number,
     maxTokens: number,
-): Promise<string> {
+): Promise<{ text: string; finishReason: string | null }> {
     const keys = getAllKeys();
     let lastErr: any;
 
@@ -159,8 +159,8 @@ async function tryModels(
             const apiKey = getKey();
             console.log(`🤖 [shorts-llm] model=${model} key=${_keyIdx + 1}/${keys.length} temp=${temperature}`);
             try {
-                const { text } = await callModel(model, systemPrompt, userMessage, temperature, maxTokens, apiKey);
-                return text;
+                const { text, finishReason } = await callModel(model, systemPrompt, userMessage, temperature, maxTokens, apiKey);
+                return { text, finishReason: (finishReason ?? null) as string | null };
             } catch (err: any) {
                 lastErr = err;
                 if (err.isRateLimit) { rotateKey(); continue; }
@@ -173,9 +173,27 @@ async function tryModels(
     throw lastErr ?? new Error('[shorts-llm] all models exhausted');
 }
 
-// ── JSON parser (simple + robust) ─────────────────────────────────────────────
+// ── JSON parser with truncation repair ───────────────────────────────────────
 
-function extractJSON(raw: string): any {
+function repairTruncated(s: string, opens: number, opena: number): any {
+    // Strategy A: close open string then close brackets
+    const withStr = s + '"';
+    try { return JSON.parse(withStr + '}'.repeat(Math.max(0, opens)) + ']'.repeat(Math.max(0, opena))); } catch { /* next */ }
+
+    // Strategy B: walk back to last clean boundary (} or ])
+    for (const marker of ['}', ']']) {
+        const idx = s.lastIndexOf(marker);
+        if (idx > 0) {
+            const t = s.slice(0, idx + 1);
+            const ob  = (t.match(/\{/g) || []).length - (t.match(/\}/g) || []).length;
+            const obr = (t.match(/\[/g) || []).length - (t.match(/\]/g) || []).length;
+            try { return JSON.parse(t + '}'.repeat(Math.max(0, ob)) + ']'.repeat(Math.max(0, obr))); } catch { /* next */ }
+        }
+    }
+    throw new Error('[shorts-llm] truncation repair failed');
+}
+
+function extractJSON(raw: string, wasTruncated = false): any {
     let s = raw.trim()
         .replace(/^```json\s*/i, '').replace(/^```\s*/, '').replace(/```\s*$/, '')
         .replace(/<json>\s*/gi, '').replace(/\s*<\/json>/gi, '')
@@ -188,6 +206,15 @@ function extractJSON(raw: string): any {
     if (start === Infinity) throw new Error('[shorts-llm] No JSON in response');
     s = s.slice(start);
 
+    const opens = (s.match(/\{/g) || []).length - (s.match(/\}/g) || []).length;
+    const opena = (s.match(/\[/g) || []).length - (s.match(/\]/g) || []).length;
+
+    // If truncated, try repair FIRST before regular parse attempts
+    if (wasTruncated) {
+        console.warn('⚠️ [shorts-llm] Response truncated (finish=length) — attempting JSON repair...');
+        try { return repairTruncated(s, opens, opena); } catch { /* fall through to normal strategies */ }
+    }
+
     // 1. Direct parse
     try { return JSON.parse(s); } catch { /* try repairs */ }
 
@@ -195,10 +222,8 @@ function extractJSON(raw: string): any {
     try { return JSON.parse(s.replace(/,(\s*[}\]])/g, '$1')); } catch { /* next */ }
 
     // 3. Balance brackets
-    const opens  = (s.match(/\{/g) || []).length - (s.match(/\}/g) || []).length;
-    const opena  = (s.match(/\[/g) || []).length - (s.match(/\]/g) || []).length;
-    const fixed  = s + '}'.repeat(Math.max(0, opens)) + ']'.repeat(Math.max(0, opena));
-    try { return JSON.parse(fixed); } catch { /* last */ }
+    const balanced = s + '}'.repeat(Math.max(0, opens)) + ']'.repeat(Math.max(0, opena));
+    try { return JSON.parse(balanced); } catch { /* next */ }
 
     // 4. Escape literal newlines inside strings
     let repaired = '';
@@ -211,7 +236,13 @@ function extractJSON(raw: string): any {
         if (inStr && c === '\r') { repaired += '\\r'; continue; }
         repaired += c;
     }
-    return JSON.parse(repaired);
+
+    // 5. Balanced + newline-escaped + truncation repair
+    const repairedBalanced = repaired + '}'.repeat(Math.max(0, opens)) + ']'.repeat(Math.max(0, opena));
+    try { return JSON.parse(repairedBalanced); } catch { /* next */ }
+
+    // 6. Last resort truncation repair on newline-escaped string
+    return repairTruncated(repaired, opens, opena);
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -225,13 +256,14 @@ export const shortsLLM = {
         userPrompt: string,
         options?: { temperature?: number; maxTokens?: number },
     ): Promise<string> {
-        return tryModels(
+        const { text } = await tryModels(
             MODELS_TEXT,
             systemPrompt,
             userPrompt,
             options?.temperature ?? 0.7,
             options?.maxTokens ?? 4000,
         );
+        return text;
     },
 
     /**
@@ -249,7 +281,7 @@ export const shortsLLM = {
         const userWithRule = userPrompt +
             '\n\nReturn ONLY valid JSON. No markdown code fences. No extra text.';
 
-        const raw = await tryModels(
+        const { text: raw, finishReason } = await tryModels(
             MODELS_JSON,
             sysWithRule,
             userWithRule,
@@ -257,7 +289,12 @@ export const shortsLLM = {
             options?.maxTokens ?? 8192,
         );
 
-        return extractJSON(raw);
+        // Detect truncation: explicit finish=length OR JSON visibly unclosed
+        const explicitTrunc = finishReason === 'length';
+        const wasTruncated  = explicitTrunc || (raw.trimEnd().slice(-1) !== '}' && raw.trimEnd().slice(-1) !== ']');
+        if (wasTruncated) console.warn(`⚠️ [shorts-llm] Truncation detected (finish=${finishReason}) — engaging repair...`);
+
+        return extractJSON(raw, wasTruncated);
     },
 
     /**
@@ -270,13 +307,14 @@ export const shortsLLM = {
         userPrompt: string,
         options?: { temperature?: number; maxTokens?: number },
     ): Promise<string> {
-        return tryModels(
+        const { text } = await tryModels(
             ['openai/gpt-oss-120b:free'],
             systemPrompt,
             userPrompt,
             options?.temperature ?? 0.3,
             options?.maxTokens ?? 1024,
         );
+        return text;
     },
 
     /**
@@ -289,12 +327,13 @@ export const shortsLLM = {
         userPrompt: string,
         options?: { temperature?: number; maxTokens?: number },
     ): Promise<string> {
-        return tryModels(
+        const { text } = await tryModels(
             MODELS_ENRICH,
             systemPrompt,
             userPrompt,
             options?.temperature ?? 0.4,
             options?.maxTokens ?? 300,
         );
+        return text;
     },
 };
