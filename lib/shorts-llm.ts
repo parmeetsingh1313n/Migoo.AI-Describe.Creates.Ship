@@ -287,7 +287,7 @@ export const shortsLLM = {
             '\n\nReturn ONLY valid JSON. No markdown code fences. No extra text.';
 
         const keys       = getAllKeys();
-        const maxTokens  = options?.maxTokens ?? 16000;
+        const maxTokens  = options?.maxTokens ?? 32768; // OpenRouter clamps to each model's hard max automatically
         const temperature = options?.temperature ?? 0.7;
         let lastErr: any;
 

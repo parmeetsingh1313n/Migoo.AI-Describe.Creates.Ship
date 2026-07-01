@@ -1014,7 +1014,7 @@ OUTPUT: JSON object wrapped in <json> and </json> tags.`;
                     };
                     const result = await shortsLLM.json(systemPrompt, userPrompt, {
                         temperature: attempt === 1 ? 0.7 : (attempt === 2 ? 0.8 : 0.85),
-                        maxTokens: 16000,
+                        maxTokens: 32768,
                     });
 
                     // ── Map explicit keys back to scenes array ────────────────
