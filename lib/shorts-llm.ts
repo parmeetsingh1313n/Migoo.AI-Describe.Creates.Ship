@@ -3,8 +3,8 @@
  * @description OpenRouter LLM client for Shorts script + web-search fact distillation.
  *
  * Primary:   openai/gpt-oss-120b:free  (117B MoE, free, strong reasoning)
- * Fallback1: nvidia/nemotron-3-ultra-550b-a55b:free (550B MoE, 1M ctx, free)
- * Fallback2: meta-llama/llama-3.3-70b-instruct:free
+ * Fallback1: nvidia/nemotron-3-super-120b-a12b:free
+ * Fallback2: nvidia/nemotron-3-ultra-550b-a55b:free
  *
  * Drop-in replacement for groq.text() / aiFallback.json().
  * Does NOT touch config/openrouter.ts (the Studio slide generator).
@@ -32,13 +32,10 @@ const MODELS_TRANSLATE: string[] = [
     'openai/gpt-oss-120b:free', // last resort only
 ];
 
-// Image prompt enrichment model list — MUST use models NOT in MODELS_JSON.
-// By the time enrichment runs, Owl / Qwen / Llama are all rate-limited from
-// script generation. These models have fresh, untouched rate-limit windows.
-// None of these have violence/graphic moderation filters.
+// Image prompt enrichment model list.
 const MODELS_ENRICH: string[] = [
-    'nvidia/nemotron-3-ultra-550b-a55b:free',     // Primary: 550B MoE, best free model, zero moderation, fresh window
-    'nvidia/nemotron-3-super-120b-a12b:free',     // Fallback
+    'nvidia/nemotron-3-ultra-550b-a55b:free',
+    'nvidia/nemotron-3-super-120b-a12b:free',
 ];
 
 // ── Key rotation (in-process) ─────────────────────────────────────────────────
@@ -86,22 +83,28 @@ async function callModel(
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5 * 60 * 1000);
 
+    const messages: any[] = [
+        { role: 'system', content: systemPrompt },
+        { role: 'user',   content: userMessage  },
+    ];
+
     const body: Record<string, any> = {
         model,
-        messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user',   content: userMessage  },
-        ],
+        messages,
         temperature,
         max_tokens: maxTokens,
     };
 
     if (requireJson) {
-        // Guide output format to JSON. We deliberately keep reasoning/thinking ON —
-        // models that think (Nemotron, Qwen) produce higher quality JSON.
-        // With maxTokens=32768 there is ample budget for thinking + JSON.
-        // Any thinking tags that bleed into content are stripped by stripThinking().
+        // 1. Hint for models that natively support response_format
         body.response_format = { type: 'json_object' };
+        // 2. Assistant prefill — force the first output token to be '{'
+        //    This is the universal fix. Even models that IGNORE response_format
+        //    (e.g. Nemotron) cannot output thinking/analysis text before '{' because
+        //    they must CONTINUE an assistant turn that already began with '{'.
+        //    The returned text is the model's continuation after '{',
+        //    so the caller must prepend '{' when the response doesn't start with it.
+        messages.push({ role: 'assistant', content: '{' });
     }
 
     const res = await fetch(OPENROUTER_BASE, {
@@ -119,33 +122,31 @@ async function callModel(
     clearTimeout(timeout);
 
     if (res.status === 429 || res.status === 402) {
-        const body = await res.text();
-        console.warn(`\u26A0\uFE0F [shorts-llm] rate/credit (${res.status}) on [${model}]: ${body.slice(0, 200)}`);
+        const errBody = await res.text();
+        console.warn(`\u26A0\uFE0F [shorts-llm] rate/credit (${res.status}) on [${model}]: ${errBody.slice(0, 200)}`);
         const err: any = new Error(`RATE_LIMIT: ${model} (${res.status})`);
         err.isRateLimit = true;
         throw err;
     }
 
     if (res.status === 403) {
-        // Content moderation rejection (e.g. openai/gpt-oss-120b:free flags religious/Hindi content).
-        // Treat as a skip — rotate to the next model instead of crashing the whole pipeline.
-        const body = await res.text();
-        console.warn(`\u26A0\uFE0F [shorts-llm] moderation block (403) on [${model}]: ${body.slice(0, 200)} \u2014 skipping model.`);
+        const errBody = await res.text();
+        console.warn(`\u26A0\uFE0F [shorts-llm] moderation block (403) on [${model}]: ${errBody.slice(0, 200)} \u2014 skipping model.`);
         const err: any = new Error(`MODERATION_BLOCK: ${model} (403)`);
-        err.isRateLimit = true; // reuse rotate logic
+        err.isRateLimit = true;
         throw err;
     }
 
     if (!res.ok) {
-        const body = await res.text();
-        throw new Error(`[shorts-llm] API error ${res.status}: ${body.slice(0, 300)}`);
+        const errBody = await res.text();
+        throw new Error(`[shorts-llm] API error ${res.status}: ${errBody.slice(0, 300)}`);
     }
 
     const data = await res.json();
     const content = data?.choices?.[0]?.message?.content;
     if (!content) {
         const err: any = new Error(`[shorts-llm] empty choices from [${model}]`);
-        err.isRateLimit = true; // rotate on empty response
+        err.isRateLimit = true;
         throw err;
     }
 
@@ -177,7 +178,7 @@ async function tryModels(
                 lastErr = err;
                 if (err.isRateLimit) { rotateKey(); continue; }
                 console.error(`\u274C [shorts-llm] [${model}] non-rate error: ${err.message}`);
-                break; // move to next model
+                break;
             }
         }
     }
@@ -186,8 +187,6 @@ async function tryModels(
 }
 
 // ── Shared: strip thinking blocks from model output ───────────────────────────
-// Models like Nemotron/Qwen/DeepSeek emit <thinking>...</thinking> or
-// <think>...</think> before their actual answer. Strip all known formats.
 
 function stripThinkingTags(s: string): string {
     return s
@@ -201,11 +200,9 @@ function stripThinkingTags(s: string): string {
 // ── JSON parser with truncation repair ───────────────────────────────────────
 
 function repairTruncated(s: string, opens: number, opena: number): any {
-    // Strategy A: close open string then close brackets
     const withStr = s + '"';
     try { return JSON.parse(withStr + '}'.repeat(Math.max(0, opens)) + ']'.repeat(Math.max(0, opena))); } catch { /* next */ }
 
-    // Strategy B: walk back to last clean boundary (} or ])
     for (const marker of ['}', ']']) {
         const idx = s.lastIndexOf(marker);
         if (idx > 0) {
@@ -219,7 +216,6 @@ function repairTruncated(s: string, opens: number, opena: number): any {
 }
 
 function extractJSON(raw: string, wasTruncated = false): any {
-    // Strip thinking blocks first, then markdown fences
     let s = stripThinkingTags(raw)
         .replace(/^(?:#{1,3}\s+)?(?:thinking|reasoning|analysis|scratchpad)[:\s][\s\S]*?(?=\{|\[)/i, '')
         .replace(/^```json\s*/i, '').replace(/^```\s*/, '').replace(/```\s*$/, '')
@@ -236,23 +232,17 @@ function extractJSON(raw: string, wasTruncated = false): any {
     const opens = (s.match(/\{/g) || []).length - (s.match(/\}/g) || []).length;
     const opena = (s.match(/\[/g) || []).length - (s.match(/\]/g) || []).length;
 
-    // If truncated, try repair FIRST before regular parse attempts
     if (wasTruncated) {
-        console.warn('\u26A0\uFE0F [shorts-llm] Response truncated (finish=length) \u2014 attempting JSON repair...');
-        try { return repairTruncated(s, opens, opena); } catch { /* fall through to normal strategies */ }
+        console.warn('\u26A0\uFE0F [shorts-llm] Response truncated \u2014 attempting JSON repair...');
+        try { return repairTruncated(s, opens, opena); } catch { /* fall through */ }
     }
 
-    // 1. Direct parse
     try { return JSON.parse(s); } catch { /* try repairs */ }
-
-    // 2. Remove trailing commas
     try { return JSON.parse(s.replace(/,(\s*[}\]])/g, '$1')); } catch { /* next */ }
 
-    // 3. Balance brackets
     const balanced = s + '}'.repeat(Math.max(0, opens)) + ']'.repeat(Math.max(0, opena));
     try { return JSON.parse(balanced); } catch { /* next */ }
 
-    // 4. Escape literal newlines inside strings
     let repaired = '';
     let inStr = false;
     for (let i = 0; i < s.length; i++) {
@@ -264,20 +254,16 @@ function extractJSON(raw: string, wasTruncated = false): any {
         repaired += c;
     }
 
-    // 5. Balanced + newline-escaped + truncation repair
     const repairedBalanced = repaired + '}'.repeat(Math.max(0, opens)) + ']'.repeat(Math.max(0, opena));
     try { return JSON.parse(repairedBalanced); } catch { /* next */ }
 
-    // 6. Last resort truncation repair on newline-escaped string
     return repairTruncated(repaired, opens, opena);
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
 export const shortsLLM = {
-    /**
-     * Generate free-form text (replaces groq.text()).
-     */
+
     async text(
         systemPrompt: string,
         userPrompt: string,
@@ -294,21 +280,22 @@ export const shortsLLM = {
     },
 
     /**
-     * Generate and parse JSON using a two-phase chain-of-thought pipeline.
+     * Two-phase chain-of-thought JSON generation.
      *
-     * PHASE 1 — Reasoning Pass (free-form text, no JSON constraint):
-     *   The model thinks deeply and freely. It analyzes the topic, plans the
-     *   narrative arc, identifies key facts, and structures the content.
-     *   This reasoning is stored and fed as context to Phase 2.
-     *   Budget: 10,000 tokens purely for thinking.
+     * PHASE 1 — Reasoning Pass (free-form, no JSON constraint):
+     *   Model thinks deeply: analyzes topic, plans narrative arc, identifies key
+     *   facts, visual descriptions, scene structure. No JSON yet.
+     *   Budget: 10,000 tokens of pure reasoning.
+     *   Stored and truncated to 6,000 chars before injecting into Phase 2.
      *
-     * PHASE 2 — JSON Generation Pass (low temperature, JSON mode):
-     *   The model receives its own Phase 1 reasoning as explicit context.
-     *   It "knows the plan" and converts it cleanly into the required JSON.
-     *   Budget: 32,768 tokens for complete, well-structured JSON output.
+     * PHASE 2 — JSON Generation Pass (assistant prefill + response_format):
+     *   Phase 1 reasoning injected as explicit context ("YOUR ANALYSIS & PLAN").
+     *   Assistant prefill '{' forces the model's FIRST output token to be '{'.
+     *   This is the universal fix — even models that ignore response_format
+     *   (Nemotron etc.) CANNOT output thinking text before '{'.
+     *   Budget: 32,768 tokens of pure JSON.
      *
-     * Result: full thinking quality (not suppressed) + full JSON completeness.
-     * No trade-off between reasoning depth and output correctness.
+     * Result: full thinking quality + complete, parseable JSON. No trade-off.
      */
     async json(
         systemPrompt: string,
@@ -317,76 +304,72 @@ export const shortsLLM = {
     ): Promise<any> {
 
         // ── PHASE 1: Reasoning Pass ──────────────────────────────────────────
-        // Explicitly tell the model NOT to output JSON yet.
-        // It should think, plan, and analyze — stored for use in Phase 2.
         const reasoningSystem =
             systemPrompt +
-            '\n\n[ANALYSIS MODE] You are in deep reasoning mode.' +
-            ' Think thoroughly: analyze the topic, plan the narrative arc, decide what facts to include in each scene, identify emotional beats and visual descriptions.' +
-            ' DO NOT output JSON yet. Output your analysis and structured plan as free-form text.' +
-            ' Be thorough and specific — this thinking will directly guide the final JSON output.';
+            '\n\n[ANALYSIS MODE] Think deeply and freely. Analyze the topic, plan the narrative arc, decide what facts to include in each scene, identify emotional beats and visual descriptions. DO NOT output JSON — output your analysis and plan as free-form text. Be thorough.';
 
         const reasoningUser =
             userPrompt +
-            '\n\nAnalyze and plan step-by-step. Think about: narrative structure, scene flow, key facts to highlight, visual descriptions for each scene, voiceover tone and pacing.' +
-            ' Write your full reasoning. Do not produce JSON in this step.';
+            '\n\nAnalyze and plan step-by-step. Cover: narrative structure, scene flow, key facts, visual descriptions per scene, voiceover tone. Write your full reasoning. Do not produce JSON in this step.';
 
         let reasoning = '';
         try {
-            console.log('\uD83E\uDDE0 [shorts-llm] Phase 1: reasoning pass (full thinking, no JSON constraint)...');
+            console.log('\uD83E\uDDE0 [shorts-llm] Phase 1: full reasoning pass (no JSON constraint)...');
             const { text: r } = await tryModels(
                 MODELS_JSON,
                 reasoningSystem,
                 reasoningUser,
                 options?.temperature ?? 0.8,
-                10_000, // generous budget — purely for thinking, no JSON yet
+                10_000,
             );
-            reasoning = stripThinkingTags(r); // strip any embedded thinking tags
+            reasoning = stripThinkingTags(r);
             console.log(`\uD83E\uDDE0 [shorts-llm] Phase 1 complete: ${reasoning.length} chars of reasoning stored`);
         } catch (err: any) {
-            // Non-fatal: Phase 2 still runs, just without reasoning context
             console.warn(`\u26A0\uFE0F [shorts-llm] Phase 1 reasoning failed (${err.message?.slice(0, 80)}) \u2014 Phase 2 will run without reasoning context`);
         }
 
         // ── PHASE 2: JSON Generation Pass ────────────────────────────────────
-        // Feed Phase 1 reasoning as explicit context.
-        // Lower temperature → higher precision for JSON output.
+        // Truncate reasoning to 6000 chars to prevent prompt bloat in Phase 2.
+        const MAX_REASONING_CHARS = 6000;
+        const truncatedReasoning = reasoning.length > MAX_REASONING_CHARS
+            ? reasoning.slice(0, MAX_REASONING_CHARS) + '\n... [analysis continues above]'
+            : reasoning;
+
         const jsonSystem =
             systemPrompt +
             '\n\nCRITICAL: Output ONLY valid JSON. No markdown, no XML tags, no explanations. Start with { and end with }.';
 
-        const reasoningBlock = reasoning.length > 0
-            ? '\n\n=== YOUR ANALYSIS & PLAN (use this to produce the JSON) ===\n' +
-              reasoning +
-              '\n=== END OF ANALYSIS ===\n\n'
+        const reasoningBlock = truncatedReasoning.length > 0
+            ? '\n\n=== YOUR ANALYSIS & PLAN ===\n' + truncatedReasoning + '\n=== END OF ANALYSIS ===\n\n'
             : '\n\n';
 
         const jsonUser =
             userPrompt +
             reasoningBlock +
-            'Using the analysis above, produce the complete JSON now. Start immediately with { — no preamble, no markdown, no explanation.';
+            'Using the analysis above, produce the complete JSON now. The JSON starts on the next line:';
 
-        console.log(`\uD83D\uDCCB [shorts-llm] Phase 2: JSON generation (reasoning context: ${reasoning.length} chars)...`);
+        console.log(`\uD83D\uDCCB [shorts-llm] Phase 2: JSON generation (reasoning: ${truncatedReasoning.length} chars used / ${reasoning.length} total)...`);
 
         const { text: raw, finishReason } = await tryModels(
             MODELS_JSON,
             jsonSystem,
             jsonUser,
-            (options?.temperature ?? 0.7) * 0.6, // lower temp: precision matters for JSON
+            (options?.temperature ?? 0.7) * 0.6,
             options?.maxTokens ?? 32768,
-            true, // response_format: json_object
+            true, // requireJson = true: sends response_format + assistant prefill '{'
         );
 
-        // Strip any residual thinking tags from Phase 2 response
-        const cleaned = stripThinkingTags(raw);
+        // The model's response is the CONTINUATION after the assistant prefill '{'.
+        // Prepend '{' unless the model already returned a full JSON starting with '{'.
+        const stripped = stripThinkingTags(raw).trim();
+        const cleaned  = stripped.startsWith('{') ? stripped : ('{' + stripped);
 
-        // Detect truncation
         const explicitTrunc = finishReason === 'length';
         const wasTruncated  = explicitTrunc || (cleaned.trimEnd().slice(-1) !== '}' && cleaned.trimEnd().slice(-1) !== ']');
         if (wasTruncated) console.warn(`\u26A0\uFE0F [shorts-llm] Truncation in Phase 2 (finish=${finishReason}) \u2014 engaging repair...`);
 
         if (!cleaned.includes('{') && !cleaned.includes('[')) {
-            throw new Error('[shorts-llm] No JSON in Phase 2 response \u2014 model produced text-only output');
+            throw new Error('[shorts-llm] No JSON in Phase 2 response \u2014 model produced text-only output despite assistant prefill');
         }
 
         return extractJSON(cleaned, wasTruncated);
@@ -394,8 +377,6 @@ export const shortsLLM = {
 
     /**
      * Translation-specific text generation.
-     * Uses ONLY openai/gpt-oss-120b:free. If this fails, the translation utility
-     * will immediately fall back to Groq Llama-3.3-70B.
      */
     async translate(
         systemPrompt: string,
@@ -413,9 +394,7 @@ export const shortsLLM = {
     },
 
     /**
-     * Image prompt enrichment — uses moderation-safe model list.
-     * Avoids gpt-oss-120b:free which blocks historical battle/martyrdom content
-     * (violence/graphic moderation). Nemotron is primary.
+     * Image prompt enrichment — moderation-safe model list (Nemotron primary).
      */
     async enrich(
         systemPrompt: string,
