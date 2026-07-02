@@ -24,7 +24,7 @@ interface TranslationResult {
     narrations: string[];
 }
 
-const LANGUAGE_NAMES: Record<string, string> = {
+export const LANGUAGE_NAMES: Record<string, string> = {
     'hi-IN': 'Hindi (Devanagari script — हिन्दी)',
     'bn-IN': 'Bengali (বাংলা)',
     'ta-IN': 'Tamil (தமிழ்)',
@@ -41,7 +41,7 @@ const LANGUAGE_NAMES: Record<string, string> = {
  * Translate a single text from English to the target language.
  * First tries OpenAI, falls back directly to Groq Llama-3.3-70B on error.
  */
-async function translateSingleText(
+export async function translateSingleText(
     text: string,
     langName: string,
     context: string = 'narration'

@@ -5,7 +5,7 @@ import { putWithRotation } from "@/lib/blob";
 import { generateNanoBananaImage, generateNanoBananaImagesParallel, generateApifyImage, generateApifyImagesParallel } from "@/lib/apify-image";
 import { submitSeedanceVideoTask, checkPolloVideoTaskStatus, processSeedanceVideoResult } from "@/lib/apify-video";
 import { getMusicUrl } from "@/lib/music-urls";
-import { translateScript } from "@/lib/translate";
+import { translateScript, translateSingleText, LANGUAGE_NAMES } from "@/lib/translate";
 import { triggerRender } from "@/lib/video-render";
 import { and, desc, eq, like, or } from "drizzle-orm";
 import { inngest } from "./client";
@@ -1085,30 +1085,45 @@ OUTPUT: JSON object wrapped in <json> and </json> tags.`;
 
             console.log(`✅ Script finalized (OpenRouter gpt-oss-120b:free): "${bestResult.videoTitle}" | ${bestResult.scenes?.length} scenes | ${bestWordCount} words ≈ ${Math.round(bestWordCount / WORDS_PER_SEC)}s`);
 
-            // ── Translate to target language if not English ─────────────────
-            if (selectedLanguage && !selectedLanguage.startsWith('en') && bestResult.scenes?.length > 0) {
-                console.log(`🌐 Translating script to ${selectedLanguage}...`);
-                const narrations = bestResult.scenes.map((s: any) => s.narration || '');
-                const translated = await translateScript({
-                    videoTitle: bestResult.videoTitle,
-                    narrations,
-                    targetLanguage: selectedLanguage,
-                });
-                bestResult.videoTitle = translated.videoTitle;
-                bestResult.scenes = bestResult.scenes.map((s: any, i: number) => ({
-                    ...s,
-                    narration: translated.narrations[i] || s.narration,
-                    wordCount: (translated.narrations[i] || s.narration).split(/\s+/).length,
-                    duration: Math.round((translated.narrations[i] || s.narration).split(/\s+/).length / WORDS_PER_SEC),
-                }));
-                bestResult.totalWordCount = bestResult.scenes.reduce(
-                    (sum: number, s: any) => sum + (s.wordCount || 0), 0
-                );
-                console.log(`✅ Translation complete — ${bestResult.totalWordCount} words in ${selectedLanguage}`);
-            }
-
             return bestResult;
         });
+
+        // ── Step 2.5: Translate to target language if not English ────────────────
+        // We run each translation as a separate Inngest step so that:
+        // 1. Every scene gets its own fresh 5-minute Vercel execution window.
+        // 2. Inngest checkpoints progress, avoiding starting from scratch if a timeout occurs.
+        if (selectedLanguage && !selectedLanguage.startsWith('en') && scriptData.scenes?.length > 0) {
+            console.log(`🌐 Translating script to ${selectedLanguage} step-by-step...`);
+            const WORDS_PER_SEC = 2.5; // conversion factor for scene duration estimations
+
+            // Translate title first
+            const translatedTitle = await step.run("translate-title", async () => {
+                const langName = LANGUAGE_NAMES[selectedLanguage] || selectedLanguage;
+                return await translateSingleText(scriptData.videoTitle, langName, 'video title');
+            });
+            scriptData.videoTitle = translatedTitle;
+
+            // Translate each scene's narration individually
+            for (let i = 0; i < scriptData.scenes.length; i++) {
+                const scene = scriptData.scenes[i];
+                if (scene.narration) {
+                    const translatedNarration = await step.run(`translate-scene-narration-${i}`, async () => {
+                        const langName = LANGUAGE_NAMES[selectedLanguage] || selectedLanguage;
+                        return await translateSingleText(scene.narration, langName, `scene ${i + 1} narration`);
+                    });
+                    scene.narration = translatedNarration;
+                    scene.wordCount = translatedNarration.split(/\s+/).length;
+                    scene.duration = Math.round(translatedNarration.split(/\s+/).length / WORDS_PER_SEC);
+                }
+            }
+
+            // Recalculate total word count
+            scriptData.totalWordCount = scriptData.scenes.reduce(
+                (sum: number, s: any) => sum + (s.wordCount || 0), 0
+            );
+            console.log(`✅ Translation complete — ${scriptData.totalWordCount} words in ${selectedLanguage}`);
+        }
+
 
         // Update status: generating voice
         await step.run("update-status-voice", () => updateSeriesStatus(seriesId, "generating:voice"));
