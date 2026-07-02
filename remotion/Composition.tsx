@@ -260,22 +260,13 @@ const VideoClipScene: React.FC<{
 
   const targetDurationSec = duration / fps;
 
-  // Compute playback rate:
-  // • Video SHORTER than scene → slow down to fill (pbRate < 1.0).
-  // • Video LONGER than scene → play at 1.0x; OffthreadVideo freezes the last
-  //   frame for the tiny gap (≤0.4s safety margin). Never speed-up — that
-  //   risks seeking past the file end and crashes the compositor.
-  const pbRate = useMemo(() => {
-    if (targetDurationSec > safeLength) {
-      return Math.max(0.0625, safeLength / targetDurationSec); // slow-down only
-    }
-    return 1.0;
-  }, [safeLength, targetDurationSec]);
+  // WAN videos are FFmpeg-stretched to exact duration before Appwrite upload.
+  // Always play at 1.0x — the stored file duration matches the scene duration.
+  // If there is a tiny gap, the fallback image below fills it.
+  const pbRate = 1.0;
 
-  // How many frames the video safely covers at the computed playback rate.
-  // When pbRate < 1 (slow-down): videoPlayFrames ≈ duration (fills the scene).
-  // When pbRate = 1 (video longer): videoPlayFrames = safeLength * fps (then fallback).
-  const videoPlayFrames = Math.floor((safeLength * fps) / pbRate);
+  // Frames the video covers at natural speed
+  const videoPlayFrames = Math.floor(safeLength * fps);
 
   if (resolvedVideoUrl && frame < videoPlayFrames) {
     return (
@@ -364,15 +355,11 @@ const SplitScreenScene: React.FC<{
   const actualLength = sourceDuration && sourceDuration > 0 ? sourceDuration : 5;
   const safeLength = Math.max(0.5, actualLength - 0.4);
 
-  // Safe stretch: slow-down only — never speed up past 1.0x.
-  const pbRate = useMemo(() => {
-    if (targetDurationSec > safeLength) {
-      return Math.max(0.0625, safeLength / targetDurationSec);
-    }
-    return 1.0;
-  }, [safeLength, targetDurationSec]);
+  // WAN videos are FFmpeg-stretched to exact duration before Appwrite upload.
+  // Always play at 1.0x — the stored file duration matches the scene duration.
+  const pbRate = 1.0;
 
-  const videoPlayFrames = Math.floor((safeLength * fps) / pbRate);
+  const videoPlayFrames = Math.floor(safeLength * fps);
 
   const topUrl    = useMemo(() => resolveLocalUrl(urls[0]) || '', [urls]);
   const bottomUrl = useMemo(() => resolveLocalUrl(urls[1]) || '', [urls]);

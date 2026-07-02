@@ -97,24 +97,40 @@ export interface ApifyVideoTask {
 export async function submitApifyVideoTask(
   imageUrl: string,
   videoPrompt: string,
-  sceneIndex: number
+  sceneIndex: number,
+  endImageUrl?: string,   // optional end-frame image — prevents WAN hallucination in last 4-5s
 ): Promise<ApifyVideoTask> {
   const tokens = getApifyTokens();
   const { token, tokenIdx } = pickToken(sceneIndex, tokens);
 
-  // Upload image so Wan 2.2 can fetch it
+  // Upload start image so Wan 2.2 can fetch it
   const publicImageUrl = await uploadImageForVideo(imageUrl);
 
+  // Upload end image if provided
+  let publicEndImageUrl: string | undefined;
+  if (endImageUrl) {
+    try {
+      publicEndImageUrl = await uploadImageForVideo(endImageUrl);
+      console.log(`🖼️ [apify-video] Scene ${sceneIndex + 1}: end image uploaded for WAN`);
+    } catch (err: any) {
+      console.warn(`⚠️ [apify-video] Scene ${sceneIndex + 1}: end image upload failed (${err.message}) — proceeding without it`);
+    }
+  }
+
   const runUrl = `https://api.apify.com/v2/actors/${VIDEO_ACTOR_ID}/runs?token=${token}`;
-  const input = {
-    imageUrl: publicImageUrl,
-    prompt: videoPrompt,
-    resolution: "480p",
-    aspectRatio: "9:16",
-    duration: 10, // 10s native → trim for short scenes, minimal stretch for long ones
-    negativePrompt: "blur, distort, low quality, shaky camera, fast movement, rapid motion, jerky, abrupt motion, sudden jump, text, watermark, speed ramp",
-    cfgScale: 1,
+  const input: Record<string, any> = {
+    imageUrl:        publicImageUrl,
+    prompt:          videoPrompt,
+    resolution:      "480p",
+    aspectRatio:     "9:16",
+    duration:        10,  // 10s native → FFmpeg stretch → Appwrite
+    negativePrompt:  "blur, distort, low quality, shaky camera, fast movement, rapid motion, jerky, abrupt motion, sudden jump, text, watermark, speed ramp",
+    cfgScale:        4,   // higher guidance = more faithful to start/end images
   };
+  // Only send endImageUrl if we successfully uploaded it
+  if (publicEndImageUrl) {
+    input.endImageUrl = publicEndImageUrl;
+  }
 
   const submitRes = await fetch(runUrl, {
     method: "POST",
@@ -192,6 +208,7 @@ export async function checkApifyVideoTask(
 export interface ApifyVideoSceneInput {
   index: number;
   imageUrl: string;
+  endImageUrl?: string;  // optional concluding frame for WAN
   videoPrompt: string;
 }
 
@@ -216,7 +233,8 @@ export async function submitApifyVideoTasksParallel(
       const task = await submitApifyVideoTask(
         scene.imageUrl,
         scene.videoPrompt,
-        scene.index
+        scene.index,
+        scene.endImageUrl,   // pass end frame if available
       );
       return { index: scene.index, task, success: true };
     } catch (err: any) {
@@ -272,12 +290,13 @@ export async function submitSeedanceVideoTask(
   imageUrl: string | undefined,
   videoPrompt: string,
   _aspectRatio: string,
-  sceneIndex = 0
+  sceneIndex = 0,
+  endImageUrl?: string,   // optional end-frame image
 ): Promise<{ taskId: string; apiKey: string }> {
   if (!imageUrl) {
     throw new Error("[apify-video] imageUrl is required for Wan 2.2 I2V — SKIP_T2V is no longer supported");
   }
-  const task = await submitApifyVideoTask(imageUrl, videoPrompt, sceneIndex);
+  const task = await submitApifyVideoTask(imageUrl, videoPrompt, sceneIndex, endImageUrl);
   return { taskId: task.runId, apiKey: String(task.tokenIdx) };
 }
 
