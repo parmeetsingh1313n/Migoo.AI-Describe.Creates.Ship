@@ -199,20 +199,97 @@ function stripThinkingTags(s: string): string {
 
 // ── JSON parser with truncation repair ───────────────────────────────────────
 
-function repairTruncated(s: string, opens: number, opena: number): any {
-    const withStr = s + '"';
-    try { return JSON.parse(withStr + '}'.repeat(Math.max(0, opens)) + ']'.repeat(Math.max(0, opena))); } catch { /* next */ }
+// ── JSON parser with stack-based truncation repair ────────────────────────────
 
-    for (const marker of ['}', ']']) {
-        const idx = s.lastIndexOf(marker);
-        if (idx > 0) {
-            const t = s.slice(0, idx + 1);
-            const ob  = (t.match(/\{/g) || []).length - (t.match(/\}/g) || []).length;
-            const obr = (t.match(/\[/g) || []).length - (t.match(/\]/g) || []).length;
-            try { return JSON.parse(t + '}'.repeat(Math.max(0, ob)) + ']'.repeat(Math.max(0, obr))); } catch { /* next */ }
+function repairTruncated(s: string): any {
+    let inString = false;
+    let isEscaped = false;
+    const stack: ('}' | ']')[] = [];
+
+    for (let i = 0; i < s.length; i++) {
+        const c = s[i];
+
+        if (isEscaped) {
+            isEscaped = false;
+            continue;
+        }
+
+        if (c === '\\') {
+            isEscaped = true;
+            continue;
+        }
+
+        if (c === '"') {
+            inString = !inString;
+            continue;
+        }
+
+        if (inString) {
+            continue; // ignore brackets inside string literals
+        }
+
+        if (c === '{') {
+            stack.push('}');
+        } else if (c === '[') {
+            stack.push(']');
+        } else if (c === '}') {
+            if (stack[stack.length - 1] === '}') {
+                stack.pop();
+            }
+        } else if (c === ']') {
+            if (stack[stack.length - 1] === ']') {
+                stack.pop();
+            }
         }
     }
-    throw new Error('[shorts-llm] truncation repair failed');
+
+    // 1. Build suffix: close string if we were left inside one, then pop and append brackets in reverse order.
+    let suffix = inString ? '"' : '';
+    let t = s.trimEnd();
+
+    if (!inString) {
+        // Strip trailing commas, colons, or unclosed keys
+        t = t.replace(/,\s*$/g, '');
+        t = t.replace(/:\s*$/g, '');
+        t = t.replace(/,\s*"[^"]*"\s*$/g, '');
+        t = t.replace(/,\s*"[^"]*"\s*:\s*$/g, '');
+    }
+
+    const reversedStack = [...stack].reverse();
+    suffix += reversedStack.join('');
+
+    try {
+        const repaired = t + suffix;
+        return JSON.parse(repaired);
+    } catch (e: any) {
+        console.warn(`⚠️ [shorts-llm] Stack repair failed (${e.message}), trying slice-fallback...`);
+        // 2. Slicing fallback: scan backwards for the last closed structural bracket
+        for (let idx = t.length - 1; idx >= 0; idx--) {
+            const char = t[idx];
+            if (char === '}' || char === ']') {
+                const sub = t.slice(0, idx + 1);
+                const subStack: ('}' | ']')[] = [];
+                let subInString = false;
+                let subEsc = false;
+                for (let j = 0; j < sub.length; j++) {
+                    const c = sub[j];
+                    if (subEsc) { subEsc = false; continue; }
+                    if (c === '\\') { subEsc = true; continue; }
+                    if (c === '"') { subInString = !subInString; continue; }
+                    if (subInString) continue;
+                    if (c === '{') subStack.push('}');
+                    else if (c === '[') subStack.push(']');
+                    else if (c === '}') { if (subStack[subStack.length - 1] === '}') subStack.pop(); }
+                    else if (c === ']') { if (subStack[subStack.length - 1] === ']') subStack.pop(); }
+                }
+                const subSuffix = (subInString ? '"' : '') + [...subStack].reverse().join('');
+                try {
+                    return JSON.parse(sub.replace(/,\s*$/g, '') + subSuffix);
+                } catch { /* continue scanning backward */ }
+            }
+        }
+    }
+    throw new Error('[shorts-llm] All truncation repairs failed');
 }
 
 function extractJSON(raw: string, wasTruncated = false): any {
@@ -229,35 +306,31 @@ function extractJSON(raw: string, wasTruncated = false): any {
     if (start === Infinity) throw new Error('[shorts-llm] No JSON in response');
     s = s.slice(start);
 
-    const opens = (s.match(/\{/g) || []).length - (s.match(/\}/g) || []).length;
-    const opena = (s.match(/\[/g) || []).length - (s.match(/\]/g) || []).length;
-
     if (wasTruncated) {
-        console.warn('\u26A0\uFE0F [shorts-llm] Response truncated \u2014 attempting JSON repair...');
-        try { return repairTruncated(s, opens, opena); } catch { /* fall through */ }
+        console.warn('⚠️ [shorts-llm] Response truncated — attempting stack-based JSON repair...');
+        try {
+            return repairTruncated(s);
+        } catch (err: any) {
+            console.error(`❌ [shorts-llm] Stack repair failed: ${err.message}`);
+        }
     }
 
-    try { return JSON.parse(s); } catch { /* try repairs */ }
-    try { return JSON.parse(s.replace(/,(\s*[}\]])/g, '$1')); } catch { /* next */ }
-
-    const balanced = s + '}'.repeat(Math.max(0, opens)) + ']'.repeat(Math.max(0, opena));
-    try { return JSON.parse(balanced); } catch { /* next */ }
-
-    let repaired = '';
-    let inStr = false;
-    for (let i = 0; i < s.length; i++) {
-        const c = s[i];
-        if (c === '\\' && i + 1 < s.length) { repaired += c + s[++i]; continue; }
-        if (c === '"') { inStr = !inStr; repaired += c; continue; }
-        if (inStr && c === '\n') { repaired += '\\n'; continue; }
-        if (inStr && c === '\r') { repaired += '\\r'; continue; }
-        repaired += c;
+    // Try direct parse
+    try {
+        return JSON.parse(s);
+    } catch {
+        // Fall back to stack-based parser to clean up literal newlines or trailing commas
+        try {
+            return repairTruncated(s);
+        } catch { /* try basic fallback regex */ }
     }
 
-    const repairedBalanced = repaired + '}'.repeat(Math.max(0, opens)) + ']'.repeat(Math.max(0, opena));
-    try { return JSON.parse(repairedBalanced); } catch { /* next */ }
+    // Regex fallback for trailing commas
+    try {
+        return JSON.parse(s.replace(/,(\s*[}\]])/g, '$1'));
+    } catch { /* throw final error */ }
 
-    return repairTruncated(repaired, opens, opena);
+    throw new Error('[shorts-llm] JSON parsing and repair failed');
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
