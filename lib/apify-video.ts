@@ -112,7 +112,7 @@ export async function submitApifyVideoTask(
     resolution: "480p",
     aspectRatio: "9:16",
     duration: 10, // 10s native → trim for short scenes, minimal stretch for long ones
-    negativePrompt: "blur, distort, low quality, shaky camera, fast movement, text, watermark",
+    negativePrompt: "blur, distort, low quality, shaky camera, fast movement, rapid motion, jerky, abrupt motion, sudden jump, text, watermark, speed ramp",
     cfgScale: 1,
   };
 
@@ -346,16 +346,26 @@ async function probeActualDuration(filePath: string): Promise<number> {
 }
 
 /**
- * Pre-process a Wan 2.2 video for smooth playback:
+ * Advanced cinematic video processor for Wan 2.2 output.
  *
- * SMART TRIM vs STRETCH:
- *   If nativeVideo (10s) >= sceneDuration  →  TRIM only (zero interpolation, perfect quality)
- *   If nativeVideo (10s) < sceneDuration   →  STRETCH with much smaller ratio (~1.x vs old 2x)
+ * ROOT FIX: Wan 2.2 Lightning generates ~16fps VFR video.
+ * Without fps conversion even a TRIMMED video looks choppy when played at 30fps.
  *
- * Stretch pipeline (3 tiers, only used when native is shorter than scene):
- *   TIER 1 — MCI optical-flow at 30fps → setpts stretch → CFR
- *   TIER 2 — blend crossfade at 30fps  → setpts stretch → CFR
- *   TIER 3 — setpts only (safe fallback)
+ * PIPELINE:
+ *
+ * TRIM PATH (native >= sceneDuration):
+ *   Tier A — MCI optical-flow to 30fps + tmix motion blur + trim  (cinema quality)
+ *   Tier B — blend crossfade to 30fps + trim                      (smooth, fast)
+ *   Tier C — simple fps=30 conversion + trim                      (safe fallback)
+ *
+ * STRETCH PATH (native < sceneDuration):
+ *   Tier 1 — MCI to 30fps + tmix motion blur + setpts stretch     (cinema quality)
+ *   Tier 2 — blend to 30fps + setpts stretch                      (smooth fallback)
+ *   Tier 3 — setpts only                                          (safe fallback)
+ *
+ * tmix (frames=3, weights=1 2 1) simulates camera shutter motion blur:
+ *   Each frame = 25% prev + 50% current + 25% next → masks interpolation artifacts
+ *   and gives the "cinematic slow motion" look without obvious ghosting.
  */
 async function smoothStretchVideoBuffer(
   inputBuffer: Buffer,
@@ -370,139 +380,154 @@ async function smoothStretchVideoBuffer(
   const outPath = path.join(tmpDir, `wan_out_${rand}.mp4`);
 
   fs.writeFileSync(inPath, inputBuffer);
-
   const actualDuration = await probeActualDuration(inPath);
 
   console.log(
     `📐 [apify-video] Scene ${sceneIndex + 1}: native=${actualDuration.toFixed(2)}s target=${targetDuration.toFixed(2)}s`
   );
 
-  // ── TRIM PATH: native video is already long enough ──────────────────────────
-  if (actualDuration >= targetDuration - 0.1) {
-    const trimPoint = targetDuration.toFixed(3);
-    const trimCmd = [
-      `"${ffmpegBin}" -y -i "${inPath}"`,
-      `-t ${trimPoint}`,
-      `-c:v libx264 -pix_fmt yuv420p -preset fast -crf 23`,
-      `-an -movflags +faststart -avoid_negative_ts make_zero`,
-      `"${outPath}"`,
-    ].join(" ");
+  // ── Shared helpers ───────────────────────────────────────────────────────────
 
-    try {
-      console.log(`✂️  [apify-video] Scene ${sceneIndex + 1}: trimming ${actualDuration.toFixed(2)}s → ${trimPoint}s (zero interpolation)`);
-      await runCmd(trimCmd, 20_000);
+  const cleanup = () => {
+    try { fs.unlinkSync(inPath);  } catch {}
+    try { fs.unlinkSync(outPath); } catch {}
+  };
 
-      if (fs.existsSync(outPath) && fs.statSync(outPath).size > 10_000) {
-        const outBuffer = fs.readFileSync(outPath);
-        try { fs.unlinkSync(inPath);  } catch {}
-        try { fs.unlinkSync(outPath); } catch {}
-        console.log(`✅ [apify-video] Scene ${sceneIndex + 1}: trim succeeded → ${(outBuffer.length / 1024).toFixed(0)} KB`);
-        return { buffer: outBuffer, reportedDuration: targetDuration };
-      }
-    } catch (err: any) {
-      console.warn(`⚠️ [apify-video] Scene ${sceneIndex + 1}: trim failed (${err.message}) — falling back to stretch`);
-    }
-  }
+  /**
+   * Run one FFmpeg command (tries modern -fps_mode cfr first, falls back to legacy -vsync cfr).
+   * Returns true if the output file is valid and > 10 KB.
+   */
+  const tryCmd = async (vfFilter: string, outputDuration: number, timeoutMs: number, crf = 23): Promise<boolean> => {
+    if (fs.existsSync(outPath)) { try { fs.unlinkSync(outPath); } catch {} }
 
-  // ── STRETCH PATH: native video is shorter than scene (minimal ratio now ~1.x) ─
-  const needed = targetDuration + 0.6;
-  const ratio = (needed / actualDuration).toFixed(6);
-  const needsStretch = Math.abs(actualDuration - needed) > 0.1;
-  const trimPoint = needed.toFixed(3);
-
-  console.log(
-    `📐 [apify-video] Scene ${sceneIndex + 1}: stretching → target=${needed.toFixed(2)}s (ratio=${ratio})`
-  );
-
-  const buildCmd = (vfFilter: string, fpsModeFlag: string, crf = 23) =>
-    [
+    const base = [
       `"${ffmpegBin}" -y -i "${inPath}"`,
       `-vf "${vfFilter}"`,
-      `-t ${trimPoint}`,
-      `-r 30`, fpsModeFlag,
+      `-t ${outputDuration.toFixed(3)}`,
+      `-r 30`,
       `-g 30 -bf 0`,
       `-c:v libx264 -pix_fmt yuv420p -preset fast -crf ${crf}`,
       `-an -movflags +faststart -avoid_negative_ts make_zero`,
-      `"${outPath}"`,
-    ].join(" ");
+    ];
 
-  const tier1Filter = needsStretch
-    ? `minterpolate=fps=30:mi_mode=mci:scd=none,setpts=${ratio}*PTS,tpad=stop=6:stop_mode=clone`
-    : `fps=30,setpts=PTS-STARTPTS,tpad=stop=6:stop_mode=clone`;
+    // Modern FFmpeg flag
+    try {
+      await runCmd([...base, `-fps_mode cfr`, `"${outPath}"`].join(' '), timeoutMs);
+      if (fs.existsSync(outPath) && fs.statSync(outPath).size > 10_000) return true;
+    } catch (err: any) {
+      if (!err.stderr?.includes('fps_mode') && !err.message?.includes('fps_mode')) return false;
+      // Legacy flag fallback
+      if (fs.existsSync(outPath)) { try { fs.unlinkSync(outPath); } catch {} }
+      try {
+        await runCmd([...base, `-vsync cfr`, `"${outPath}"`].join(' '), timeoutMs);
+        if (fs.existsSync(outPath) && fs.statSync(outPath).size > 10_000) return true;
+      } catch { return false; }
+    }
+    return false;
+  };
 
-  const tier2Filter = needsStretch
-    ? `minterpolate=fps=30:mi_mode=blend:scd=none,setpts=${ratio}*PTS,tpad=stop=6:stop_mode=clone`
-    : `fps=30,setpts=PTS-STARTPTS,tpad=stop=6:stop_mode=clone`;
+  /** Re-encode at higher CRF if output is too large (> 20 MB). */
+  const applySmallSizeGate = async (buf: Buffer): Promise<Buffer> => {
+    if (buf.length <= 20 * 1024 * 1024) return buf;
+    const smallPath = outPath.replace('.mp4', '_s.mp4');
+    console.warn(`⚠️ [apify-video] Scene ${sceneIndex + 1}: ${(buf.length / 1024 / 1024).toFixed(1)} MB — re-encoding CRF 32...`);
+    try {
+      await runCmd(
+        `"${ffmpegBin}" -y -i "${outPath}" -c:v libx264 -pix_fmt yuv420p -preset fast -crf 32 -an -movflags +faststart "${smallPath}"`,
+        15_000
+      );
+      if (fs.existsSync(smallPath) && fs.statSync(smallPath).size > 5_000) {
+        const small = fs.readFileSync(smallPath);
+        try { fs.unlinkSync(smallPath); } catch {}
+        return small;
+      }
+    } catch { /* use original */ }
+    return buf;
+  };
 
-  const tier3Filter = needsStretch
-    ? `setpts=${ratio}*PTS,tpad=stop=6:stop_mode=clone`
-    : `fps=30,setpts=PTS-STARTPTS,tpad=stop=6:stop_mode=clone`;
+  const readOutput = (): Buffer | null => {
+    if (!fs.existsSync(outPath) || fs.statSync(outPath).size < 10_000) return null;
+    return fs.readFileSync(outPath);
+  };
 
-  const tiers: Array<{ name: string; filter: string; timeout: number }> = [
-    { name: "MCI optical-flow",  filter: tier1Filter, timeout: 50_000 },
-    { name: "blend crossfade",   filter: tier2Filter, timeout: 35_000 },
-    { name: "setpts fallback",   filter: tier3Filter, timeout: 20_000 },
+  // ── TRIM PATH: native video is already long enough ───────────────────────────
+  // Critical fix: even for trim, we must convert 16fps VFR → 30fps CFR or the
+  // video will look choppy when played back by any 30fps player.
+  if (actualDuration >= targetDuration - 0.1) {
+    const trimDur = targetDuration;
+    console.log(`✂️  [apify-video] Scene ${sceneIndex + 1}: trim path → ${trimDur.toFixed(2)}s (converting 16fps→30fps CFR)`);
+
+    // Tier A: MCI optical-flow + tmix motion blur → cinema quality
+    if (await tryCmd(
+      `minterpolate=fps=30:mi_mode=mci:scd=none,tmix=frames=3:weights='1 2 1'`,
+      trimDur, 30_000
+    )) {
+      let buf = await applySmallSizeGate(readOutput()!);
+      cleanup();
+      console.log(`✅ [apify-video] Scene ${sceneIndex + 1}: trim (MCI+tmix) → ${(buf.length / 1024).toFixed(0)} KB`);
+      return { buffer: buf, reportedDuration: trimDur };
+    }
+
+    // Tier B: blend crossfade → smooth, 2× faster
+    if (await tryCmd(
+      `minterpolate=fps=30:mi_mode=blend:scd=none`,
+      trimDur, 20_000
+    )) {
+      let buf = await applySmallSizeGate(readOutput()!);
+      cleanup();
+      console.log(`✅ [apify-video] Scene ${sceneIndex + 1}: trim (blend) → ${(buf.length / 1024).toFixed(0)} KB`);
+      return { buffer: buf, reportedDuration: trimDur };
+    }
+
+    // Tier C: simple fps=30 conversion → fast safe fallback
+    if (await tryCmd(
+      `fps=30,setpts=PTS-STARTPTS`,
+      trimDur, 10_000
+    )) {
+      let buf = await applySmallSizeGate(readOutput()!);
+      cleanup();
+      console.log(`✅ [apify-video] Scene ${sceneIndex + 1}: trim (fps=30) → ${(buf.length / 1024).toFixed(0)} KB`);
+      return { buffer: buf, reportedDuration: trimDur };
+    }
+
+    console.warn(`⚠️ [apify-video] Scene ${sceneIndex + 1}: all trim tiers failed — falling through to stretch path`);
+  }
+
+  // ── STRETCH PATH: native video shorter than scene (minimal ratio ~1.x) ────────
+  const needed    = targetDuration + 0.6;
+  const ratio     = (needed / actualDuration).toFixed(6);
+  const needsSt   = Math.abs(actualDuration - needed) > 0.1;
+
+  console.log(`📐 [apify-video] Scene ${sceneIndex + 1}: stretch → target=${needed.toFixed(2)}s (ratio=${ratio})`);
+
+  const stretchFilter = (interp: string) =>
+    needsSt
+      ? `${interp},setpts=${ratio}*PTS,tpad=stop=6:stop_mode=clone`
+      : `fps=30,setpts=PTS-STARTPTS,tpad=stop=6:stop_mode=clone`;
+
+  const stretchTiers: Array<{ name: string; filter: string; timeout: number }> = [
+    // Tier 1: MCI + tmix motion blur + stretch → best quality
+    { name: 'MCI+tmix stretch',  filter: stretchFilter(`minterpolate=fps=30:mi_mode=mci:scd=none,tmix=frames=3:weights='1 2 1'`), timeout: 50_000 },
+    // Tier 2: blend + stretch → smooth, faster
+    { name: 'blend stretch',     filter: stretchFilter(`minterpolate=fps=30:mi_mode=blend:scd=none`),                            timeout: 35_000 },
+    // Tier 3: pure setpts → safe fallback
+    { name: 'setpts fallback',   filter: `setpts=${ratio}*PTS,tpad=stop=6:stop_mode=clone`,                                      timeout: 20_000 },
   ];
 
-  for (const tier of tiers) {
-    try {
-      if (fs.existsSync(outPath)) fs.unlinkSync(outPath);
-      const cmd = buildCmd(tier.filter, "-fps_mode cfr");
-      console.log(`⏳ [apify-video] Scene ${sceneIndex + 1}: trying ${tier.name}...`);
-      await runCmd(cmd, tier.timeout);
-
-      if (!fs.existsSync(outPath) || fs.statSync(outPath).size < 10_000) {
-        throw new Error(`Output file too small or missing`);
-      }
-
-      let outBuffer = fs.readFileSync(outPath);
-
-      // Size gate: re-encode at higher CRF if > 20 MB
-      if (outBuffer.length > 20 * 1024 * 1024) {
-        console.warn(`⚠️ [apify-video] Output ${(outBuffer.length / 1024 / 1024).toFixed(1)} MB — re-encoding at CRF 32...`);
-        const smallPath = outPath.replace(".mp4", "_s.mp4");
-        try {
-          await runCmd(
-            `"${ffmpegBin}" -y -i "${outPath}" -c:v libx264 -pix_fmt yuv420p -preset fast -crf 32 -an -movflags +faststart "${smallPath}"`,
-            15_000
-          );
-          if (fs.existsSync(smallPath) && fs.statSync(smallPath).size > 5_000) {
-            outBuffer = fs.readFileSync(smallPath);
-            try { fs.unlinkSync(smallPath); } catch {}
-          }
-        } catch { /* use original */ }
-      }
-
-      try { fs.unlinkSync(inPath);  } catch {}
-      try { fs.unlinkSync(outPath); } catch {}
-
-      console.log(`✅ [apify-video] Scene ${sceneIndex + 1}: ${tier.name} succeeded → ${(outBuffer.length / 1024).toFixed(0)} KB`);
-      return { buffer: outBuffer, reportedDuration: needed };
-
-    } catch (err: any) {
-      // fps_mode fallback for older FFmpeg builds
-      if (err.stderr?.includes("fps_mode") || err.message?.includes("fps_mode")) {
-        try {
-          if (fs.existsSync(outPath)) fs.unlinkSync(outPath);
-          const legacyCmd = buildCmd(tier.filter, "-vsync cfr");
-          await runCmd(legacyCmd, tier.timeout);
-          if (fs.existsSync(outPath) && fs.statSync(outPath).size > 10_000) {
-            const outBuffer = fs.readFileSync(outPath);
-            try { fs.unlinkSync(inPath);  } catch {}
-            try { fs.unlinkSync(outPath); } catch {}
-            console.log(`✅ [apify-video] Scene ${sceneIndex + 1}: ${tier.name} succeeded (legacy vsync)`);
-            return { buffer: outBuffer, reportedDuration: needed };
-          }
-        } catch { /* fall through to next tier */ }
-      }
-      console.warn(`⚠️ [apify-video] Scene ${sceneIndex + 1}: ${tier.name} failed (${err.message?.slice(0, 80)}) — trying next tier`);
+  for (const tier of stretchTiers) {
+    console.log(`⏳ [apify-video] Scene ${sceneIndex + 1}: trying ${tier.name}...`);
+    if (await tryCmd(tier.filter, needed, tier.timeout)) {
+      let buf = await applySmallSizeGate(readOutput()!);
+      cleanup();
+      console.log(`✅ [apify-video] Scene ${sceneIndex + 1}: ${tier.name} → ${(buf.length / 1024).toFixed(0)} KB`);
+      return { buffer: buf, reportedDuration: needed };
     }
+    console.warn(`⚠️ [apify-video] Scene ${sceneIndex + 1}: ${tier.name} failed — trying next tier`);
   }
 
   // All tiers failed — return original unprocessed buffer
-  try { fs.unlinkSync(inPath);  } catch {}
-  try { fs.unlinkSync(outPath); } catch {}
-  console.warn(`⚠️ [apify-video] Scene ${sceneIndex + 1}: all FFmpeg tiers failed, returning raw video (actualDuration=${actualDuration.toFixed(2)}s)`);
+  cleanup();
+  console.warn(`⚠️ [apify-video] Scene ${sceneIndex + 1}: all FFmpeg tiers failed — returning raw video (native ${actualDuration.toFixed(2)}s)`);
   return { buffer: inputBuffer, reportedDuration: actualDuration };
 }
 
