@@ -67,10 +67,10 @@ function rotateKey(): void {
     const keys = getAllKeys();
     if (keys.length <= 1) return;
     _keyIdx = (_keyIdx + 1) % keys.length;
-    console.log(`🔄 [shorts-llm] key rotated → key${_keyIdx + 1}/${keys.length}`);
+    console.log(`\uD83D\uDD04 [shorts-llm] key rotated \u2192 key${_keyIdx + 1}/${keys.length}`);
 }
 
-// ── Core HTTP call ───────────────────────────────────────────────────────────
+// ── Core HTTP call ────────────────────────────────────────────────────────────
 
 interface CallResult { text: string; finishReason?: string }
 
@@ -97,12 +97,10 @@ async function callModel(
     };
 
     if (requireJson) {
-        // Guide the output format to JSON — most models respect this without needing to
-        // disable their internal reasoning/thinking chain.
-        // With maxTokens=32768, models have ample budget for:
-        //   ~8K tokens thinking + ~5K tokens JSON = well within 32K limit.
-        // We deliberately DO NOT disable reasoning — thinking produces higher quality output.
-        // Leftover thinking tags are stripped by extractJSON before parsing.
+        // Guide output format to JSON. We deliberately keep reasoning/thinking ON —
+        // models that think (Nemotron, Qwen) produce higher quality JSON.
+        // With maxTokens=32768 there is ample budget for thinking + JSON.
+        // Any thinking tags that bleed into content are stripped by stripThinking().
         body.response_format = { type: 'json_object' };
     }
 
@@ -122,7 +120,7 @@ async function callModel(
 
     if (res.status === 429 || res.status === 402) {
         const body = await res.text();
-        console.warn(`⚠️ [shorts-llm] rate/credit (${res.status}) on [${model}]: ${body.slice(0, 200)}`);
+        console.warn(`\u26A0\uFE0F [shorts-llm] rate/credit (${res.status}) on [${model}]: ${body.slice(0, 200)}`);
         const err: any = new Error(`RATE_LIMIT: ${model} (${res.status})`);
         err.isRateLimit = true;
         throw err;
@@ -132,7 +130,7 @@ async function callModel(
         // Content moderation rejection (e.g. openai/gpt-oss-120b:free flags religious/Hindi content).
         // Treat as a skip — rotate to the next model instead of crashing the whole pipeline.
         const body = await res.text();
-        console.warn(`⚠️ [shorts-llm] moderation block (403) on [${model}]: ${body.slice(0, 200)} — skipping model.`);
+        console.warn(`\u26A0\uFE0F [shorts-llm] moderation block (403) on [${model}]: ${body.slice(0, 200)} \u2014 skipping model.`);
         const err: any = new Error(`MODERATION_BLOCK: ${model} (403)`);
         err.isRateLimit = true; // reuse rotate logic
         throw err;
@@ -151,7 +149,7 @@ async function callModel(
         throw err;
     }
 
-    console.log(`✅ [shorts-llm] [${model}] responded (${content.length} chars, finish=${data?.choices?.[0]?.finish_reason})`);
+    console.log(`\u2705 [shorts-llm] [${model}] responded (${content.length} chars, finish=${data?.choices?.[0]?.finish_reason})`);
     return { text: content, finishReason: data?.choices?.[0]?.finish_reason };
 }
 
@@ -171,20 +169,33 @@ async function tryModels(
     for (const model of models) {
         for (let ki = 0; ki < keys.length; ki++) {
             const apiKey = getKey();
-            console.log(`🤖 [shorts-llm] model=${model} key=${_keyIdx + 1}/${keys.length} temp=${temperature}`);
+            console.log(`\uD83E\uDD16 [shorts-llm] model=${model} key=${_keyIdx + 1}/${keys.length} temp=${temperature}`);
             try {
                 const { text, finishReason } = await callModel(model, systemPrompt, userMessage, temperature, maxTokens, apiKey, requireJson);
                 return { text, finishReason: (finishReason ?? null) as string | null };
             } catch (err: any) {
                 lastErr = err;
                 if (err.isRateLimit) { rotateKey(); continue; }
-                console.error(`❌ [shorts-llm] [${model}] non-rate error: ${err.message}`);
+                console.error(`\u274C [shorts-llm] [${model}] non-rate error: ${err.message}`);
                 break; // move to next model
             }
         }
     }
 
     throw lastErr ?? new Error('[shorts-llm] all models exhausted');
+}
+
+// ── Shared: strip thinking blocks from model output ───────────────────────────
+// Models like Nemotron/Qwen/DeepSeek emit <thinking>...</thinking> or
+// <think>...</think> before their actual answer. Strip all known formats.
+
+function stripThinkingTags(s: string): string {
+    return s
+        .replace(/<\|thinking\|>[\s\S]*?<\/\|thinking\|>/gi, '')
+        .replace(/<thinking>[\s\S]*?<\/thinking>/gi, '')
+        .replace(/<think>[\s\S]*?<\/think>/gi, '')
+        .replace(/\[THINKING\][\s\S]*?\[\/THINKING\]/gi, '')
+        .trim();
 }
 
 // ── JSON parser with truncation repair ───────────────────────────────────────
@@ -208,16 +219,9 @@ function repairTruncated(s: string, opens: number, opena: number): any {
 }
 
 function extractJSON(raw: string, wasTruncated = false): any {
-    // ── Step 0: strip thinking/reasoning blocks from models like Nemotron, Qwen, DeepSeek ─
-    // These models emit <thinking>...</thinking> or <think>...</think> before JSON.
-    // When token budget is tight the thinking fills all tokens and JSON is never written.
-    // Strip any known thinking-block format BEFORE looking for JSON.
-    let s = raw
-        .replace(/<\|?thinking\|?>([\s\S]*?)<\/\|?thinking\|?>/gi, '')
-        .replace(/<think>([\s\S]*?)<\/think>/gi, '')
-        .replace(/\[THINKING\]([\s\S]*?)\[\/THINKING\]/gi, '')
+    // Strip thinking blocks first, then markdown fences
+    let s = stripThinkingTags(raw)
         .replace(/^(?:#{1,3}\s+)?(?:thinking|reasoning|analysis|scratchpad)[:\s][\s\S]*?(?=\{|\[)/i, '')
-        .trim()
         .replace(/^```json\s*/i, '').replace(/^```\s*/, '').replace(/```\s*$/, '')
         .replace(/<json>\s*/gi, '').replace(/\s*<\/json>/gi, '')
         .trim();
@@ -234,7 +238,7 @@ function extractJSON(raw: string, wasTruncated = false): any {
 
     // If truncated, try repair FIRST before regular parse attempts
     if (wasTruncated) {
-        console.warn('⚠️ [shorts-llm] Response truncated (finish=length) — attempting JSON repair...');
+        console.warn('\u26A0\uFE0F [shorts-llm] Response truncated (finish=length) \u2014 attempting JSON repair...');
         try { return repairTruncated(s, opens, opena); } catch { /* fall through to normal strategies */ }
     }
 
@@ -290,43 +294,99 @@ export const shortsLLM = {
     },
 
     /**
-     * Generate and parse JSON (replaces aiFallback.json() / groq.json()).
-     * Injects a mandatory JSON-output instruction into the system prompt.
+     * Generate and parse JSON using a two-phase chain-of-thought pipeline.
+     *
+     * PHASE 1 — Reasoning Pass (free-form text, no JSON constraint):
+     *   The model thinks deeply and freely. It analyzes the topic, plans the
+     *   narrative arc, identifies key facts, and structures the content.
+     *   This reasoning is stored and fed as context to Phase 2.
+     *   Budget: 10,000 tokens purely for thinking.
+     *
+     * PHASE 2 — JSON Generation Pass (low temperature, JSON mode):
+     *   The model receives its own Phase 1 reasoning as explicit context.
+     *   It "knows the plan" and converts it cleanly into the required JSON.
+     *   Budget: 32,768 tokens for complete, well-structured JSON output.
+     *
+     * Result: full thinking quality (not suppressed) + full JSON completeness.
+     * No trade-off between reasoning depth and output correctness.
      */
     async json(
         systemPrompt: string,
         userPrompt: string,
         options?: { temperature?: number; maxTokens?: number },
     ): Promise<any> {
-        const sysWithRule = systemPrompt +
+
+        // ── PHASE 1: Reasoning Pass ──────────────────────────────────────────
+        // Explicitly tell the model NOT to output JSON yet.
+        // It should think, plan, and analyze — stored for use in Phase 2.
+        const reasoningSystem =
+            systemPrompt +
+            '\n\n[ANALYSIS MODE] You are in deep reasoning mode.' +
+            ' Think thoroughly: analyze the topic, plan the narrative arc, decide what facts to include in each scene, identify emotional beats and visual descriptions.' +
+            ' DO NOT output JSON yet. Output your analysis and structured plan as free-form text.' +
+            ' Be thorough and specific — this thinking will directly guide the final JSON output.';
+
+        const reasoningUser =
+            userPrompt +
+            '\n\nAnalyze and plan step-by-step. Think about: narrative structure, scene flow, key facts to highlight, visual descriptions for each scene, voiceover tone and pacing.' +
+            ' Write your full reasoning. Do not produce JSON in this step.';
+
+        let reasoning = '';
+        try {
+            console.log('\uD83E\uDDE0 [shorts-llm] Phase 1: reasoning pass (full thinking, no JSON constraint)...');
+            const { text: r } = await tryModels(
+                MODELS_JSON,
+                reasoningSystem,
+                reasoningUser,
+                options?.temperature ?? 0.8,
+                10_000, // generous budget — purely for thinking, no JSON yet
+            );
+            reasoning = stripThinkingTags(r); // strip any embedded thinking tags
+            console.log(`\uD83E\uDDE0 [shorts-llm] Phase 1 complete: ${reasoning.length} chars of reasoning stored`);
+        } catch (err: any) {
+            // Non-fatal: Phase 2 still runs, just without reasoning context
+            console.warn(`\u26A0\uFE0F [shorts-llm] Phase 1 reasoning failed (${err.message?.slice(0, 80)}) \u2014 Phase 2 will run without reasoning context`);
+        }
+
+        // ── PHASE 2: JSON Generation Pass ────────────────────────────────────
+        // Feed Phase 1 reasoning as explicit context.
+        // Lower temperature → higher precision for JSON output.
+        const jsonSystem =
+            systemPrompt +
             '\n\nCRITICAL: Output ONLY valid JSON. No markdown, no XML tags, no explanations. Start with { and end with }.';
 
-        const userWithRule = userPrompt +
-            '\n\nReturn ONLY valid JSON. No markdown code fences. No extra text.';
+        const reasoningBlock = reasoning.length > 0
+            ? '\n\n=== YOUR ANALYSIS & PLAN (use this to produce the JSON) ===\n' +
+              reasoning +
+              '\n=== END OF ANALYSIS ===\n\n'
+            : '\n\n';
+
+        const jsonUser =
+            userPrompt +
+            reasoningBlock +
+            'Using the analysis above, produce the complete JSON now. Start immediately with { — no preamble, no markdown, no explanation.';
+
+        console.log(`\uD83D\uDCCB [shorts-llm] Phase 2: JSON generation (reasoning context: ${reasoning.length} chars)...`);
 
         const { text: raw, finishReason } = await tryModels(
             MODELS_JSON,
-            sysWithRule,
-            userWithRule,
-            options?.temperature ?? 0.7,
+            jsonSystem,
+            jsonUser,
+            (options?.temperature ?? 0.7) * 0.6, // lower temp: precision matters for JSON
             options?.maxTokens ?? 32768,
-            true, // requireJson: suppresses model reasoning / forces JSON output
+            true, // response_format: json_object
         );
 
-        // Strip thinking tags defensively (in case response_format was ignored)
-        const cleaned = raw
-            .replace(/<\|?thinking\|?>([\s\S]*?)<\/\|?thinking\|?>/gi, '')
-            .replace(/<think>([\s\S]*?)<\/think>/gi, '')
-            .trim();
+        // Strip any residual thinking tags from Phase 2 response
+        const cleaned = stripThinkingTags(raw);
 
-        // Detect truncation: explicit finish=length OR JSON visibly unclosed
+        // Detect truncation
         const explicitTrunc = finishReason === 'length';
         const wasTruncated  = explicitTrunc || (cleaned.trimEnd().slice(-1) !== '}' && cleaned.trimEnd().slice(-1) !== ']');
-        if (wasTruncated) console.warn(`⚠️ [shorts-llm] Truncation detected (finish=${finishReason}) — engaging repair...`);
+        if (wasTruncated) console.warn(`\u26A0\uFE0F [shorts-llm] Truncation in Phase 2 (finish=${finishReason}) \u2014 engaging repair...`);
 
-        // If cleaned response has no JSON at all, skip to next model via re-throw
         if (!cleaned.includes('{') && !cleaned.includes('[')) {
-            console.warn(`⚠️ [shorts-llm] Model returned no JSON structure (thinking-only response) — check reasoning suppression`);
+            throw new Error('[shorts-llm] No JSON in Phase 2 response \u2014 model produced text-only output');
         }
 
         return extractJSON(cleaned, wasTruncated);
