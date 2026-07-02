@@ -1001,7 +1001,7 @@ OUTPUT: JSON object wrapped in <json> and </json> tags.`;
             let bestWordCount = 0;
 
             for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-                console.log(`🔄 Script generation attempt ${attempt}/${MAX_ATTEMPTS} (OpenRouter gpt-oss-120b:free)...`);
+                console.log(`🔄 Script generation attempt ${attempt}/${MAX_ATTEMPTS} (NVIDIA Mistral-large)...`);
 
                 try {
                     const _sceneSchema = {
@@ -1083,7 +1083,7 @@ OUTPUT: JSON object wrapped in <json> and </json> tags.`;
                 bestResult.totalWordCount = bestWordCount;
             }
 
-            console.log(`✅ Script finalized (OpenRouter gpt-oss-120b:free): "${bestResult.videoTitle}" | ${bestResult.scenes?.length} scenes | ${bestWordCount} words ≈ ${Math.round(bestWordCount / WORDS_PER_SEC)}s`);
+            console.log(`✅ Script finalized (NVIDIA Mistral-large): "${bestResult.videoTitle}" | ${bestResult.scenes?.length} scenes | ${bestWordCount} words ≈ ${Math.round(bestWordCount / WORDS_PER_SEC)}s`);
 
             return bestResult;
         });
@@ -2532,8 +2532,8 @@ export const generateMotionGraphic = inngest.createFunction(
             console.log(`🎬 Generating ${toProcess.length} Kling video clips for scenes: ${toProcess.map((c: any) => c.index + 1).join(', ')}`);
             const videoUrls: Record<number, string> = {};
 
-            // Get an API key for GPT-120b prompt generation
-            const mgKeys = (process.env.OPENROUTER_API_KEY || '').split(',').map((k: string) => k.trim()).filter(Boolean);
+            // Get an API key for Mistral prompt generation
+            const mgKeys = (process.env.NVIDIA_API_KEY || '').split(',').map((k: string) => k.trim()).filter(Boolean);
             const promptApiKey = mgKeys[0] || '';
 
             // Process Kling generations sequentially (they're long-running)

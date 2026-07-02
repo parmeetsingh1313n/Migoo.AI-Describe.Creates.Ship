@@ -33,8 +33,8 @@ interface ModelTier {
 
 const TIERS: ModelTier[] = [
     {
-        // Tier 1: openai/gpt-oss-120b:free (131K context, 117B MoE)
-        model: "openai/gpt-oss-120b:free",
+        // Tier 1: mistralai/mistral-large-3-675b-instruct-2512 (primary, best quality)
+        model: "mistralai/mistral-large-3-675b-instruct-2512",
         maxContentChars: 300_000,
         maxOutputTokens: 12_000,
         headChars: 10_000,
@@ -42,8 +42,8 @@ const TIERS: ModelTier[] = [
         minCharsPerSection: 2_000,
     },
     {
-        // Tier 2: nvidia/nemotron-3-super-120b-a12b:free (1M context, 120B MoE)
-        model: "nvidia/nemotron-3-super-120b-a12b:free",
+        // Tier 2: openai/gpt-oss-120b (fallback 1)
+        model: "openai/gpt-oss-120b",
         maxContentChars: 1_200_000,
         maxOutputTokens: 12_000,
         headChars: 10_000,
@@ -51,8 +51,8 @@ const TIERS: ModelTier[] = [
         minCharsPerSection: 2_000,
     },
     {
-        // Tier 3: nvidia/nemotron-3-ultra-550b-a55b:free (1M context, 550B MoE)
-        model: "nvidia/nemotron-3-ultra-550b-a55b:free",
+        // Tier 3: meta/llama-3.3-70b-instruct (fallback 2, fast, reliable)
+        model: "meta/llama-3.3-70b-instruct",
         maxContentChars: 1_200_000,
         maxOutputTokens: 12_000,
         headChars: 10_000,
@@ -151,10 +151,10 @@ function smartSample(content: string, tier: ModelTier): string {
 
 function getOpenRouterKeys(): string[] {
     const keys: string[] = [];
-    const base = process.env.OPENROUTER_API_KEY;
+    const base = process.env.NVIDIA_API_KEY;
     if (base) keys.push(base);
     for (let i = 1; i <= 9; i++) {
-        const k = process.env[`OPENROUTER_API_KEY${i}`];
+        const k = process.env[`NVIDIA_API_KEY${i}`];
         if (k) keys.push(k);
     }
     return keys;
@@ -168,7 +168,7 @@ async function callOpenRouterDirect(
     retries = 3,
 ): Promise<any> {
     const apiKeys = getOpenRouterKeys();
-    if (apiKeys.length === 0) throw new Error("No OPENROUTER_API_KEY configured");
+    if (apiKeys.length === 0) throw new Error("No NVIDIA_API_KEY configured");
 
     let keyIndex = 0;
     let lastError: any = null;
@@ -178,14 +178,12 @@ async function callOpenRouterDirect(
         const keyTag = apiKeys.length > 1 ? ` [key_${(keyIndex % apiKeys.length) + 1}/${apiKeys.length}]` : "";
 
         try {
-            console.log(`🤖 Querying OpenRouter (${model})${keyTag} (attempt ${attempt + 1}/${retries})...`);
-            const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+            console.log(`🤖 Querying NvidiaAPI (${model})${keyTag} (attempt ${attempt + 1}/${retries})...`);
+            const response = await fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
                 method: "POST",
                 headers: {
                     "Authorization": `Bearer ${apiKey}`,
                     "Content-Type": "application/json",
-                    "HTTP-Referer": "https://ai-video-course-generator.vercel.app",
-                    "X-Title": "AI Video Course Generator",
                 },
                 body: JSON.stringify({
                     model,
@@ -222,12 +220,12 @@ async function callOpenRouterDirect(
                     continue;
                 }
 
-                throw new Error(`OpenRouter API error (${response.status}): ${errText}`);
+                throw new Error(`NvidiaAPI error (${response.status}): ${errText}`);
             }
 
             const data = await response.json();
             const content = data.choices?.[0]?.message?.content?.trim() || "";
-            if (!content) throw new Error("Empty response from OpenRouter");
+            if (!content) throw new Error("Empty response from NvidiaAPI");
 
             const jsonStart = content.search(/[{[]/);
             if (jsonStart === -1) throw new Error("No JSON in response");
@@ -247,7 +245,7 @@ async function callOpenRouterDirect(
         }
     }
 
-    throw lastError || new Error("All OpenRouter retries exhausted");
+    throw lastError || new Error("All NvidiaAPI retries exhausted");
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────

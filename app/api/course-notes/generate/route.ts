@@ -203,18 +203,16 @@ ${slideContents}
 
 Return ONLY the raw JSON object.`;
 
-        // ── Step 3: Call OpenRouter directly (bypasses slide-specific json client) ──
+        // ── Step 3: Call NvidiaAPI directly (bypasses slide-specific json client) ──
         async function callOpenRouter(model: string): Promise<string> {
-            const apiKey = process.env.OPENROUTER_API_KEY || process.env.OPENROUTER_API_KEY1 || '';
-            if (!apiKey) throw new Error('No OPENROUTER_API_KEY configured');
+            const apiKey = process.env.NVIDIA_API_KEY || process.env.NVIDIA_API_KEY1 || '';
+            if (!apiKey) throw new Error('No NVIDIA_API_KEY configured');
 
-            const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+            const res = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
                 method: 'POST',
                 headers: {
                     'Authorization': `Bearer ${apiKey}`,
                     'Content-Type': 'application/json',
-                    'HTTP-Referer': 'https://ai-video-course-generator.vercel.app',
-                    'X-Title': 'Migoo AI Notes',
                 },
                 body: JSON.stringify({
                     model,
@@ -226,22 +224,22 @@ Return ONLY the raw JSON object.`;
                     max_tokens: 16000,
                 }),
             });
-            if (!res.ok) throw new Error(`OpenRouter ${model} failed: ${res.status}`);
+            if (!res.ok) throw new Error(`NvidiaAPI ${model} failed: ${res.status}`);
             const data = await res.json();
             const text = data.choices?.[0]?.message?.content;
-            if (!text) throw new Error('Empty response from OpenRouter');
+            if (!text) throw new Error('Empty response from NvidiaAPI');
             console.log(`📄 Raw notes response from [${model}]: ${text.length} chars`);
             return text;
         }
 
-        // ── Helper to call OpenRouter (fallback model) to plan beautiful image prompts ──
+        // ── Helper to call NvidiaAPI to plan beautiful image prompts ──
         async function callOpenRouterForPrompts(
             model: string,
             chapterTitle: string,
             slideContents: string
         ): Promise<string[]> {
-            const apiKey = process.env.OPENROUTER_API_KEY || process.env.OPENROUTER_API_KEY1 || '';
-            if (!apiKey) throw new Error('No OPENROUTER_API_KEY configured');
+            const apiKey = process.env.NVIDIA_API_KEY || process.env.NVIDIA_API_KEY1 || '';
+            if (!apiKey) throw new Error('No NVIDIA_API_KEY configured');
 
             const promptsSystemPrompt = `You are a visual design assistant specializing in creating highly effective image generation prompts for educational materials.
 Your job is to generate 4 distinct, highly detailed prompts for generating beautiful images representing the concepts in the study chapter.
@@ -272,13 +270,11 @@ ${slideContents}
 
 Return ONLY the raw JSON array of strings.`;
 
-            const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+            const res = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
                 method: 'POST',
                 headers: {
                     'Authorization': `Bearer ${apiKey}`,
                     'Content-Type': 'application/json',
-                    'HTTP-Referer': 'https://ai-video-course-generator.vercel.app',
-                    'X-Title': 'Migoo AI Notes Prompts',
                 },
                 body: JSON.stringify({
                     model,
@@ -290,10 +286,10 @@ Return ONLY the raw JSON array of strings.`;
                     max_tokens: 4000,
                 }),
             });
-            if (!res.ok) throw new Error(`OpenRouter ${model} failed for prompts: ${res.status}`);
+            if (!res.ok) throw new Error(`NvidiaAPI ${model} failed for prompts: ${res.status}`);
             const data = await res.json();
             const text = data.choices?.[0]?.message?.content;
-            if (!text) throw new Error('Empty response from OpenRouter prompts');
+            if (!text) throw new Error('Empty response from NvidiaAPI prompts');
             
             try {
                 let cleanText = text.trim()
@@ -326,32 +322,32 @@ Return ONLY the raw JSON array of strings.`;
 
         try {
             const [notesResult, promptsResult] = await Promise.all([
-                // 1. Notes Content Generation (gpt-oss-120b with Nemotron fallbacks)
+                // 1. Notes Content Generation (Mistral primary, gpt-oss-120b + llama fallbacks)
                 (async () => {
                     try {
-                        return await callOpenRouter('openai/gpt-oss-120b:free');
+                        return await callOpenRouter('mistralai/mistral-large-3-675b-instruct-2512');
                     } catch (primaryErr) {
-                        console.warn('⚠️ gpt-oss-120b failed, falling back to Nemotron Super for notes:', primaryErr);
+                        console.warn('⚠️ Mistral failed, falling back to gpt-oss-120b for notes:', primaryErr);
                         try {
-                            return await callOpenRouter('nvidia/nemotron-3-super-120b-a12b:free');
+                            return await callOpenRouter('openai/gpt-oss-120b');
                         } catch (superErr) {
-                            console.warn('⚠️ Nemotron Super failed, falling back to Nemotron Ultra for notes:', superErr);
-                            return await callOpenRouter('nvidia/nemotron-3-ultra-550b-a55b:free');
+                            console.warn('⚠️ gpt-oss-120b failed, falling back to llama-3.3-70b for notes:', superErr);
+                            return await callOpenRouter('meta/llama-3.3-70b-instruct');
                         }
                     }
                 })(),
-                // 2. Prompts Generation via gpt-oss-120b with Nemotron fallbacks
+                // 2. Prompts Generation via Mistral primary, with fallbacks
                 (async () => {
                     try {
-                        return await callOpenRouterForPrompts('openai/gpt-oss-120b:free', chapterTitle, slideContents);
+                        return await callOpenRouterForPrompts('mistralai/mistral-large-3-675b-instruct-2512', chapterTitle, slideContents);
                     } catch (err) {
-                        console.warn('⚠️ gpt-oss-120b prompts generation failed, trying Nemotron Super:', err);
+                        console.warn('⚠️ Mistral prompts failed, trying gpt-oss-120b:', err);
                         try {
-                            return await callOpenRouterForPrompts('nvidia/nemotron-3-super-120b-a12b:free', chapterTitle, slideContents);
+                            return await callOpenRouterForPrompts('openai/gpt-oss-120b', chapterTitle, slideContents);
                         } catch (superErr) {
-                            console.warn('⚠️ Nemotron Super prompts generation failed, trying Nemotron Ultra:', superErr);
+                            console.warn('⚠️ gpt-oss-120b prompts failed, trying llama-3.3-70b:', superErr);
                             try {
-                                return await callOpenRouterForPrompts('nvidia/nemotron-3-ultra-550b-a55b:free', chapterTitle, slideContents);
+                                return await callOpenRouterForPrompts('meta/llama-3.3-70b-instruct', chapterTitle, slideContents);
                             } catch (fallbackErr) {
                                 console.error('⚠️ Fallback prompts generation failed, using defaults:', fallbackErr);
                                 return [

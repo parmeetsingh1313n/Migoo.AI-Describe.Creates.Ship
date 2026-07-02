@@ -4,8 +4,8 @@
  * to the target language.
  *
  * PIPELINE ORDER:
- * 1. Try openai/gpt-oss-120b:free via OpenRouter.
- * 2. If it fails (due to 403 moderation filter, 429 rate limit, etc.),
+ * 1. Try mistralai/mistral-large-3-675b-instruct-2512 via NVIDIA (primary).
+ * 2. If it fails (due to rate limit, etc.),
  *    immediately fall back to Groq Llama 3.3 70B (llama-3.3-70b-versatile)
  *    for a fast, high-quality, and robust translation.
  */
@@ -49,9 +49,9 @@ export async function translateSingleText(
     const systemPrompt = `You are a professional ${langName} translator. Translate the given English text to natural, conversational ${langName}. Output ONLY the translated text, nothing else. No quotes, no labels, no explanations.`;
     const userPrompt = `Translate this English ${context} to ${langName}. Keep proper nouns, dates, and numbers intact. IMPORTANT: Always preserve respectful honorifics for spiritual/religious figures (e.g. "Ji", "Sahib", "PBUH", "AS") — never drop them. Output ONLY the translation:\n\n${text}`;
 
-    // 1. Try OpenAI (gpt-oss-120b:free) via OpenRouter first
+    // 1. Try Mistral via NVIDIA (primary — best multilingual)
     try {
-        console.log(`🤖 [translate] Trying OpenAI gpt-oss-120b:free for ${context}...`);
+        console.log(`🤖 [translate] Trying Mistral-large via NVIDIA for ${context}...`);
         const result = await shortsLLM.translate(
             systemPrompt,
             userPrompt,
@@ -63,11 +63,11 @@ export async function translateSingleText(
 
         const translated = result?.trim();
         if (translated && translated.length > 0) {
-            console.log(`✅ [translate] Success with OpenAI gpt-oss-120b:free`);
+            console.log(`✅ [translate] Success with Mistral-large via NVIDIA`);
             return translated;
         }
     } catch (error: any) {
-        console.warn(`⚠️ [translate] OpenAI gpt-oss-120b:free failed: ${error.message}. Shifting to Groq...`);
+        console.warn(`⚠️ [translate] NVIDIA Mistral failed: ${error.message}. Shifting to Groq...`);
     }
 
     // 2. Fallback: Shift directly to Groq Llama 3.3 70B!

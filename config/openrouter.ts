@@ -1,6 +1,8 @@
 /**
- * OpenRouter API Configuration
- * Primary: openai/gpt-oss-120b:free  |  Fallback: nvidia/nemotron-3-ultra-550b-a55b:free
+ * NVIDIA NIM API Configuration
+ * Primary: mistralai/mistral-large-3-675b-instruct-2512
+ * Fallback1: openai/gpt-oss-120b
+ * Fallback2: meta/llama-3.3-70b-instruct
  * Enhanced JSON parsing with HTML quote handling
  */
 
@@ -20,10 +22,10 @@ interface OpenRouterResponse {
 }
 
 class OpenRouterClient {
-    private baseUrl: string = 'https://openrouter.ai/api/v1';
-    private model: string = 'openai/gpt-oss-120b:free';
-    private fallbackModel: string = 'nvidia/nemotron-3-super-120b-a12b:free';
-    private lastFallbackModel: string = 'nvidia/nemotron-3-ultra-550b-a55b:free';
+    private baseUrl: string = 'https://integrate.api.nvidia.com/v1';
+    private model: string = 'mistralai/mistral-large-3-675b-instruct-2512';
+    private fallbackModel: string = 'openai/gpt-oss-120b';
+    private lastFallbackModel: string = 'meta/llama-3.3-70b-instruct';
 
     // Key rotation state (in-memory for this server session)
     private currentKeyIndex: number = 0;
@@ -31,22 +33,22 @@ class OpenRouterClient {
     constructor() {
         // No key caching — keys are read fresh on every call from process.env
         // so a server restart with a new key is immediately picked up.
-        const key = process.env.OPENROUTER_API_KEY || '';
+        const key = process.env.NVIDIA_API_KEY || '';
         if (!key) {
-            throw new Error('OPENROUTER_API_KEY is not set in environment variables');
+            throw new Error('NVIDIA_API_KEY is not set in environment variables');
         }
     }
 
     /**
-     * Collect all available OpenRouter API keys from env (fresh on every call).
-     * Supports OPENROUTER_API_KEY, OPENROUTER_API_KEY1 … OPENROUTER_API_KEY9
+     * Collect all available NVIDIA API keys from env (fresh on every call).
+     * Supports NVIDIA_API_KEY, NVIDIA_API_KEY1 … NVIDIA_API_KEY9
      */
     private getAllKeys(): string[] {
         const keys: string[] = [];
-        const base = process.env.OPENROUTER_API_KEY;
+        const base = process.env.NVIDIA_API_KEY;
         if (base) keys.push(base);
         for (let i = 1; i <= 9; i++) {
-            const k = process.env[`OPENROUTER_API_KEY${i}`];
+            const k = process.env[`NVIDIA_API_KEY${i}`];
             if (k) keys.push(k);
         }
         return keys;
@@ -55,7 +57,7 @@ class OpenRouterClient {
     /** Returns the currently active key */
     private getActiveKey(): string {
         const keys = this.getAllKeys();
-        if (keys.length === 0) throw new Error('No OPENROUTER_API_KEY found in environment');
+        if (keys.length === 0) throw new Error('No NVIDIA_API_KEY found in environment');
         // Clamp index in case env keys were removed
         this.currentKeyIndex = this.currentKeyIndex % keys.length;
         return keys[this.currentKeyIndex];
@@ -65,12 +67,12 @@ class OpenRouterClient {
     private rotateKey(): string {
         const keys = this.getAllKeys();
         if (keys.length <= 1) {
-            console.warn('⚠️  Only one OpenRouter API key available — cannot rotate');
+            console.warn('⚠️  Only one NVIDIA API key available — cannot rotate');
             return keys[0] || '';
         }
         const prev = this.currentKeyIndex + 1;
         this.currentKeyIndex = (this.currentKeyIndex + 1) % keys.length;
-        console.log(`🔄 OpenRouter key rotated: key${prev} → key${this.currentKeyIndex + 1} of ${keys.length}`);
+        console.log(`🔄 NvidiaAPI key rotated: key${prev} → key${this.currentKeyIndex + 1} of ${keys.length}`);
         return this.getActiveKey();
     }
 
@@ -95,8 +97,6 @@ class OpenRouterClient {
             headers: {
                 'Authorization': `Bearer ${apiKey}`,
                 'Content-Type': 'application/json',
-                'HTTP-Referer': 'https://ai-video-course-generator.vercel.app',
-                'X-Title': 'AI Video Course Generator',
             },
             body: JSON.stringify({
                 model,
@@ -114,7 +114,7 @@ class OpenRouterClient {
 
         if (response.status === 429 || response.status === 402) {
             const errorText = await response.text();
-            console.warn(`⚠️ OpenRouter rate/credit limit (${response.status}) on [${model}]: ${errorText.substring(0, 200)}`);
+            console.warn(`⚠️ NvidiaAPI rate limit (${response.status}) on [${model}]: ${errorText.substring(0, 200)}`);
             const err: any = new Error(`RATE_LIMIT: ${model} (${response.status})`);
             err.isRateLimit = true;
             throw err;
@@ -122,25 +122,25 @@ class OpenRouterClient {
 
         if (!response.ok) {
             const errorText = await response.text();
-            throw new Error(`OpenRouter API failed: ${response.status} - ${errorText}`);
+            throw new Error(`NvidiaAPI failed: ${response.status} - ${errorText}`);
         }
 
         const data: OpenRouterResponse = await response.json();
 
         // Treat empty choices as a soft rate-limit so we rotate keys
         if (!data.choices?.length) {
-            console.warn(`⚠️ OpenRouter returned empty choices array on [${model}] — treating as rate limit, rotating key...`);
-            const err: any = new Error(`Empty choices from OpenRouter on model ${model}`);
+            console.warn(`⚠️ NvidiaAPI returned empty choices array on [${model}] — treating as rate limit, rotating key...`);
+            const err: any = new Error(`Empty choices from NvidiaAPI on model ${model}`);
             err.isRateLimit = true;
             throw err;
         }
-        if (!data.choices[0]?.message)        throw new Error('No message in OpenRouter response');
-        if (!data.choices[0].message.content) throw new Error('No content in OpenRouter response');
+        if (!data.choices[0]?.message)        throw new Error('No message in NvidiaAPI response');
+        if (!data.choices[0].message.content) throw new Error('No content in NvidiaAPI response');
 
         const rawText      = data.choices[0].message.content;
         const finishReason = data.choices[0].finish_reason;
 
-        console.log(`✅ OpenRouter [${model}] response:`, {
+        console.log(`✅ NvidiaAPI [${model}] response:`, {
             length: rawText.length,
             tokens: data.usage?.total_tokens,
             finishReason,
@@ -208,7 +208,7 @@ CRITICAL STRUCTURAL & DESIGN MANDATES (override defaults):
             let activeSystemPrompt = systemPrompt + designBooster;
 
             if (isFallback) {
-                console.log(`🔀 Falling back from [${primaryModel}] to [${model}]...`);
+                console.log(`🔀 NvidiaAPI falling back from [${primaryModel}] to [${model}]...`);
                 
                 // Add extremely direct, simple, and high-impact rules to help the fallback model avoid common formatting and overcrowding mistakes
                 const fallbackBooster = `
@@ -230,12 +230,12 @@ CRITICAL STRUCTURAL & DESIGN MANDATES (override defaults):
             for (let keyAttempt = 0; keyAttempt < allKeys.length; keyAttempt++) {
                 const apiKey = this.getActiveKey();
                 // Model-specific token caps — use max supported to avoid ANY truncation
-                const modelMaxTokens = model.includes('gpt-oss-120b') || model.includes('nemotron-3-super') || model.includes('nemotron-3-ultra') || model.includes('nex-n2-pro') || model.includes('cobuddy') || model.includes('owl-alpha') || model.includes('north-mini-code') || model.includes('llama-3.3')
+                const modelMaxTokens = model.includes('mistral-large-3-675b') || model.includes('gpt-oss-120b') || model.includes('llama-3.3')
                     ? 65536
                     : model.includes('gpt-oss-20b')
                         ? 32768
                         : maxTokens;
-                console.log(`🔑 OpenRouter: model=${model}, key=${keyAttempt + 1}/${allKeys.length}, maxTokens=${modelMaxTokens}`);
+                console.log(`🔑 NvidiaAPI: model=${model}, key=${keyAttempt + 1}/${allKeys.length}, maxTokens=${modelMaxTokens}`);
 
                 try {
                     const { rawText, finishReason } = await this.callModel(
@@ -261,13 +261,13 @@ CRITICAL STRUCTURAL & DESIGN MANDATES (override defaults):
                         continue;
                     }
                     // Non-rate-limit error (network, parse, etc.) — move to next model
-                    console.error(`❌ OpenRouter error [${model}]:`, error.message);
+                    console.error(`❌ NvidiaAPI error [${model}]:`, error.message);
                     break;
                 }
             }
         }
 
-        console.error('❌ All OpenRouter keys and models exhausted.');
+        console.error('❌ All NvidiaAPI keys and models exhausted.');
         throw lastError;
     }
 
@@ -921,7 +921,7 @@ CRITICAL STRUCTURAL & DESIGN MANDATES (override defaults):
      * Test API connection
      */
     async test(): Promise<void> {
-        console.log(`🔗 Testing OpenRouter API with ${this.model}...`);
+        console.log(`🔗 Testing NvidiaAPI with ${this.model}...`);
 
         const url = `${this.baseUrl}/chat/completions`;
 
@@ -930,8 +930,6 @@ CRITICAL STRUCTURAL & DESIGN MANDATES (override defaults):
             headers: {
                 'Authorization': `Bearer ${this.getActiveKey()}`,
                 'Content-Type': 'application/json',
-                'HTTP-Referer': 'https://ai-video-course-generator.vercel.app',
-                'X-Title': 'AI Video Course Generator'
             },
             body: JSON.stringify({
                 model: this.model,
@@ -947,14 +945,14 @@ CRITICAL STRUCTURAL & DESIGN MANDATES (override defaults):
 
         if (!response.ok) {
             const errorText = await response.text();
-            throw new Error(`OpenRouter test failed: ${response.status} - ${errorText}`);
+            throw new Error(`NvidiaAPI test failed: ${response.status} - ${errorText}`);
         }
 
         const data = await response.json();
         if (!data || !data.choices || !data.choices[0] || !data.choices[0].message) {
-            throw new Error(`OpenRouter returned invalid response structure: ${JSON.stringify(data)}`);
+            throw new Error(`NvidiaAPI returned invalid response structure: ${JSON.stringify(data)}`);
         }
-        console.log('✅ OpenRouter API connected:', data.choices[0].message.content);
+        console.log('✅ NvidiaAPI connected:', data.choices[0].message.content);
     }
 }
 

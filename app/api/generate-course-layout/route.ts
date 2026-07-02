@@ -70,8 +70,8 @@ export async function POST(req: NextRequest) {
         // ═══════════════════════════════════════════════════════════════════
         // Generate comprehensive course layout
         // ═══════════════════════════════════════════════════════════════════
-        console.log('🤖 Generating comprehensive course layout with OpenRouter AI...');
-        console.log('Model: openai/gpt-oss-120b:free');
+        console.log('🤖 Generating comprehensive course layout with NvidiaAPI...');
+        console.log('Model: mistralai/mistral-large-3-675b-instruct-2512');
         console.log('Temperature: 0.7 (balanced creativity)');
         console.log('Max Tokens: 8000 (increased for detailed courses)');
 
@@ -79,13 +79,13 @@ export async function POST(req: NextRequest) {
             COURSE_CONFIG_PROMPT,
             userInput,
             {
-                model: 'openai/gpt-oss-120b:free',
+                model: 'mistralai/mistral-large-3-675b-instruct-2512',
                 temperature: 0.7,
                 maxTokens: 8000,
             }
         );
 
-        console.log('✅ OpenRouter API Response Received');
+        console.log('✅ NvidiaAPI Response Received');
         console.log('📊 Course Layout Statistics:', {
             courseName: result.courseName,
             courseId: result.courseId,
@@ -177,7 +177,7 @@ export async function POST(req: NextRequest) {
             course: courseResult[0],
             metadata: {
                 generatedAt: new Date().toISOString(),
-                model: 'cohere/north-mini-code:free',
+                model: 'mistralai/mistral-large-3-675b-instruct-2512',
                 courseId,
                 type,
                 courseName: result.courseName,

@@ -1,51 +1,52 @@
 /**
  * @module shorts-llm
- * @description OpenRouter LLM client for Shorts script + web-search fact distillation.
+ * @description NVIDIA NIM LLM client for Shorts script + web-search fact distillation.
  *
- * Primary:   openai/gpt-oss-120b:free  (117B MoE, free, strong reasoning)
- * Fallback1: nvidia/nemotron-3-super-120b-a12b:free
- * Fallback2: nvidia/nemotron-3-ultra-550b-a55b:free
+ * Primary:   mistralai/mistral-large-3-675b-instruct-2512  (675B MoE, creative, multilingual)
+ * Fallback1: openai/gpt-oss-120b                           (117B MoE, strong reasoning)
+ * Fallback2: meta/llama-3.3-70b-instruct                   (70B, fast, clean JSON)
  *
  * Drop-in replacement for groq.text() / aiFallback.json().
  * Does NOT touch config/openrouter.ts (the Studio slide generator).
  */
 
-const OPENROUTER_BASE = 'https://openrouter.ai/api/v1/chat/completions';
+const NVIDIA_BASE = 'https://integrate.api.nvidia.com/v1/chat/completions';
 
 const MODELS_TEXT: string[] = [
-    'openai/gpt-oss-120b:free',
-    'nvidia/nemotron-3-ultra-550b-a55b:free',
+    'mistralai/mistral-large-3-675b-instruct-2512',
+    'openai/gpt-oss-120b',
+    'meta/llama-3.3-70b-instruct',
 ];
 
 const MODELS_JSON: string[] = [
-    'openai/gpt-oss-120b:free',
-    'nvidia/nemotron-3-ultra-550b-a55b:free',
+    'mistralai/mistral-large-3-675b-instruct-2512',
+    'openai/gpt-oss-120b',
+    'meta/llama-3.3-70b-instruct',
 ];
 
-// Translation model list — excludes openai/gpt-oss-120b:free which consistently
-// gets 403 (moderation) on Hindi/Punjabi/Urdu religious & devotional content.
+// Translation model list — Mistral primary (best multilingual)
 const MODELS_TRANSLATE: string[] = [
-    'qwen/qwen3-next-80b-a3b-instruct:free',
-    'meta-llama/llama-3.3-70b-instruct:free',
-    'openai/gpt-oss-120b:free', // last resort only
+    'mistralai/mistral-large-3-675b-instruct-2512',
+    'meta/llama-3.3-70b-instruct',
+    'openai/gpt-oss-120b', // last resort only
 ];
 
 // Image prompt enrichment model list.
 const MODELS_ENRICH: string[] = [
-    'nvidia/nemotron-3-ultra-550b-a55b:free',
-    'meta-llama/llama-3.3-70b-instruct:free',
+    'mistralai/mistral-large-3-675b-instruct-2512',
+    'meta/llama-3.3-70b-instruct',
 ];
 
-// ── Key rotation (in-process) ─────────────────────────────────────────────────
+// ── Key rotation (in-process) ────────────────────────────────────────────────────────────────────
 
 let _keyIdx = 0;
 
 function getAllKeys(): string[] {
     const keys: string[] = [];
-    const base = process.env.OPENROUTER_API_KEY;
+    const base = process.env.NVIDIA_API_KEY;
     if (base) keys.push(base);
     for (let i = 1; i <= 9; i++) {
-        const k = process.env[`OPENROUTER_API_KEY${i}`];
+        const k = process.env[`NVIDIA_API_KEY${i}`];
         if (k) keys.push(k);
     }
     return keys;
@@ -53,7 +54,7 @@ function getAllKeys(): string[] {
 
 function getKey(): string {
     const keys = getAllKeys();
-    if (!keys.length) throw new Error('No OPENROUTER_API_KEY found in environment');
+    if (!keys.length) throw new Error('No NVIDIA_API_KEY found in environment');
     _keyIdx = _keyIdx % keys.length;
     return keys[_keyIdx];
 }
@@ -105,13 +106,11 @@ async function callModel(
         messages.push({ role: 'assistant', content: '{' });
     }
 
-    const res = await fetch(OPENROUTER_BASE, {
+    const res = await fetch(NVIDIA_BASE, {
         method: 'POST',
         headers: {
             'Authorization': `Bearer ${apiKey}`,
             'Content-Type': 'application/json',
-            'HTTP-Referer': 'https://ai-video-course-generator.vercel.app',
-            'X-Title': 'Migoo AI Shorts Generator',
         },
         body: JSON.stringify(body),
         signal: controller.signal,
@@ -121,7 +120,7 @@ async function callModel(
 
     if (res.status === 429 || res.status === 402) {
         const errBody = await res.text();
-        console.warn(`\u26A0\uFE0F [shorts-llm] rate/credit (${res.status}) on [${model}]: ${errBody.slice(0, 200)}`);
+        console.warn(`⚠️ [shorts-llm] rate limit (${res.status}) on [${model}]: ${errBody.slice(0, 200)}`);
         const err: any = new Error(`RATE_LIMIT: ${model} (${res.status})`);
         err.isRateLimit = true;
         throw err;
@@ -129,8 +128,8 @@ async function callModel(
 
     if (res.status === 403) {
         const errBody = await res.text();
-        console.warn(`\u26A0\uFE0F [shorts-llm] moderation block (403) on [${model}]: ${errBody.slice(0, 200)} \u2014 skipping model.`);
-        const err: any = new Error(`MODERATION_BLOCK: ${model} (403)`);
+        console.warn(`⚠️ [shorts-llm] blocked (403) on [${model}]: ${errBody.slice(0, 200)} — skipping model.`);
+        const err: any = new Error(`BLOCKED: ${model} (403)`);
         err.isRateLimit = true;
         throw err;
     }
@@ -175,7 +174,7 @@ async function tryModels(
     for (const model of models) {
         for (let ki = 0; ki < keys.length; ki++) {
             const apiKey = getKey();
-            console.log(`\uD83E\uDD16 [shorts-llm] model=${model} key=${_keyIdx + 1}/${keys.length} temp=${temperature}`);
+            console.log(`🤖 [shorts-llm] NvidiaAPI model=${model} key=${_keyIdx + 1}/${keys.length} temp=${temperature}`);
             try {
                 const { text, finishReason } = await callModel(model, systemPrompt, userMessage, temperature, maxTokens, apiKey, requireJson);
                 return { text, finishReason: (finishReason ?? null) as string | null };
@@ -462,7 +461,7 @@ export const shortsLLM = {
         options?: { temperature?: number; maxTokens?: number },
     ): Promise<string> {
         const { text } = await tryModels(
-            ['openai/gpt-oss-120b:free'],
+            ['mistralai/mistral-large-3-675b-instruct-2512'],
             systemPrompt,
             userPrompt,
             options?.temperature ?? 0.3,

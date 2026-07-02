@@ -27,10 +27,10 @@ const NOTES_STYLE_UUID = NANO_BANANA_STYLES["Illustration"];
  */
 function getOpenRouterKeys(): string[] {
     const keys: string[] = [];
-    const base = process.env.OPENROUTER_API_KEY;
+    const base = process.env.NVIDIA_API_KEY;
     if (base) keys.push(base);
     for (let i = 1; i <= 9; i++) {
-        const k = process.env[`OPENROUTER_API_KEY${i}`];
+        const k = process.env[`NVIDIA_API_KEY${i}`];
         if (k) keys.push(k);
     }
     return keys;
@@ -44,7 +44,7 @@ async function callOpenRouterDirect(
     retries = 3,
 ): Promise<any> {
     const apiKeys = getOpenRouterKeys();
-    if (apiKeys.length === 0) throw new Error("No OPENROUTER_API_KEY configured");
+    if (apiKeys.length === 0) throw new Error("No NVIDIA_API_KEY configured");
 
     let keyIndex = 0;
     let lastError: any = null;
@@ -54,14 +54,12 @@ async function callOpenRouterDirect(
         const keyTag = apiKeys.length > 1 ? ` [key_${(keyIndex % apiKeys.length) + 1}/${apiKeys.length}]` : "";
 
         try {
-            console.log(`🤖 Querying OpenRouter (${model})${keyTag} (attempt ${attempt + 1}/${retries})...`);
-            const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+            console.log(`🤖 Querying NvidiaAPI (${model})${keyTag} (attempt ${attempt + 1}/${retries})...`);
+            const response = await fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
                 method: "POST",
                 headers: {
                     "Authorization": `Bearer ${apiKey}`,
                     "Content-Type": "application/json",
-                    "HTTP-Referer": "https://ai-video-course-generator.vercel.app",
-                    "X-Title": "AI Video Course Generator",
                 },
                 body: JSON.stringify({
                     model,
@@ -102,7 +100,7 @@ async function callOpenRouterDirect(
         }
     }
 
-    throw lastError || new Error("All OpenRouter retries exhausted");
+    throw lastError || new Error("All NvidiaAPI retries exhausted");
 }
 
 async function planImagesWithOpenRouter(
@@ -137,12 +135,12 @@ Total pages: ${totalPages}
 Page breakdown:
 ${pagesSummary}`;
 
-    const models = ["openai/gpt-oss-120b:free", "nvidia/nemotron-3-super-120b-a12b:free", "nvidia/nemotron-3-ultra-550b-a55b:free"];
+    const models = ["mistralai/mistral-large-3-675b-instruct-2512", "openai/gpt-oss-120b", "meta/llama-3.3-70b-instruct"];
     let lastError: any = null;
 
     for (const model of models) {
         try {
-            console.log(`🧠 OpenRouter planning image placements using ${model}...`);
+            console.log(`🧠 NvidiaAPI planning image placements using ${model}...`);
             const parsed = await callOpenRouterDirect(systemPrompt, userMsg, model, 1024, 3);
             const images: Array<{ pageIndex: number; prompt: string }> = parsed?.images || [];
             return images

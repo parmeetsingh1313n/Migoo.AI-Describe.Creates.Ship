@@ -1,9 +1,10 @@
 /**
  * @module motion-graphics-llm
- * @description OpenRouter LLM client dedicated to the Motion Graphics pipeline.
+ * @description NVIDIA NIM LLM client dedicated to the Motion Graphics pipeline.
  *
- * Primary:  openai/gpt-oss-120b:free  (117B MoE, strong reasoning)
- * Fallback: nvidia/nemotron-3-ultra-550b-a55b:free (550B MoE, 1M ctx, agentic)
+ * Primary:  mistralai/mistral-large-3-675b-instruct-2512
+ * Fallback: openai/gpt-oss-120b
+ * Last:     meta/llama-3.3-70b-instruct
  *
  * NOTE: This file is intentionally separate from:
  *   - config/openrouter.ts  → used by the Course Slide generator (heavy JSON + HTML repair)
@@ -13,24 +14,24 @@
  * HTML-attribute-safe output format. The client here is purpose-built for that.
  */
 
-const OPENROUTER_BASE = 'https://openrouter.ai/api/v1/chat/completions';
+const NVIDIA_BASE = 'https://integrate.api.nvidia.com/v1/chat/completions';
 
 // ── Model priority ────────────────────────────────────────────────────────────
-const MG_PRIMARY_MODEL     = 'openai/gpt-oss-120b:free';
-const MG_FALLBACK_MODEL    = 'nvidia/nemotron-3-super-120b-a12b:free';
-const MG_LAST_RESORT_MODEL = 'nvidia/nemotron-3-ultra-550b-a55b:free';
-// Premium 120B model dedicated to cinematic voiceover rewriting
-const MG_VOICEOVER_MODEL   = 'openai/gpt-oss-120b:free';
+const MG_PRIMARY_MODEL     = 'mistralai/mistral-large-3-675b-instruct-2512';
+const MG_FALLBACK_MODEL    = 'openai/gpt-oss-120b';
+const MG_LAST_RESORT_MODEL = 'meta/llama-3.3-70b-instruct';
+// Premium model dedicated to cinematic voiceover rewriting
+const MG_VOICEOVER_MODEL   = 'mistralai/mistral-large-3-675b-instruct-2512';
 
 // ── Key rotation (in-process, shared across requests in this server session) ──
 let _mgKeyIdx = 0;
 
 function getMgKeys(): string[] {
     const keys: string[] = [];
-    const base = process.env.OPENROUTER_API_KEY;
+    const base = process.env.NVIDIA_API_KEY;
     if (base) keys.push(base);
     for (let i = 1; i <= 9; i++) {
-        const k = process.env[`OPENROUTER_API_KEY${i}`];
+        const k = process.env[`NVIDIA_API_KEY${i}`];
         if (k) keys.push(k);
     }
     return keys;
@@ -38,7 +39,7 @@ function getMgKeys(): string[] {
 
 function getMgKey(): string {
     const keys = getMgKeys();
-    if (!keys.length) throw new Error('No OPENROUTER_API_KEY found in environment');
+    if (!keys.length) throw new Error('No NVIDIA_API_KEY found in environment');
     _mgKeyIdx = _mgKeyIdx % keys.length;
     return keys[_mgKeyIdx];
 }
@@ -63,13 +64,11 @@ async function callMgModel(
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5 * 60 * 1000);
 
-    const res = await fetch(OPENROUTER_BASE, {
+    const res = await fetch(NVIDIA_BASE, {
         method: 'POST',
         headers: {
             'Authorization': `Bearer ${apiKey}`,
             'Content-Type': 'application/json',
-            'HTTP-Referer': 'https://ai-video-course-generator.vercel.app',
-            'X-Title': 'Migoo AI Motion Graphics',
         },
         body: JSON.stringify({
             model,
@@ -576,16 +575,14 @@ export const motionGraphicsLLM = {
             `Make it vivid, specific, physically plausible, and optimized for Kling's motion model.`;
 
         try {
-            const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+            const res = await fetch(NVIDIA_BASE, {
                 method: 'POST',
                 headers: {
                     'Authorization': `Bearer ${apiKey}`,
                     'Content-Type': 'application/json',
-                    'HTTP-Referer': 'https://ai-video-course-generator.vercel.app',
-                    'X-Title': 'Migoo AI Kling Prompt Generator',
                 },
                 body: JSON.stringify({
-                    model: MG_VOICEOVER_MODEL, // gpt-oss-120b:free
+                    model: MG_VOICEOVER_MODEL,
                     messages: [
                         { role: 'system', content: SYSTEM },
                         { role: 'user',   content: USER },
@@ -644,13 +641,11 @@ async function enhanceVoiceovers(
         sceneContext +
         `\n\nReturn ONLY a JSON array of ${scenes.length} rewritten strings. Start with [.`;
 
-    const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    const res = await fetch(NVIDIA_BASE, {
         method: 'POST',
         headers: {
             'Authorization': `Bearer ${apiKey}`,
             'Content-Type': 'application/json',
-            'HTTP-Referer': 'https://ai-video-course-generator.vercel.app',
-            'X-Title': 'Migoo AI Voiceover Enhancement',
         },
         body: JSON.stringify({
             model: MG_VOICEOVER_MODEL,
