@@ -95,15 +95,11 @@ async function callModel(
     };
 
     if (requireJson) {
-        // 1. Hint for models that natively support response_format
+        // NVIDIA NIM API does NOT support assistant prefill (causes 400 BadRequestError).
+        // Use response_format + a firm system instruction instead.
         body.response_format = { type: 'json_object' };
-        // 2. Assistant prefill — force the first output token to be '{'
-        //    This is the universal fix. Even models that IGNORE response_format
-        //    (e.g. Nemotron) cannot output thinking/analysis text before '{' because
-        //    they must CONTINUE an assistant turn that already began with '{'.
-        //    The returned text is the model's continuation after '{',
-        //    so the caller must prepend '{' when the response doesn't start with it.
-        messages.push({ role: 'assistant', content: '{' });
+        // Force the model to output only JSON via a clear system suffix:
+        // (already set in the jsonSystem prompt in shortsLLM.json — this is a belt-and-suspenders guard)
     }
 
     const res = await fetch(NVIDIA_BASE, {
@@ -142,13 +138,17 @@ async function callModel(
     const data = await res.json();
     const content = data?.choices?.[0]?.message?.content;
     if (!content) {
-        // If content is empty but reasoning is present, extract it as text fallback
-        const reasoning = data?.choices?.[0]?.message?.reasoning || data?.choices?.[0]?.message?.thinking;
+        // gpt-oss-120b (thinking model) puts output in reasoning_content when content is null.
+        // Also check legacy keys: reasoning / thinking.
+        const reasoning =
+            data?.choices?.[0]?.message?.reasoning_content ||
+            data?.choices?.[0]?.message?.reasoning ||
+            data?.choices?.[0]?.message?.thinking;
         if (reasoning) {
-            console.log(`\u2705 [shorts-llm] [${model}] returned empty content but found reasoning block (${reasoning.length} chars)`);
+            console.log(`✅ [shorts-llm] [${model}] content=null but reasoning_content found (${reasoning.length} chars) — using as text`);
             return { text: reasoning, finishReason: data?.choices?.[0]?.finish_reason };
         }
-        console.warn(`\u26A0\uFE0F [shorts-llm] empty choices or null content returned from [${model}]. Full response: ${JSON.stringify(data).slice(0, 300)}`);
+        console.warn(`⚠️ [shorts-llm] empty choices or null content returned from [${model}]. Full response: ${JSON.stringify(data).slice(0, 300)}`);
         const err: any = new Error(`[shorts-llm] empty choices from [${model}]`);
         err.isRateLimit = true;
         throw err;
@@ -436,10 +436,11 @@ export const shortsLLM = {
             true, // requireJson = true: sends response_format + assistant prefill '{'
         );
 
-        // The model's response is the CONTINUATION after the assistant prefill '{'.
-        // Prepend '{' unless the model already returned a full JSON starting with '{'.
+        // No assistant prefill — model outputs complete JSON starting with '{'
+        // Strip any thinking tags then locate the actual JSON boundary.
         const stripped = stripThinkingTags(raw).trim();
-        const cleaned  = stripped.startsWith('{') ? stripped : ('{' + stripped);
+        const jsonStart = stripped.search(/[{[]/);
+        const cleaned  = jsonStart >= 0 ? stripped.slice(jsonStart) : stripped;
 
         const explicitTrunc = finishReason === 'length';
         const wasTruncated  = explicitTrunc || (cleaned.trimEnd().slice(-1) !== '}' && cleaned.trimEnd().slice(-1) !== ']');
