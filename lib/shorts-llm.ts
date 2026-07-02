@@ -70,7 +70,7 @@ function rotateKey(): void {
     console.log(`🔄 [shorts-llm] key rotated → key${_keyIdx + 1}/${keys.length}`);
 }
 
-// ── Core HTTP call ────────────────────────────────────────────────────────────
+// ── Core HTTP call ───────────────────────────────────────────────────────────
 
 interface CallResult { text: string; finishReason?: string }
 
@@ -81,9 +81,28 @@ async function callModel(
     temperature: number,
     maxTokens: number,
     apiKey: string,
+    requireJson = false,
 ): Promise<CallResult> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5 * 60 * 1000);
+
+    const body: Record<string, any> = {
+        model,
+        messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user',   content: userMessage  },
+        ],
+        temperature,
+        max_tokens: maxTokens,
+    };
+
+    if (requireJson) {
+        // Force JSON-only output — suppresses thinking/scratchpad in reasoning models
+        // (Nemotron, Qwen-thinking, etc. spend ALL tokens on internal reasoning
+        //  then produce no JSON when token budget is exhausted).
+        body.response_format = { type: 'json_object' };
+        body.reasoning = { enabled: false };   // OpenRouter: suppress thinking tokens
+    }
 
     const res = await fetch(OPENROUTER_BASE, {
         method: 'POST',
@@ -93,15 +112,7 @@ async function callModel(
             'HTTP-Referer': 'https://ai-video-course-generator.vercel.app',
             'X-Title': 'Migoo AI Shorts Generator',
         },
-        body: JSON.stringify({
-            model,
-            messages: [
-                { role: 'system', content: systemPrompt },
-                { role: 'user',   content: userMessage  },
-            ],
-            temperature,
-            max_tokens: maxTokens,
-        }),
+        body: JSON.stringify(body),
         signal: controller.signal,
     });
 
@@ -150,6 +161,7 @@ async function tryModels(
     userMessage: string,
     temperature: number,
     maxTokens: number,
+    requireJson = false,
 ): Promise<{ text: string; finishReason: string | null }> {
     const keys = getAllKeys();
     let lastErr: any;
@@ -159,7 +171,7 @@ async function tryModels(
             const apiKey = getKey();
             console.log(`🤖 [shorts-llm] model=${model} key=${_keyIdx + 1}/${keys.length} temp=${temperature}`);
             try {
-                const { text, finishReason } = await callModel(model, systemPrompt, userMessage, temperature, maxTokens, apiKey);
+                const { text, finishReason } = await callModel(model, systemPrompt, userMessage, temperature, maxTokens, apiKey, requireJson);
                 return { text, finishReason: (finishReason ?? null) as string | null };
             } catch (err: any) {
                 lastErr = err;
@@ -194,7 +206,16 @@ function repairTruncated(s: string, opens: number, opena: number): any {
 }
 
 function extractJSON(raw: string, wasTruncated = false): any {
-    let s = raw.trim()
+    // ── Step 0: strip thinking/reasoning blocks from models like Nemotron, Qwen, DeepSeek ─
+    // These models emit <thinking>...</thinking> or <think>...</think> before JSON.
+    // When token budget is tight the thinking fills all tokens and JSON is never written.
+    // Strip any known thinking-block format BEFORE looking for JSON.
+    let s = raw
+        .replace(/<\|?thinking\|?>([\s\S]*?)<\/\|?thinking\|?>/gi, '')
+        .replace(/<think>([\s\S]*?)<\/think>/gi, '')
+        .replace(/\[THINKING\]([\s\S]*?)\[\/THINKING\]/gi, '')
+        .replace(/^(?:#{1,3}\s+)?(?:thinking|reasoning|analysis|scratchpad)[:\s][\s\S]*?(?=\{|\[)/i, '')
+        .trim()
         .replace(/^```json\s*/i, '').replace(/^```\s*/, '').replace(/```\s*$/, '')
         .replace(/<json>\s*/gi, '').replace(/\s*<\/json>/gi, '')
         .trim();
@@ -286,15 +307,27 @@ export const shortsLLM = {
             sysWithRule,
             userWithRule,
             options?.temperature ?? 0.7,
-            options?.maxTokens ?? 8192,
+            options?.maxTokens ?? 32768,
+            true, // requireJson: suppresses model reasoning / forces JSON output
         );
+
+        // Strip thinking tags defensively (in case response_format was ignored)
+        const cleaned = raw
+            .replace(/<\|?thinking\|?>([\s\S]*?)<\/\|?thinking\|?>/gi, '')
+            .replace(/<think>([\s\S]*?)<\/think>/gi, '')
+            .trim();
 
         // Detect truncation: explicit finish=length OR JSON visibly unclosed
         const explicitTrunc = finishReason === 'length';
-        const wasTruncated  = explicitTrunc || (raw.trimEnd().slice(-1) !== '}' && raw.trimEnd().slice(-1) !== ']');
+        const wasTruncated  = explicitTrunc || (cleaned.trimEnd().slice(-1) !== '}' && cleaned.trimEnd().slice(-1) !== ']');
         if (wasTruncated) console.warn(`⚠️ [shorts-llm] Truncation detected (finish=${finishReason}) — engaging repair...`);
 
-        return extractJSON(raw, wasTruncated);
+        // If cleaned response has no JSON at all, skip to next model via re-throw
+        if (!cleaned.includes('{') && !cleaned.includes('[')) {
+            console.warn(`⚠️ [shorts-llm] Model returned no JSON structure (thinking-only response) — check reasoning suppression`);
+        }
+
+        return extractJSON(cleaned, wasTruncated);
     },
 
     /**
