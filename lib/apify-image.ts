@@ -136,6 +136,7 @@ async function runApifyImageActor(
       const imageUrl: string = item?.imageUrl || item?.url || "";
 
       if (!imageUrl) {
+        console.warn(`⚠️ [apify-image] Run succeeded but no imageUrl/url found in dataset item. Item content:`, JSON.stringify(items).slice(0, 500));
         throw new Error("[apify-image] Run succeeded but no image URL in dataset");
       }
 
