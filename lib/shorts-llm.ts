@@ -97,11 +97,13 @@ async function callModel(
     };
 
     if (requireJson) {
-        // Force JSON-only output — suppresses thinking/scratchpad in reasoning models
-        // (Nemotron, Qwen-thinking, etc. spend ALL tokens on internal reasoning
-        //  then produce no JSON when token budget is exhausted).
+        // Guide the output format to JSON — most models respect this without needing to
+        // disable their internal reasoning/thinking chain.
+        // With maxTokens=32768, models have ample budget for:
+        //   ~8K tokens thinking + ~5K tokens JSON = well within 32K limit.
+        // We deliberately DO NOT disable reasoning — thinking produces higher quality output.
+        // Leftover thinking tags are stripped by extractJSON before parsing.
         body.response_format = { type: 'json_object' };
-        body.reasoning = { enabled: false };   // OpenRouter: suppress thinking tokens
     }
 
     const res = await fetch(OPENROUTER_BASE, {
