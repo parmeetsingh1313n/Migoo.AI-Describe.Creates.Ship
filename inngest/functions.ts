@@ -2058,6 +2058,7 @@ Rewrite so it VISUALLY DEPICTS the specific event in the narration. 65-90 words.
                 captionData: captionData,
                 imageUrls: imageData.imageUrls,
                 sceneVideoUrls: sceneVideoData.sceneVideoUrls,
+                sceneVideoDurations: sceneVideoData.sceneVideoDurations, // Save the actual video durations to DB
                 sceneThumbnailUrls: sceneVideoData.sceneThumbnailUrls,
                 avatarClipUrls, // Store intro/outro video URLs for reference
                 thumbnailUrl: thumbnailData.thumbnailUrl || null, // AI Generated Thumbnail

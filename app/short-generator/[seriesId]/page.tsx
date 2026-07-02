@@ -62,6 +62,8 @@ interface VideoAsset {
     audioDuration: number | null
     captionData: any
     imageUrls: string[] | null
+    sceneVideoUrls: string[] | null
+    sceneVideoDurations: number[] | null
     sceneThumbnailUrls: string[] | null
     avatarClipUrls: string[] | null
     videoUrl: string | null
@@ -991,6 +993,8 @@ function VideoPlayerDialog({ video, series, onClose }: { video: VideoAsset | nul
                                 }}
                                 inputProps={{
                                     imageUrls: video.imageUrls || [],
+                                    sceneVideoUrls: video.sceneVideoUrls || [],
+                                    sceneVideoDurations: video.sceneVideoDurations || [],
                                     avatarClipData: (video.avatarClipUrls || []).map((url: string) => url ? { url, motionDuration: undefined } : null),
                                     audioUrl: video.audioUrl || '',
                                     musicUrl: musicUrl,

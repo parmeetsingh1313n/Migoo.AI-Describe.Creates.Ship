@@ -109,6 +109,7 @@ export const shortVideoAssets = pgTable("short_video_assets", {
 
     // Scene video data from step 5.25 (image-to-video conversion)
     sceneVideoUrls: json("scene_video_urls"),            // ["videoUrl1", "videoUrl2", ...] per scene
+    sceneVideoDurations: json("scene_video_durations"),  // [duration1, duration2, ...] per scene duration after processing
     sceneThumbnailUrls: json("scene_thumbnail_urls"),    // ["thumbUrl1", "thumbUrl2", ...] per scene
 
     // Avatar clip data from step 5.5

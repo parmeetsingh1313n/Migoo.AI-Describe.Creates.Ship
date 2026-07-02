@@ -146,6 +146,7 @@ export async function POST(req: Request) {
         const props: Record<string, any> = {
             imageUrls: video.imageUrls || [],
             sceneVideoUrls: (video.sceneVideoUrls as string[]) || [],
+            sceneVideoDurations: (video.sceneVideoDurations as number[]) || [],
             audioUrl: video.audioUrl,
             audioDuration: video.audioDuration,
             musicUrl,
@@ -158,10 +159,6 @@ export async function POST(req: Request) {
         // Include intro/outro if we have full clip data
         if (introClip) props.introClip = introClip;
         if (outroClip) props.outroClip = outroClip;
-
-        // sceneVideoDurations are not stored in DB — Remotion Composition
-        // falls back to 5s default per scene, which triggers playbackRate
-        // calculation. This is fine for most cases.
 
         console.log(`🔄 Re-rendering video ${videoId} (${introClip ? 'with' : 'without'} intro/outro, duration=${totalDurationSec}s)`);
 

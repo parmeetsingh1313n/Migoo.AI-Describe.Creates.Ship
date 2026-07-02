@@ -64,6 +64,7 @@ export async function GET(
     const props: Record<string, any> = {
       imageUrls:           (video.imageUrls as string[])         || [],
       sceneVideoUrls:      (video.sceneVideoUrls as string[])    || [],
+      sceneVideoDurations:  (video.sceneVideoDurations as number[]) || [],
       audioUrl:            video.audioUrl || '',
       audioDuration:       video.audioDuration || 60,
       musicUrl,

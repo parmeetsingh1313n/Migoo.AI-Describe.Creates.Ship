@@ -31,6 +31,7 @@ export async function POST(req: Request) {
         const props: Record<string, any> = {
             imageUrls: video.imageUrls || [],
             sceneVideoUrls: (video.sceneVideoUrls as string[]) || [],
+            sceneVideoDurations: (video.sceneVideoDurations as number[]) || [],
             audioUrl: video.audioUrl,
             audioDuration: video.audioDuration,
             musicUrl,
