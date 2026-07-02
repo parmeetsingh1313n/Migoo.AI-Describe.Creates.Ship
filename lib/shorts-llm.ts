@@ -355,7 +355,7 @@ export const shortsLLM = {
             jsonSystem,
             jsonUser,
             (options?.temperature ?? 0.7) * 0.6,
-            options?.maxTokens ?? 32768,
+            Math.max(options?.maxTokens ?? 32768, 4096), // Enforce a safe minimum for JSON generation
             true, // requireJson = true: sends response_format + assistant prefill '{'
         );
 
