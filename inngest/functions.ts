@@ -1721,46 +1721,8 @@ Rewrite so it VISUALLY DEPICTS the specific event in the narration. 65-90 words.
             }
         }
 
-        // ── Step C2: Generate END images for each scene (prevents WAN hallucination) ──
-        // Each scene gets a dedicated "concluding frame" image generated via the same
-        // Apify pipeline. WAN uses imageUrl=start + endImageUrl=end to interpolate a
-        // clean 10-second motion arc from start to finish — no hallucination at the tail.
-        const finalEndImageUrls: string[] = new Array(scriptData.scenes.length).fill("");
-
-        if (!isCancelledBeforeSubmit && scenesNeedingImages.length > 0) {
-            console.log(`🎨 Generating ${scenesNeedingImages.length} END-FRAME images in parallel...`);
-            const endImagesResult = await step.run("generate-all-scene-end-images", async () => {
-                const endScenesInput = scenesNeedingImages.map(({ scene, i }: { scene: any; i: number }) => {
-                    // Build an advanced "concluding frame" prompt from the enriched prompt.
-                    // Different enough that WAN has a real destination to interpolate toward,
-                    // but visually consistent so the motion arc feels natural.
-                    const basePrompt = enrichedPrompts[i] || scene.imagePrompt || scene.narration || "Cinematic scene";
-                    const endPrompt = [
-                        `Concluding cinematic frame: ${basePrompt}`,
-                        "Final moment of the scene, story resolution, visual closure,",
-                        "slightly different composition than the opening frame,",
-                        "same lighting palette, same setting, same subject — but now in a natural resting position,",
-                        "camera has subtly settled, ambient stillness, cinematic end frame, no text, no watermarks.",
-                    ].join(" ");
-                    return { index: i, prompt: endPrompt, aspectRatio: "9:16" as const };
-                });
-                return await generateApifyImagesParallel(endScenesInput);
-            });
-
-            for (const res of endImagesResult) {
-                if (res.success && res.imageUrl) {
-                    finalEndImageUrls[res.index] = res.imageUrl;
-                    console.log(`✅ Scene ${res.index + 1}: end-frame image ready`);
-                } else {
-                    console.warn(`⚠️ Scene ${res.index + 1}: end-frame image failed (${res.error}) — WAN will run without endImageUrl`);
-                }
-            }
-        }
-
-
         const imageData = {
             imageUrls: finalImageUrls,
-            endImageUrls: finalEndImageUrls,  // per-scene concluding frame for WAN endImageUrl
             sceneOverrides: resolvedAssets.sceneOverrides,
             sceneProbedDurations: resolvedAssets.sceneProbedDurations
         };
@@ -1882,15 +1844,13 @@ Rewrite so it VISUALLY DEPICTS the specific event in the narration. 65-90 words.
                     videoPrompt += " Stationary camera, locked tripod, zero camera movement.";
                 videoPrompt += " Absolutely no text, titles, words, writing, captions, labels, or overlays.";
 
-                // ── Submit new Wan 2.2 task (with end-frame image) ───────────────────────
+                // ── Submit new Wan 2.2 task ──────────────────────────────────────────
                 try {
-                    const endImageUrl = imageData.endImageUrls?.[i] || undefined;
                     const { taskId, apiKey } = await submitSeedanceVideoTask(
                         sceneImageUrl,
                         videoPrompt,
                         "9:16",
-                        i,
-                        endImageUrl,     // 🎨 concluding frame — WAN interpolates start→end
+                        i
                     );
                     // Persist immediately so retries find it
                     try {
