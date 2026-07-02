@@ -15,13 +15,11 @@ const OPENROUTER_BASE = 'https://openrouter.ai/api/v1/chat/completions';
 const MODELS_TEXT: string[] = [
     'openai/gpt-oss-120b:free',
     'nvidia/nemotron-3-ultra-550b-a55b:free',
-    'meta-llama/llama-3.3-70b-instruct:free',
 ];
 
 const MODELS_JSON: string[] = [
     'openai/gpt-oss-120b:free',
     'nvidia/nemotron-3-ultra-550b-a55b:free',
-    'meta-llama/llama-3.3-70b-instruct:free',
 ];
 
 // Translation model list — excludes openai/gpt-oss-120b:free which consistently
@@ -145,6 +143,13 @@ async function callModel(
     const data = await res.json();
     const content = data?.choices?.[0]?.message?.content;
     if (!content) {
+        // If content is empty but reasoning is present, extract it as text fallback
+        const reasoning = data?.choices?.[0]?.message?.reasoning || data?.choices?.[0]?.message?.thinking;
+        if (reasoning) {
+            console.log(`\u2705 [shorts-llm] [${model}] returned empty content but found reasoning block (${reasoning.length} chars)`);
+            return { text: reasoning, finishReason: data?.choices?.[0]?.finish_reason };
+        }
+        console.warn(`\u26A0\uFE0F [shorts-llm] empty choices or null content returned from [${model}]. Full response: ${JSON.stringify(data).slice(0, 300)}`);
         const err: any = new Error(`[shorts-llm] empty choices from [${model}]`);
         err.isRateLimit = true;
         throw err;
