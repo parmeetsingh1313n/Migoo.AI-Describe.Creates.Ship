@@ -560,6 +560,28 @@ export const shortsLLM = {
         userPrompt: string,
         options?: { temperature?: number; maxTokens?: number },
     ): Promise<any> {
+        const maxTokens = options?.maxTokens ?? 8192;
+
+        // ── Skip Phase 1 reasoning for small/fast JSON calls ─────────────────
+        // Phase 1 uses a 10k-token budget — wasteful for tiny calls like topic discovery.
+        // Only run reasoning when the output is expected to be large (>512 tokens).
+        if (maxTokens <= 512) {
+            const jsonSystem = systemPrompt +
+                '\n\nCRITICAL: Output ONLY valid JSON. No markdown, no XML tags, no explanations. Start with { and end with }.';
+            const keys = getAllKeys();
+            const apiKey = getKey();
+            console.log(`🤖 [shorts-llm] json() direct (no reasoning, maxTokens=${maxTokens}) model=${MODELS_JSON[0]} key=${_keyIdx + 1}/${keys.length}`);
+            const { text: raw } = await callModel(MODELS_JSON[0], jsonSystem, userPrompt, options?.temperature ?? 0.7, maxTokens, apiKey, true);
+            const stripped = stripThinkingTags(raw).trim();
+            const jsonStart = stripped.search(/[{[]/);
+            const cleaned = jsonStart >= 0 ? stripped.slice(jsonStart) : stripped;
+            if (!cleaned.includes('{') && !cleaned.includes('[')) {
+                throw new Error('[shorts-llm] No JSON in direct response');
+            }
+            return extractJSON(cleaned, false);
+        }
+
+        // ── Full two-phase chain-of-thought for large JSON generation ─────────
         const reasoning = await this.reason(systemPrompt, userPrompt, options);
         const { text: raw, finishReason } = await this.jsonFromReasoning(systemPrompt, userPrompt, reasoning, options);
 
