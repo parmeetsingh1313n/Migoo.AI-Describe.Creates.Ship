@@ -6,8 +6,7 @@
  * Fallback1: openai/gpt-oss-120b                           (117B MoE, strong reasoning)
  * Fallback2: meta/llama-3.3-70b-instruct                   (70B, fast, clean JSON)
  *
- * Drop-in replacement for groq.text() / aiFallback.json().
- * Does NOT touch config/openrouter.ts (the Studio slide generator).
+ * Drop-in replacement for groq.text() / aiFallback.json()
  */
 
 const NVIDIA_BASE = 'https://integrate.api.nvidia.com/v1/chat/completions';
@@ -21,7 +20,6 @@ const MODELS_TEXT: string[] = [
 const MODELS_JSON: string[] = [
     'mistralai/mistral-large-3-675b-instruct-2512',
     'openai/gpt-oss-120b',
-    'meta/llama-3.3-70b-instruct',
 ];
 
 // Translation model list — Mistral primary (best multilingual)
@@ -52,9 +50,14 @@ function getAllKeys(): string[] {
     return keys;
 }
 
-function getKey(): string {
+function getKey(keyIndex?: number): string {
     const keys = getAllKeys();
     if (!keys.length) throw new Error('No NVIDIA_API_KEY found in environment');
+    if (keyIndex !== undefined) {
+        const k = keys[keyIndex % keys.length];
+        if (!k) throw new Error(`NVIDIA key index ${keyIndex} not configured`);
+        return k;
+    }
     _keyIdx = _keyIdx % keys.length;
     return keys[_keyIdx];
 }
@@ -63,7 +66,7 @@ function rotateKey(): void {
     const keys = getAllKeys();
     if (keys.length <= 1) return;
     _keyIdx = (_keyIdx + 1) % keys.length;
-    console.log(`\uD83D\uDD04 [shorts-llm] key rotated \u2192 key${_keyIdx + 1}/${keys.length}`);
+    console.log(`\uD83D\uDD04 [shorts-llm] key rotated → key${_keyIdx + 1}/${keys.length}`);
 }
 
 // ── Core HTTP call ────────────────────────────────────────────────────────────
@@ -190,6 +193,26 @@ async function tryModels(
     throw lastErr ?? new Error('[shorts-llm] all models exhausted');
 }
 
+/**
+ * Call a single specific model with a specific API key index.
+ * Used for keyed retry steps in Inngest (fresh Vercel invocations with a different key).
+ */
+export async function callSpecificModelWithKey(
+    model: string,
+    systemPrompt: string,
+    userMessage: string,
+    temperature: number,
+    maxTokens: number,
+    keyIndex: number,
+    requireJson = false,
+): Promise<{ text: string; finishReason: string | null }> {
+    const apiKey = getKey(keyIndex);
+    const keys = getAllKeys();
+    console.log(`🤖 [shorts-llm] callSpecificModelWithKey model=${model} key=${keyIndex + 1}/${keys.length} temp=${temperature}`);
+    const { text, finishReason } = await callModel(model, systemPrompt, userMessage, temperature, maxTokens, apiKey, requireJson);
+    return { text, finishReason: finishReason ?? null };
+}
+
 // ── Shared: strip thinking blocks from model output ───────────────────────────
 
 function stripThinkingTags(s: string): string {
@@ -200,8 +223,6 @@ function stripThinkingTags(s: string): string {
         .replace(/\[THINKING\][\s\S]*?\[\/THINKING\]/gi, '')
         .trim();
 }
-
-// ── JSON parser with truncation repair ───────────────────────────────────────
 
 // ── JSON parser with stack-based truncation repair ────────────────────────────
 
@@ -337,6 +358,88 @@ function extractJSON(raw: string, wasTruncated = false): any {
     throw new Error('[shorts-llm] JSON parsing and repair failed');
 }
 
+/**
+ * Parse and validate a script JSON response. Normalizes both flat scene1/scene2 keys
+ * AND scenes:[] array format into a unified {scenes: [...]} shape.
+ * Returns null if the parsed object is missing scenes entirely.
+ */
+export function parseScriptJSON(raw: string, sceneCount: number): { result: any; missing: string } | null {
+    let parsed: any;
+    try {
+        // strip <json> tags, markdown fences, thinking blocks
+        const cleaned = raw
+            .replace(/<\|thinking\|>[\s\S]*?<\/\|thinking\|>/gi, '')
+            .replace(/<thinking>[\s\S]*?<\/thinking>/gi, '')
+            .replace(/<think>[\s\S]*?<\/think>/gi, '')
+            .replace(/^```json\s*/im, '').replace(/```\s*$/m, '')
+            .replace(/<json>\s*/gi, '').replace(/\s*<\/json>/gi, '')
+            .trim();
+
+        // find JSON start
+        const jsonStart = cleaned.search(/[{[]/);
+        if (jsonStart < 0) return null;
+        const jsonStr = cleaned.slice(jsonStart);
+
+        try {
+            parsed = JSON.parse(jsonStr);
+        } catch {
+            parsed = repairTruncated(jsonStr);
+        }
+    } catch (e: any) {
+        console.warn(`⚠️ [shorts-llm] parseScriptJSON parse error: ${e.message}`);
+        return null;
+    }
+
+    if (!parsed || typeof parsed !== 'object') return null;
+
+    // ── Normalize scenes ─────────────────────────────────────────────────────
+    // Case 1: model returned flat scene1…sceneN keys
+    if (!parsed.scenes || !Array.isArray(parsed.scenes) || parsed.scenes.length === 0) {
+        const extracted: any[] = [];
+        for (let i = 1; i <= sceneCount; i++) {
+            const key = `scene${i}`;
+            if (parsed[key] && typeof parsed[key] === 'object') {
+                extracted.push({ ...parsed[key], sceneNumber: i });
+                delete parsed[key];
+            }
+        }
+        if (extracted.length > 0) {
+            parsed.scenes = extracted;
+        }
+    }
+
+    // Case 2: model returned scenes as array (already handled above if extracted.length > 0)
+    // but make sure sceneNumber is set
+    if (Array.isArray(parsed.scenes)) {
+        parsed.scenes = parsed.scenes.map((s: any, idx: number) => ({
+            ...s,
+            sceneNumber: s.sceneNumber ?? (idx + 1),
+        }));
+    }
+
+    // ── Validate completeness ─────────────────────────────────────────────────
+    const missing: string[] = [];
+
+    if (!parsed.scenes || parsed.scenes.length < sceneCount) {
+        missing.push(`scenes: got ${parsed.scenes?.length ?? 0}/${sceneCount}`);
+    }
+
+    if (parsed.scenes?.length >= sceneCount) {
+        for (const scene of parsed.scenes.slice(0, sceneCount)) {
+            if (!scene.narration || scene.narration.trim().length < 10) {
+                missing.push(`scene${scene.sceneNumber} missing narration`);
+                break;
+            }
+        }
+    }
+
+    if (missing.length > 0) {
+        return { result: parsed, missing: missing.join('; ') };
+    }
+
+    return { result: parsed, missing: '' };
+}
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 export const shortsLLM = {
@@ -356,24 +459,6 @@ export const shortsLLM = {
         return text;
     },
 
-    /**
-     * Two-phase chain-of-thought JSON generation.
-     *
-     * PHASE 1 — Reasoning Pass (free-form, no JSON constraint):
-     *   Model thinks deeply: analyzes topic, plans narrative arc, identifies key
-     *   facts, visual descriptions, scene structure. No JSON yet.
-     *   Budget: 10,000 tokens of pure reasoning.
-     *   Stored and truncated to 6,000 chars before injecting into Phase 2.
-     *
-     * PHASE 2 — JSON Generation Pass (assistant prefill + response_format):
-     *   Phase 1 reasoning injected as explicit context ("YOUR ANALYSIS & PLAN").
-     *   Assistant prefill '{' forces the model's FIRST output token to be '{'.
-     *   This is the universal fix — even models that ignore response_format
-     *   (Nemotron etc.) CANNOT output thinking text before '{'.
-     *   Budget: 32,768 tokens of pure JSON.
-     *
-     * Result: full thinking quality + complete, parseable JSON. No trade-off.
-     */
     /**
      * PHASE 1: Reasoning Pass (free-form text, no JSON constraint)
      */
@@ -409,14 +494,16 @@ export const shortsLLM = {
     },
 
     /**
-     * PHASE 2: JSON Generation Pass (injects Phase 1 reasoning)
+     * PHASE 2: JSON Generation Pass (injects Phase 1 reasoning).
+     * Tries Mistral-large first, then GPT-oss-120b — NO retry on the same model.
+     * Each model gets ONE attempt. If both fail, throws.
      */
     async jsonFromReasoning(
         systemPrompt: string,
         userPrompt: string,
         reasoning: string,
-        options?: { temperature?: number; maxTokens?: number },
-    ): Promise<any> {
+        options?: { temperature?: number; maxTokens?: number; keyIndex?: number },
+    ): Promise<{ text: string; finishReason: string | null }> {
         // Truncate reasoning to 6000 chars to prevent prompt bloat in Phase 2.
         const MAX_REASONING_CHARS = 6000;
         const truncatedReasoning = reasoning.length > MAX_REASONING_CHARS
@@ -438,16 +525,44 @@ export const shortsLLM = {
 
         console.log(`\uD83D\uDCCB [shorts-llm] Phase 2: JSON generation (reasoning: ${truncatedReasoning.length} chars used / ${reasoning.length} total)...`);
 
-        const { text: raw, finishReason } = await tryModels(
-            MODELS_JSON,
-            jsonSystem,
-            jsonUser,
-            (options?.temperature ?? 0.7) * 0.6,
-            Math.max(options?.maxTokens ?? 32768, 4096), // Enforce a safe minimum for JSON generation
-            true, // requireJson = true: sends response_format + assistant prefill '{'
-        );
+        const temp = (options?.temperature ?? 0.7) * 0.6;
+        const maxTok = Math.max(options?.maxTokens ?? 8192, 4096);
+        const keyIndex = options?.keyIndex;
 
-        // Strip any thinking tags then locate the actual JSON boundary.
+        // Try each model once — no intra-model retry
+        let lastErr: any;
+        for (const model of MODELS_JSON) {
+            try {
+                let result: { text: string; finishReason: string | null };
+                if (keyIndex !== undefined) {
+                    result = await callSpecificModelWithKey(model, jsonSystem, jsonUser, temp, maxTok, keyIndex, true);
+                } else {
+                    const keys = getAllKeys();
+                    const apiKey = getKey();
+                    console.log(`🤖 [shorts-llm] NvidiaAPI model=${model} key=${_keyIdx + 1}/${keys.length} temp=${temp}`);
+                    const { text, finishReason } = await callModel(model, jsonSystem, jsonUser, temp, maxTok, apiKey, true);
+                    result = { text, finishReason: finishReason ?? null };
+                }
+                console.log(`✅ [shorts-llm] [${model}] Phase 2 responded (${result.text.length} chars, finish=${result.finishReason})`);
+                return result;
+            } catch (err: any) {
+                lastErr = err;
+                console.error(`❌ [shorts-llm] [${model}] Phase 2 failed: ${err.message?.slice(0, 120)}`);
+                // Move to next model
+            }
+        }
+
+        throw lastErr ?? new Error('[shorts-llm] All Phase 2 models exhausted');
+    },
+
+    async json(
+        systemPrompt: string,
+        userPrompt: string,
+        options?: { temperature?: number; maxTokens?: number },
+    ): Promise<any> {
+        const reasoning = await this.reason(systemPrompt, userPrompt, options);
+        const { text: raw, finishReason } = await this.jsonFromReasoning(systemPrompt, userPrompt, reasoning, options);
+
         const stripped = stripThinkingTags(raw).trim();
         const jsonStart = stripped.search(/[{[]/);
         const cleaned  = jsonStart >= 0 ? stripped.slice(jsonStart) : stripped;
@@ -457,19 +572,10 @@ export const shortsLLM = {
         if (wasTruncated) console.warn(`\u26A0\uFE0F [shorts-llm] Truncation in Phase 2 (finish=${finishReason}) \u2014 engaging repair...`);
 
         if (!cleaned.includes('{') && !cleaned.includes('[')) {
-            throw new Error('[shorts-llm] No JSON in Phase 2 response \u2014 model produced text-only output despite assistant prefill');
+            throw new Error('[shorts-llm] No JSON in Phase 2 response');
         }
 
         return extractJSON(cleaned, wasTruncated);
-    },
-
-    async json(
-        systemPrompt: string,
-        userPrompt: string,
-        options?: { temperature?: number; maxTokens?: number },
-    ): Promise<any> {
-        const reasoning = await this.reason(systemPrompt, userPrompt, options);
-        return await this.jsonFromReasoning(systemPrompt, userPrompt, reasoning, options);
     },
 
     /**

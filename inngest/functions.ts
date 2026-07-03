@@ -10,7 +10,7 @@ import { triggerRender } from "@/lib/video-render";
 import { and, desc, eq, like, or } from "drizzle-orm";
 import { inngest } from "./client";
 import { groq } from "@/config/groq";
-import { shortsLLM } from "@/lib/shorts-llm";
+import { shortsLLM, parseScriptJSON, callSpecificModelWithKey } from "@/lib/shorts-llm";
 import { distillFactSheet, searchWeb } from "@/lib/web-search";
 
 // ─── Lightweight MP4 duration prober (works on serverless, no ffprobe) ────────
@@ -1000,8 +1000,8 @@ OUTPUT: JSON object wrapped in <json> and </json> tags.`;
             };
         });
 
-        // Step 2b: Generate Video Script JSON (Phase 2)
-        const scriptData = await step.run("generate-video-script", async () => {
+        // Step 2b: Generate Video Script JSON (Phase 2) — key1, Mistral then GPT-120b (one shot each)
+        const scriptDataRaw = await step.run("generate-video-script", async () => {
             // ── STUDIO MODE: Use pre-edited user script ─────────────────────
             if (studioPayload?.scriptData) {
                 console.log(`🎬 Studio mode: using pre-edited script (${studioPayload.scriptData.scenes?.length} scenes)`);
@@ -1012,93 +1012,188 @@ OUTPUT: JSON object wrapped in <json> and </json> tags.`;
             }
 
             const { systemPrompt, userPrompt, reasoning, sceneCount, WORDS_PER_SEC } = scriptReasoningData;
-            console.log(`📝 Phase 2: Generating script JSON schema structure...`);
+            const totalWordsMin = Math.ceil(100 * WORDS_PER_SEC);
 
-            const targetMinSec = 100;
-            const totalWordsMin = Math.ceil(targetMinSec * WORDS_PER_SEC);   // 250
-            const totalWordsMax = Math.ceil(140 * WORDS_PER_SEC);   // 350
+            // Build strict Phase 2 prompt with flat key schema
+            const MAX_REASONING_CHARS = 6000;
+            const truncatedReasoning = reasoning.length > MAX_REASONING_CHARS
+                ? reasoning.slice(0, MAX_REASONING_CHARS) + '\n... [analysis continues above]'
+                : reasoning;
 
-            // ── Generate with validation + retry ─────────────────────
-            const MAX_ATTEMPTS = 3;
+            const jsonSystem = systemPrompt +
+                '\n\nCRITICAL OUTPUT FORMAT:\n' +
+                '1. Output ONLY a single valid JSON object. No markdown, no code fences, no XML tags, no explanation.\n' +
+                '2. Use FLAT KEYS: "scene1", "scene2", "scene3", "scene4", "scene5", "scene6" — NOT a "scenes" array.\n' +
+                '3. Start your response with { and end with }.\n' +
+                '4. Every scene key MUST have: narration, imagePrompt, videoPrompt, sceneCategory, duration, wordCount.\n' +
+                `5. Producing fewer than ${sceneCount} scene keys = FAILURE. You MUST output all ${sceneCount}.`;
+
+            const reasoningBlock = truncatedReasoning.length > 0
+                ? '\n\n=== YOUR ANALYSIS & PLAN ===\n' + truncatedReasoning + '\n=== END OF ANALYSIS ===\n\n'
+                : '\n\n';
+
+            const jsonUser = userPrompt + reasoningBlock +
+                `Now output the complete JSON object with scene1 through scene${sceneCount} as FLAT KEYS (not an array). Start with { on this line:`;
+
+            // Try each model ONCE — Mistral-large first, then GPT-oss-120b
+            const MODELS_TO_TRY = [
+                'mistralai/mistral-large-3-675b-instruct-2512',
+                'openai/gpt-oss-120b',
+            ];
+
             let bestResult: any = null;
             let bestWordCount = 0;
 
-            for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-                console.log(`🔄 Script generation JSON attempt ${attempt}/${MAX_ATTEMPTS} (NVIDIA Mistral-large)...`);
-
+            for (const model of MODELS_TO_TRY) {
+                console.log(`🔄 [generate-video-script] Trying ${model} with key1...`);
                 try {
-                    const result = await shortsLLM.jsonFromReasoning(systemPrompt, userPrompt, reasoning, {
-                        temperature: attempt === 1 ? 0.7 : (attempt === 2 ? 0.8 : 0.85),
-                        maxTokens: 8192,
-                    });
-
-                    // ── Map explicit keys back to scenes array ────────────────
-                    if (!result.scenes || !Array.isArray(result.scenes) || result.scenes.length === 0) {
-                        const extractedScenes: any[] = [];
-                        for (let i = 1; i <= sceneCount; i++) {
-                            const sceneKey = `scene${i}`;
-                            if (result[sceneKey]) {
-                                extractedScenes.push({
-                                    ...result[sceneKey],
-                                    sceneNumber: i
-                                });
-                                delete result[sceneKey]; // cleanup
-                            }
-                        }
-                        result.scenes = extractedScenes;
-                    }
-
-                    if (!result.scenes || result.scenes.length < sceneCount) {
-                        throw new Error(`Generated only ${result.scenes?.length || 0} scenes, expected ${sceneCount}. Model likely truncated or ignored instructions.`);
-                    }
-
-                    // Count actual words across all scenes
-                    const actualWordCount = result.scenes.reduce(
-                        (sum: number, s: any) => sum + (s.narration?.split(/\s+/).length || 0),
-                        0
+                    const { text: raw } = await callSpecificModelWithKey(
+                        model, jsonSystem, jsonUser,
+                        0.42, 8192, 0, true // key index 0 = NVIDIA_API_KEY
                     );
 
-                    console.log(`📊 Attempt ${attempt}: ${actualWordCount} words (target: ${totalWordsMin}-${totalWordsMax}), ${result.scenes.length} scenes`);
+                    const parsed = parseScriptJSON(raw, sceneCount);
+                    if (!parsed) {
+                        console.error(`❌ [generate-video-script] ${model}: JSON parse returned null`);
+                        continue;
+                    }
+                    if (parsed.missing) {
+                        console.warn(`⚠️ [generate-video-script] ${model}: incomplete — ${parsed.missing}`);
+                        if (parsed.result && !bestResult) bestResult = parsed.result;
+                        continue;
+                    }
 
-                    // Keep the best result
+                    const actualWordCount = parsed.result.scenes.reduce(
+                        (sum: number, s: any) => sum + (s.narration?.split(/\s+/).length || 0), 0
+                    );
+                    console.log(`📊 [generate-video-script] ${model}: ${actualWordCount} words, ${parsed.result.scenes.length} scenes`);
+
                     if (actualWordCount > bestWordCount) {
-                        bestResult = result;
+                        bestResult = parsed.result;
                         bestWordCount = actualWordCount;
                     }
 
-                    // If word count is acceptable, use this result
                     if (actualWordCount >= totalWordsMin * 0.85) {
-                        console.log(`✅ Word count OK (${actualWordCount} ≥ ${Math.floor(totalWordsMin * 0.85)})`);
+                        console.log(`✅ [generate-video-script] ${model} passed word-count check`);
                         break;
                     }
-
-                    console.warn(`⚠️ Word count too low: ${actualWordCount} < ${totalWordsMin} (need 85%+)`);
+                    console.warn(`⚠️ [generate-video-script] ${model}: word count low (${actualWordCount}/${totalWordsMin})`);
                 } catch (err: any) {
-                    console.error(`❌ Attempt ${attempt} failed: ${err.message}`);
-                    // Continue to next attempt
+                    console.error(`❌ [generate-video-script] ${model} error: ${err.message?.slice(0, 200)}`);
                 }
             }
 
-            if (!bestResult) {
-                throw new Error('All script generation attempts failed. Please try again.');
+            if (!bestResult || !bestResult.scenes || bestResult.scenes.length < sceneCount) {
+                console.warn('⚠️ [generate-video-script] Both models failed on key1 — returning null for key2 retry');
+                return null; // Signal Step 2c to retry with key2
             }
 
-            // Recalculate accurate durations based on actual word counts
-            if (bestResult?.scenes) {
-                for (const scene of bestResult.scenes) {
-                    const words = scene.narration?.split(/\s+/).length || 0;
-                    scene.wordCount = words;
-                    scene.duration = Math.round(words / WORDS_PER_SEC);
+            // Recalculate durations
+            for (const scene of bestResult.scenes) {
+                const words = scene.narration?.split(/\s+/).length || 0;
+                scene.wordCount = words;
+                scene.duration = Math.round(words / WORDS_PER_SEC);
+            }
+            bestResult.totalWordCount = bestWordCount;
+            console.log(`✅ Script ready: "${bestResult.videoTitle}" | ${bestResult.scenes.length} scenes | ${bestWordCount} words`);
+            return bestResult;
+        });
+
+        // Step 2c: Retry with key2 in a fresh Vercel function (only fires if Step 2b returned null)
+        const scriptData = await step.run("generate-video-script-retry", async () => {
+            if (studioPayload?.scriptData) return studioPayload.scriptData;
+            if (scriptDataRaw !== null) return scriptDataRaw; // Step 2b succeeded — pass through
+
+            if (!scriptReasoningData) throw new Error('Missing script reasoning data');
+
+            const { systemPrompt, userPrompt, reasoning, sceneCount, WORDS_PER_SEC } = scriptReasoningData;
+            const totalWordsMin = Math.ceil(100 * WORDS_PER_SEC);
+
+            console.log(`🔁 [generate-video-script-retry] Both key1 models failed. Retrying with key2...`);
+
+            const MAX_REASONING_CHARS = 6000;
+            const truncatedReasoning = reasoning.length > MAX_REASONING_CHARS
+                ? reasoning.slice(0, MAX_REASONING_CHARS) + '\n... [analysis continues above]'
+                : reasoning;
+
+            const jsonSystem = systemPrompt +
+                '\n\nCRITICAL OUTPUT FORMAT:\n' +
+                '1. Output ONLY a single valid JSON object. No markdown, no code fences, no XML tags, no explanation.\n' +
+                '2. Use FLAT KEYS: "scene1", "scene2", "scene3", "scene4", "scene5", "scene6" — NOT a "scenes" array.\n' +
+                '3. Start your response with { and end with }.\n' +
+                '4. Every scene key MUST have: narration, imagePrompt, videoPrompt, sceneCategory, duration, wordCount.\n' +
+                `5. Producing fewer than ${sceneCount} scene keys = FAILURE. You MUST output all ${sceneCount}.`;
+
+            const reasoningBlock = truncatedReasoning.length > 0
+                ? '\n\n=== YOUR ANALYSIS & PLAN ===\n' + truncatedReasoning + '\n=== END OF ANALYSIS ===\n\n'
+                : '\n\n';
+
+            const jsonUser = userPrompt + reasoningBlock +
+                `Now output the complete JSON object with scene1 through scene${sceneCount} as FLAT KEYS (not an array). Start with { on this line:`;
+
+            const MODELS_TO_TRY = [
+                'mistralai/mistral-large-3-675b-instruct-2512',
+                'openai/gpt-oss-120b',
+            ];
+
+            let bestResult: any = null;
+            let bestWordCount = 0;
+
+            for (const model of MODELS_TO_TRY) {
+                console.log(`🔄 [generate-video-script-retry] Trying ${model} with key2...`);
+                try {
+                    const { text: raw } = await callSpecificModelWithKey(
+                        model, jsonSystem, jsonUser,
+                        0.48, 8192, 1, true // key index 1 = NVIDIA_API_KEY1
+                    );
+
+                    const parsed = parseScriptJSON(raw, sceneCount);
+                    if (!parsed) {
+                        console.error(`❌ [generate-video-script-retry] ${model}: JSON parse null`);
+                        continue;
+                    }
+                    if (parsed.missing) {
+                        console.warn(`⚠️ [generate-video-script-retry] ${model}: ${parsed.missing}`);
+                        if (parsed.result && !bestResult) bestResult = parsed.result;
+                        continue;
+                    }
+
+                    const actualWordCount = parsed.result.scenes.reduce(
+                        (sum: number, s: any) => sum + (s.narration?.split(/\s+/).length || 0), 0
+                    );
+                    console.log(`📊 [generate-video-script-retry] ${model}: ${actualWordCount} words, ${parsed.result.scenes.length} scenes`);
+
+                    if (actualWordCount > bestWordCount) {
+                        bestResult = parsed.result;
+                        bestWordCount = actualWordCount;
+                    }
+
+                    if (actualWordCount >= totalWordsMin * 0.85) {
+                        console.log(`✅ [generate-video-script-retry] ${model} passed`);
+                        break;
+                    }
+                } catch (err: any) {
+                    console.error(`❌ [generate-video-script-retry] ${model}: ${err.message?.slice(0, 200)}`);
                 }
-                bestResult.totalWordCount = bestWordCount;
             }
 
-            console.log(`✅ Script finalized (NVIDIA Mistral-large): "${bestResult.videoTitle}" | ${bestResult.scenes?.length} scenes | ${bestWordCount} words ≈ ${Math.round(bestWordCount / WORDS_PER_SEC)}s`);
+            if (!bestResult || !bestResult.scenes || bestResult.scenes.length < sceneCount) {
+                throw new Error('Script generation failed on both key1 and key2 across all models. Please retry the video.');
+            }
 
+            // Recalculate durations
+            for (const scene of bestResult.scenes) {
+                const words = scene.narration?.split(/\s+/).length || 0;
+                scene.wordCount = words;
+                scene.duration = Math.round(words / WORDS_PER_SEC);
+            }
+            bestResult.totalWordCount = bestWordCount;
+            console.log(`✅ Script ready (retry): "${bestResult.videoTitle}" | ${bestResult.scenes.length} scenes | ${bestWordCount} words`);
             return bestResult;
         });
 
         // ── Step 2.5: Translate to target language if not English ────────────────
+
         // We run each translation as a separate Inngest step so that:
         // 1. Every scene gets its own fresh 5-minute Vercel execution window.
         // 2. Inngest checkpoints progress, avoiding starting from scratch if a timeout occurs.
