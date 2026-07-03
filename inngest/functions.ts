@@ -737,12 +737,10 @@ Return ONLY a valid JSON object matching the schema above.`;
             if (studioPayload?.scriptData || !rawResearchSources?.length) return null;
             console.log(`🧠 Distilling fact sheet from ${rawResearchSources.length} sources...`);
             const factSheet = await distillFactSheet(chosenTopic, rawResearchSources as any);
-            const factCount = factSheet.split('\n').filter((l: string) => /^[•\-\*]/.test(l.trim())).length;
-            console.log(`📋 Fact sheet: ${factCount} verified facts from ${rawResearchSources.length} sources`);
-
-            // Rebuild context block from distilled fact sheet
             const wikiCount = (rawResearchSources as any[]).filter((s: any) => s.source === 'wikipedia').length;
             const webCount  = (rawResearchSources as any[]).filter((s: any) => s.source === 'tavily').length;
+            const factCount = factSheet.split('\n').filter((l: string) => /^[•\-\*]/.test(l.trim())).length;
+            console.log(`📋 Fact sheet: ${factCount} verified facts from ${rawResearchSources.length} sources`);
             const webContext = `
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 📚 VERIFIED RESEARCH (Deep-Crawl RAG — ${wikiCount} Wikipedia + ${webCount} web sources)
@@ -764,14 +762,10 @@ ${factSheet}
             return { webContext, factCount, sourcesCount: rawResearchSources.length };
         });
 
-        // Step 2: Generate Video Script — skip when Studio pre-edited script is provided
-        const scriptData = await step.run("generate-video-script", async () => {
-            // ── STUDIO MODE: Use pre-edited user script ─────────────────────
-            if (studioPayload?.scriptData) {
-                console.log(`🎬 Studio mode: using pre-edited script (${studioPayload.scriptData.scenes?.length} scenes)`);
-                return studioPayload.scriptData;
-            }
-            console.log(`📝 Generating video script for: "${seriesData.title}"`);
+        // Step 2a: Generate Video Script Reasoning (Phase 1)
+        const scriptReasoningData = await step.run("generate-video-script-reasoning", async () => {
+            if (studioPayload?.scriptData) return null;
+            console.log(`📝 Phase 1: Generating script reasoning/plan for: "${seriesData.title}"`);
 
             // ── Always target 80-120 seconds for engaging short videos ──
             const sceneCount = 6;
@@ -995,29 +989,45 @@ WRITING RULES:
 
 OUTPUT: JSON object wrapped in <json> and </json> tags.`;
 
+            const reasoning = await shortsLLM.reason(systemPrompt, userPrompt, { temperature: 0.8 });
+
+            return {
+                systemPrompt,
+                userPrompt,
+                reasoning,
+                sceneCount,
+                WORDS_PER_SEC
+            };
+        });
+
+        // Step 2b: Generate Video Script JSON (Phase 2)
+        const scriptData = await step.run("generate-video-script", async () => {
+            // ── STUDIO MODE: Use pre-edited user script ─────────────────────
+            if (studioPayload?.scriptData) {
+                console.log(`🎬 Studio mode: using pre-edited script (${studioPayload.scriptData.scenes?.length} scenes)`);
+                return studioPayload.scriptData;
+            }
+            if (!scriptReasoningData) {
+                throw new Error("Missing script reasoning data from Phase 1");
+            }
+
+            const { systemPrompt, userPrompt, reasoning, sceneCount, WORDS_PER_SEC } = scriptReasoningData;
+            console.log(`📝 Phase 2: Generating script JSON schema structure...`);
+
+            const targetMinSec = 100;
+            const totalWordsMin = Math.ceil(targetMinSec * WORDS_PER_SEC);   // 250
+            const totalWordsMax = Math.ceil(140 * WORDS_PER_SEC);   // 350
+
             // ── Generate with validation + retry ─────────────────────
             const MAX_ATTEMPTS = 3;
             let bestResult: any = null;
             let bestWordCount = 0;
 
             for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-                console.log(`🔄 Script generation attempt ${attempt}/${MAX_ATTEMPTS} (NVIDIA Mistral-large)...`);
+                console.log(`🔄 Script generation JSON attempt ${attempt}/${MAX_ATTEMPTS} (NVIDIA Mistral-large)...`);
 
                 try {
-                    const _sceneSchema = {
-                        type: 'object',
-                        properties: {
-                            narration: { type: 'string' },
-                            imagePrompt: { type: 'string' },
-                            videoPrompt: { type: 'string' },
-                            sceneCategory: { type: 'string', enum: ['real_entity', 'living_thing', 'general', 'doc_image'] },
-                            asset_url: { type: 'string', nullable: true },
-                            duration: { type: 'number' },
-                            wordCount: { type: 'number' },
-                        },
-                        required: ['narration', 'imagePrompt', 'videoPrompt', 'sceneCategory'],
-                    };
-                    const result = await shortsLLM.json(systemPrompt, userPrompt, {
+                    const result = await shortsLLM.jsonFromReasoning(systemPrompt, userPrompt, reasoning, {
                         temperature: attempt === 1 ? 0.7 : (attempt === 2 ? 0.8 : 0.85),
                         maxTokens: 8192,
                     });

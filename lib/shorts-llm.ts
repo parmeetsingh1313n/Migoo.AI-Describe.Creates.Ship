@@ -374,13 +374,14 @@ export const shortsLLM = {
      *
      * Result: full thinking quality + complete, parseable JSON. No trade-off.
      */
-    async json(
+    /**
+     * PHASE 1: Reasoning Pass (free-form text, no JSON constraint)
+     */
+    async reason(
         systemPrompt: string,
         userPrompt: string,
-        options?: { temperature?: number; maxTokens?: number },
-    ): Promise<any> {
-
-        // ── PHASE 1: Reasoning Pass ──────────────────────────────────────────
+        options?: { temperature?: number },
+    ): Promise<string> {
         const reasoningSystem =
             systemPrompt +
             '\n\n[ANALYSIS MODE] Think deeply and freely. Analyze the topic, plan the narrative arc, decide what facts to include in each scene, identify emotional beats and visual descriptions. DO NOT output JSON — output your analysis and plan as free-form text. Be thorough.';
@@ -389,7 +390,6 @@ export const shortsLLM = {
             userPrompt +
             '\n\nAnalyze and plan step-by-step. Cover: narrative structure, scene flow, key facts, visual descriptions per scene, voiceover tone. Write your full reasoning. Do not produce JSON in this step.';
 
-        let reasoning = '';
         try {
             console.log('\uD83E\uDDE0 [shorts-llm] Phase 1: full reasoning pass (no JSON constraint)...');
             const { text: r } = await tryModels(
@@ -399,13 +399,24 @@ export const shortsLLM = {
                 options?.temperature ?? 0.8,
                 10_000,
             );
-            reasoning = stripThinkingTags(r);
+            const reasoning = stripThinkingTags(r);
             console.log(`\uD83E\uDDE0 [shorts-llm] Phase 1 complete: ${reasoning.length} chars of reasoning stored`);
+            return reasoning;
         } catch (err: any) {
-            console.warn(`\u26A0\uFE0F [shorts-llm] Phase 1 reasoning failed (${err.message?.slice(0, 80)}) \u2014 Phase 2 will run without reasoning context`);
+            console.warn(`\u26A0\uFE0F [shorts-llm] Phase 1 reasoning failed (${err.message?.slice(0, 80)}) \u2014 returning empty reasoning`);
+            return '';
         }
+    },
 
-        // ── PHASE 2: JSON Generation Pass ────────────────────────────────────
+    /**
+     * PHASE 2: JSON Generation Pass (injects Phase 1 reasoning)
+     */
+    async jsonFromReasoning(
+        systemPrompt: string,
+        userPrompt: string,
+        reasoning: string,
+        options?: { temperature?: number; maxTokens?: number },
+    ): Promise<any> {
         // Truncate reasoning to 6000 chars to prevent prompt bloat in Phase 2.
         const MAX_REASONING_CHARS = 6000;
         const truncatedReasoning = reasoning.length > MAX_REASONING_CHARS
@@ -436,7 +447,6 @@ export const shortsLLM = {
             true, // requireJson = true: sends response_format + assistant prefill '{'
         );
 
-        // No assistant prefill — model outputs complete JSON starting with '{'
         // Strip any thinking tags then locate the actual JSON boundary.
         const stripped = stripThinkingTags(raw).trim();
         const jsonStart = stripped.search(/[{[]/);
@@ -451,6 +461,15 @@ export const shortsLLM = {
         }
 
         return extractJSON(cleaned, wasTruncated);
+    },
+
+    async json(
+        systemPrompt: string,
+        userPrompt: string,
+        options?: { temperature?: number; maxTokens?: number },
+    ): Promise<any> {
+        const reasoning = await this.reason(systemPrompt, userPrompt, options);
+        return await this.jsonFromReasoning(systemPrompt, userPrompt, reasoning, options);
     },
 
     /**
