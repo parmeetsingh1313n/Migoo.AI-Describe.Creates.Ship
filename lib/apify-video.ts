@@ -466,21 +466,21 @@ async function smoothStretchVideoBuffer(
     const trimDur = targetDuration;
     console.log(`✂️  [apify-video] Scene ${sceneIndex + 1}: trim path → ${trimDur.toFixed(2)}s (converting to 30fps CFR)`);
 
-    // Tier A: MCI optical-flow + tmix motion blur → cinema quality
+    // Tier A: OBMC motion-compensated interpolation → best quality, no timeout risk
     if (await tryCmd(
-      `minterpolate=fps=30:mi_mode=mci:scd=none,tmix=frames=3:weights='1 2 1'`,
-      trimDur, 30_000
+      `minterpolate=fps=30:mi_mode=obmc:scd=none`,
+      trimDur, 25_000
     )) {
       const buf = await applySmallSizeGate(readOutput()!);
       cleanup();
-      console.log(`✅ [apify-video] Scene ${sceneIndex + 1}: trim (MCI+tmix) → ${(buf.length / 1024).toFixed(0)} KB`);
+      console.log(`✅ [apify-video] Scene ${sceneIndex + 1}: trim (OBMC) → ${(buf.length / 1024).toFixed(0)} KB`);
       return { buffer: buf, reportedDuration: trimDur };
     }
 
-    // Tier B: blend crossfade → smooth, 2× faster
+    // Tier B: blend crossfade → smooth, faster fallback
     if (await tryCmd(
       `minterpolate=fps=30:mi_mode=blend:scd=none`,
-      trimDur, 20_000
+      trimDur, 18_000
     )) {
       const buf = await applySmallSizeGate(readOutput()!);
       cleanup();
@@ -488,7 +488,7 @@ async function smoothStretchVideoBuffer(
       return { buffer: buf, reportedDuration: trimDur };
     }
 
-    // Tier C: simple fps=30 conversion → fast safe fallback
+    // Tier C: simple fps=30 conversion → always works
     if (await tryCmd(
       `fps=30,setpts=PTS-STARTPTS`,
       trimDur, 10_000
@@ -503,44 +503,30 @@ async function smoothStretchVideoBuffer(
   }
 
   // ── STRETCH PATH: native video shorter than scene ─────────────────────────────
-  const needed    = targetDuration + 0.6;
+  const needed       = targetDuration + 0.6;
   const stretchRatio = needed / actualDuration;
-  const ratio     = stretchRatio.toFixed(6);
-  const needsSt   = Math.abs(actualDuration - needed) > 0.1;
+  const ratio        = stretchRatio.toFixed(6);
 
-  console.log(`📐 [apify-video] Scene ${sceneIndex + 1}: stretch → target=${needed.toFixed(2)}s (ratio=${ratio})`);
+  console.log(`📐 [apify-video] Scene ${sceneIndex + 1}: stretch → target=${needed.toFixed(2)}s (ratio=${stretchRatio.toFixed(2)}x)`);
 
-  const setptsFilter = `setpts=${ratio}*PTS,tpad=stop=6:stop_mode=clone`;
-  const blendFilter  = `minterpolate=fps=30:mi_mode=blend:scd=none,setpts=${ratio}*PTS,tpad=stop=6:stop_mode=clone`;
-  const mciFilter    = `minterpolate=fps=30:mi_mode=mci:scd=none,tmix=frames=3:weights='1 2 1',setpts=${ratio}*PTS,tpad=stop=6:stop_mode=clone`;
+  // Pre-built filters (no MCI anywhere)
+  // OBMC = Overlapped Block Motion Compensation: real motion-compensated interpolation,
+  // smoother than blend, far faster than MCI, no timeout risk even at 4x+ ratios.
+  const obmbFilter  = `minterpolate=fps=30:mi_mode=obmc:scd=none,setpts=${ratio}*PTS,tpad=stop=6:stop_mode=clone`;
+  const blendFilter = `minterpolate=fps=30:mi_mode=blend:scd=none,setpts=${ratio}*PTS,tpad=stop=6:stop_mode=clone`;
+  const setptsFilter = `setpts=${ratio}*PTS,fps=30,tpad=stop=6:stop_mode=clone`;
 
-  // ── Adaptive tier selection based on stretch ratio ─────────────────────────
-  // MCI+tmix is O(n²) per frame — for ratios > 2.5x it consistently times out
-  // on serverless (50s budget). For large ratios we skip MCI and go blend-first.
-  // All tiers always fall back safely to pure setpts.
-  const LARGE_RATIO_THRESHOLD = 2.5;
-  const isLargeRatio = stretchRatio > LARGE_RATIO_THRESHOLD;
-
-  const stretchTiers: Array<{ name: string; filter: string; timeout: number }> = isLargeRatio
-    ? [
-        // Large ratio: blend is fast enough and produces smooth results
-        { name: 'blend stretch',     filter: blendFilter,  timeout: 40_000 },
-        // Pure setpts — no interpolation, always works, zero quality loss on WAN output
-        { name: 'setpts fallback',   filter: setptsFilter, timeout: 20_000 },
-      ]
-    : [
-        // Small ratio: MCI is fast enough and gives cinema quality
-        { name: 'MCI+tmix stretch',  filter: mciFilter,    timeout: 50_000 },
-        { name: 'blend stretch',     filter: blendFilter,  timeout: 35_000 },
-        { name: 'setpts fallback',   filter: setptsFilter, timeout: 20_000 },
-      ];
-
-  if (isLargeRatio) {
-    console.log(`📐 [apify-video] Scene ${sceneIndex + 1}: large ratio (${stretchRatio.toFixed(2)}x > ${LARGE_RATIO_THRESHOLD}x) — skipping MCI, using blend-first`);
-  }
+  const stretchTiers: Array<{ name: string; filter: string; timeout: number }> = [
+    // Tier 1: OBMC — motion-compensated, real smooth slow-motion look
+    { name: 'OBMC stretch',    filter: obmbFilter,   timeout: 40_000 },
+    // Tier 2: blend — smooth temporal average, fast
+    { name: 'blend stretch',   filter: blendFilter,  timeout: 25_000 },
+    // Tier 3: setpts only — instant, safe, always works
+    { name: 'setpts fallback', filter: setptsFilter, timeout: 15_000 },
+  ];
 
   for (const tier of stretchTiers) {
-    console.log(`⏳ [apify-video] Scene ${sceneIndex + 1}: trying ${tier.name}...`);
+    console.log(`⏳ [apify-video] Scene ${sceneIndex + 1}: trying ${tier.name} (${stretchRatio.toFixed(2)}x)...`);
     if (await tryCmd(tier.filter, needed, tier.timeout)) {
       const buf = await applySmallSizeGate(readOutput()!);
       cleanup();
