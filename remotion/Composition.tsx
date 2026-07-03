@@ -707,11 +707,42 @@ const Captions: React.FC<{
   language?: string;
 }> = ({ segments, styleId = 'hormozi', language = 'en-IN' }) => {
   const frame = useCurrentFrame();
-  const { fps } = useVideoConfig();
-  // Sequence resets frame to 0 at contentStart. Audio also starts at contentStart with no delay.
-  // SYNC_OFFSET: 0 = captions appear exactly when the word is spoken (Whisper timestamps).
-  // Set negative to delay captions, positive to show them slightly early.
-  const SYNC_OFFSET = -0.5;
+  const { fps, durationInFrames } = useVideoConfig();
+
+  // ── Dynamic U-shaped caption sync ──────────────────────────────────────────
+  // The video is divided into 3 zones based on total playback position:
+  //
+  //   Zone 1 — START  (0%–33%):  captions run slightly AHEAD  → less delay
+  //   Zone 2 — MIDDLE (33%–67%): same timing as before         → baseline delay
+  //   Zone 3 — END    (67%–100%): captions run slightly AHEAD  → less delay
+  //
+  // SYNC_OFFSET semantics (matches Whisper timestamps):
+  //   negative = captions lag behind speech  (e.g. -0.5 = show 0.5s late)
+  //   positive = captions run ahead of speech (e.g. +0.1 = show 0.1s early)
+  //
+  // Zone offsets:
+  //   START / END : -0.15s   (0.35s less lag than middle → noticeably ahead)
+  //   MIDDLE      : -0.50s   (unchanged baseline)
+  //
+  // Easing exponent moves in sync — lower exponent at start/end = more linear
+  // word highlighting (crisper, snappier feel that matches the ahead timing).
+
+  const OFFSET_AHEAD  = -0.15;  // start & end zones
+  const OFFSET_MIDDLE = -0.50;  // middle zone (same as before)
+  const EXP_AHEAD     = 0.95;   // near-linear at start/end (slightly ease-in)
+  const EXP_MIDDLE    = 1.15;   // ease-out in middle (same as before)
+
+  // Smooth video progress (0 → 1) over the full composition
+  const videoProgress = durationInFrames > 0 ? frame / durationInFrames : 0;
+
+  // U-shaped blend factor: 1.0 at start and end, 0.0 at exact middle (0.5)
+  // Uses a smooth cosine curve → no abrupt jumps at zone boundaries
+  //   blend = 1 − sin(π × videoProgress)   [peaks at 0, trough at 0.5]
+  const uBlend = Math.max(0, 1 - Math.sin(Math.PI * videoProgress));
+
+  const SYNC_OFFSET     = OFFSET_MIDDLE + (OFFSET_AHEAD - OFFSET_MIDDLE) * uBlend;
+  const easingExponent  = EXP_MIDDLE    + (EXP_AHEAD   - EXP_MIDDLE)    * uBlend;
+
   const rawTime = (frame / fps) + SYNC_OFFSET;
 
   const style = useMemo(() =>
@@ -727,13 +758,13 @@ const Captions: React.FC<{
 
   // Calculate progress within the active segment
   const totalDuration = activeSegment.end - activeSegment.start;
-  const rawProgress = totalDuration > 0 
+  const rawProgress = totalDuration > 0
     ? Math.max(0, Math.min(1, (rawTime - activeSegment.start) / totalDuration))
     : 0;
 
-  // Apply a gentle ease-out/decelerating curve so the captions feel slightly slower/more relaxed,
-  // matching natural human speaking cadence which naturally slows down towards the end of a segment.
-  const adjustedProgress = Math.pow(rawProgress, 1.15); // Gently dampens and slows down highlights
+  // Apply dynamic easing curve: near-linear (crisp) at start/end, ease-out in middle.
+  // This makes word highlights match the U-shaped sync offset perfectly.
+  const adjustedProgress = Math.pow(rawProgress, easingExponent);
 
   // The effective currentTime to use for all calculations inside this segment:
   const currentTime = activeSegment.start + adjustedProgress * totalDuration;
