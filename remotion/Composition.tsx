@@ -709,39 +709,32 @@ const Captions: React.FC<{
   const frame = useCurrentFrame();
   const { fps, durationInFrames } = useVideoConfig();
 
-  // ── Dynamic U-shaped caption sync ──────────────────────────────────────────
-  // The video is divided into 3 zones based on total playback position:
+  // ── Progressive caption sync — forward ramp ───────────────────────────────
+  // The user confirmed: end of video feels great, start/middle need to be slower.
   //
-  //   Zone 1 — START  (0%–33%):  captions run slightly AHEAD  → less delay
-  //   Zone 2 — MIDDLE (33%–67%): same timing as before         → baseline delay
-  //   Zone 3 — END    (67%–100%): captions run slightly AHEAD  → less delay
+  // Solution: smooth linear ramp from delayed (start) → ahead (end):
   //
-  // SYNC_OFFSET semantics (matches Whisper timestamps):
-  //   negative = captions lag behind speech  (e.g. -0.5 = show 0.5s late)
-  //   positive = captions run ahead of speech (e.g. +0.1 = show 0.1s early)
+  //   videoProgress=0.0 → SYNC_OFFSET=-0.50  (same as original, captions slightly behind)
+  //   videoProgress=0.5 → SYNC_OFFSET=-0.33  (transitioning)
+  //   videoProgress=1.0 → SYNC_OFFSET=-0.15  (captions noticeably ahead → feels great)
   //
-  // Zone offsets:
-  //   START / END : -0.15s   (0.35s less lag than middle → noticeably ahead)
-  //   MIDDLE      : -0.50s   (unchanged baseline)
-  //
-  // Easing exponent moves in sync — lower exponent at start/end = more linear
-  // word highlighting (crisper, snappier feel that matches the ahead timing).
+  // No U-shape — purely progressive. The further into the video, the more
+  // ahead captions run. Smooth eased ramp so there's never a perceptible jump.
 
-  const OFFSET_AHEAD  = -0.15;  // start & end zones
-  const OFFSET_MIDDLE = -0.50;  // middle zone (same as before)
-  const EXP_AHEAD     = 0.95;   // near-linear at start/end (slightly ease-in)
-  const EXP_MIDDLE    = 1.15;   // ease-out in middle (same as before)
+  const OFFSET_START = -0.50;  // start: same delay as original
+  const OFFSET_END   = -0.15;  // end:   ahead of speech (user confirmed: great)
+  const EXP_START    =  1.15;  // ease-out (relaxed word highlights)
+  const EXP_END      =  0.95;  // near-linear (crisp word highlights)
 
   // Smooth video progress (0 → 1) over the full composition
   const videoProgress = durationInFrames > 0 ? frame / durationInFrames : 0;
 
-  // U-shaped blend factor: 1.0 at start and end, 0.0 at exact middle (0.5)
-  // Uses a smooth cosine curve → no abrupt jumps at zone boundaries
-  //   blend = 1 − sin(π × videoProgress)   [peaks at 0, trough at 0.5]
-  const uBlend = Math.max(0, 1 - Math.sin(Math.PI * videoProgress));
+  // Ease-in-out ramp so the transition feels natural, not mechanical
+  // smoothStep: 0 at start, 1 at end, S-curve in between
+  const smoothStep = videoProgress * videoProgress * (3 - 2 * videoProgress);
 
-  const SYNC_OFFSET     = OFFSET_MIDDLE + (OFFSET_AHEAD - OFFSET_MIDDLE) * uBlend;
-  const easingExponent  = EXP_MIDDLE    + (EXP_AHEAD   - EXP_MIDDLE)    * uBlend;
+  const SYNC_OFFSET    = OFFSET_START + (OFFSET_END - OFFSET_START) * smoothStep;
+  const easingExponent = EXP_START    + (EXP_END   - EXP_START)    * smoothStep;
 
   const rawTime = (frame / fps) + SYNC_OFFSET;
 
