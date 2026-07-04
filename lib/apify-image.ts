@@ -17,6 +17,10 @@
  *
  * Image Actor: fayoussef/bulk-ai-image-generator
  *  Actor ID: DX3hwU5XRNEJkpeC4
+ *
+ * Ultimate fallback (when ALL Apify tokens fail):
+ *  WaveSpeed GPT Image 2 (openai/gpt-image-2/text-to-image)
+ *  Rotates WAVESPEED_API_KEY … WAVESPEED_API_KEY_5 on quota errors.
  */
 
 const IMAGE_ACTOR_ID = "DX3hwU5XRNEJkpeC4";
@@ -64,6 +68,147 @@ function pickToken(
 
 async function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+// ─── WaveSpeed GPT Image 2 Fallback ───────────────────────────────────────────
+
+/**
+ * Collect all WAVESPEED_API_KEY, WAVESPEED_API_KEY_2 … WAVESPEED_API_KEY_5 from env.
+ */
+function getWaveSpeedKeys(): string[] {
+  const keyNames = [
+    "WAVESPEED_API_KEY",
+    "WAVESPEED_API_KEY_2",
+    "WAVESPEED_API_KEY_3",
+    "WAVESPEED_API_KEY_4",
+    "WAVESPEED_API_KEY_5",
+  ];
+  const keys: string[] = [];
+  for (const name of keyNames) {
+    const k = process.env[name];
+    if (k && k.length > 0 && !k.includes("PLACEHOLDER")) keys.push(k);
+  }
+  return keys;
+}
+
+/**
+ * Generate an image via WaveSpeed GPT Image 2 (openai/gpt-image-2/text-to-image).
+ * Rotates through up to 5 API keys on 429/403 quota errors.
+ * Returns the public output URL of the generated image.
+ */
+async function generateWaveSpeedImage(
+  prompt: string,
+  aspectRatio = "9:16"
+): Promise<string> {
+  const keys = getWaveSpeedKeys();
+  if (keys.length === 0) {
+    throw new Error(
+      "[wavespeed] No WAVESPEED_API_KEY_* found in env. Set WAVESPEED_API_KEY … WAVESPEED_API_KEY_5."
+    );
+  }
+
+  let lastErr = "";
+
+  for (let ki = 0; ki < keys.length; ki++) {
+    const key = keys[ki];
+    const keyLabel = ki === 0 ? "WAVESPEED_API_KEY" : `WAVESPEED_API_KEY_${ki + 1}`;
+    try {
+      console.log(`🎨 [wavespeed] Submitting with ${keyLabel} | aspectRatio: ${aspectRatio}`);
+
+      // ── Submit request ────────────────────────────────────────────────────────
+      const submitRes = await fetch(
+        "https://api.wavespeed.ai/api/v3/openai/gpt-image-2/text-to-image",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${key}`,
+          },
+          body: JSON.stringify({
+            prompt,
+            aspect_ratio: aspectRatio,
+            quality: "medium",
+            resolution: "1k",
+            output_format: "png",
+            enable_sync_mode: false,
+            enable_base64_output: false,
+          }),
+        }
+      );
+
+      if (!submitRes.ok) {
+        const errText = await submitRes.text();
+        if (submitRes.status === 429 || submitRes.status === 403) {
+          console.warn(
+            `⚠️ [wavespeed] [${keyLabel}] quota exceeded (${submitRes.status}) — rotating key`
+          );
+          lastErr = `QUOTA:${submitRes.status}`;
+          continue; // rotate to next key
+        }
+        throw new Error(
+          `[wavespeed] HTTP ${submitRes.status}: ${errText.slice(0, 200)}`
+        );
+      }
+
+      const submitData = await submitRes.json();
+      const requestId: string = submitData.id;
+      if (!requestId)
+        throw new Error("[wavespeed] No request ID returned in submit response");
+
+      console.log(`⏳ [wavespeed] [${keyLabel}] Submitted (id: ${requestId}), polling...`);
+
+      // ── Poll until complete ────────────────────────────────────────────────────
+      const startTime = Date.now();
+      const MAX_WAIT_MS = 120_000;
+
+      while (Date.now() - startTime < MAX_WAIT_MS) {
+        await sleep(3000);
+
+        const pollRes = await fetch(
+          `https://api.wavespeed.ai/api/v3/predictions/${requestId}`,
+          { headers: { Authorization: `Bearer ${key}` } }
+        );
+        if (!pollRes.ok) continue;
+
+        const pollData = await pollRes.json();
+        const status: string = pollData.status;
+
+        if (status === "completed") {
+          const outputs: string[] = pollData.outputs || [];
+          const imageUrl = outputs[0];
+          if (!imageUrl)
+            throw new Error(
+              "[wavespeed] completed but no output URL in response"
+            );
+          console.log(
+            `✅ [wavespeed] [${keyLabel}] Image ready: ${imageUrl.slice(0, 80)}`
+          );
+          return imageUrl;
+        }
+
+        if (status === "failed") {
+          throw new Error(
+            `[wavespeed] Task failed: ${pollData.error || "unknown error"}`
+          );
+        }
+
+        console.log(`⏳ [wavespeed] [${keyLabel}] Status: ${status}...`);
+      }
+
+      throw new Error("[wavespeed] Timed out waiting for image");
+    } catch (err: any) {
+      // If the key loop already handled a quota rotate via `continue`, we won't
+      // reach here for that key. For all other errors try next key.
+      lastErr = err.message ?? String(err);
+      console.warn(
+        `⚠️ [wavespeed] [${keyLabel}] failed: ${lastErr.slice(0, 120)}`
+      );
+    }
+  }
+
+  throw new Error(
+    `[wavespeed] All ${keys.length} key(s) exhausted. Last error: ${lastErr.slice(0, 150)}`
+  );
 }
 
 interface ApifyRunResult {
@@ -207,8 +352,21 @@ export async function generateApifyImage(
     }
   }
 
+  // ── All Apify tokens exhausted — try WaveSpeed GPT Image 2 as final fallback ──
+  console.warn(
+    `⚠️ [apify-image] All ${tokens.length} token(s) exhausted. Trying WaveSpeed GPT Image 2 fallback...`
+  );
+  try {
+    const wsUrl = await generateWaveSpeedImage(prompt, aspectRatio);
+    return wsUrl;
+  } catch (wsErr: any) {
+    console.error(
+      `❌ [wavespeed] Fallback also failed: ${wsErr.message?.slice(0, 120)}`
+    );
+  }
+
   throw new Error(
-    `[apify-image] All ${tokens.length} token(s) exhausted. Last error: ${lastErr.slice(0, 150)}`
+    `[apify-image] All ${tokens.length} token(s) exhausted + WaveSpeed fallback failed. Last apify error: ${lastErr.slice(0, 150)}`
   );
 }
 
@@ -274,7 +432,26 @@ export async function generateApifyImagesParallel(
       }
     }
 
-    console.error(`❌ [apify-image] Scene ${scene.index + 1} failed: ${lastErr.slice(0, 80)}`);
+    // ── All Apify tokens exhausted for this scene — try WaveSpeed GPT Image 2 ──
+    console.warn(
+      `⚠️ [apify-image] Scene ${scene.index + 1}: All Apify tokens exhausted. Trying WaveSpeed GPT Image 2 fallback...`
+    );
+    try {
+      const wsUrl = await generateWaveSpeedImage(scene.prompt, ar);
+      console.log(`✅ [wavespeed] Scene ${scene.index + 1} done via WaveSpeed GPT Image 2`);
+      return {
+        index: scene.index,
+        success: true,
+        imageUrl: wsUrl,
+        signedUrl: wsUrl,
+      };
+    } catch (wsErr: any) {
+      console.error(
+        `❌ [wavespeed] Scene ${scene.index + 1} fallback failed: ${wsErr.message?.slice(0, 120)}`
+      );
+    }
+
+    console.error(`❌ [apify-image] Scene ${scene.index + 1} failed (Apify + WaveSpeed): ${lastErr.slice(0, 80)}`);
     return { index: scene.index, success: false, error: lastErr };
   });
 
