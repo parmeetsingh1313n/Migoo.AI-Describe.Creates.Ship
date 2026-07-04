@@ -92,6 +92,8 @@ export interface ApifyVideoTask {
 
 /**
  * Submit one image-to-video job to Apify (async, does not wait).
+ * Automatically rotates through ALL available tokens when a token's monthly
+ * quota is exceeded (403) or rate-limited (429).
  * Returns a task handle for polling.
  */
 export async function submitApifyVideoTask(
@@ -100,12 +102,13 @@ export async function submitApifyVideoTask(
   sceneIndex: number,
 ): Promise<ApifyVideoTask> {
   const tokens = getApifyTokens();
-  const { token, tokenIdx } = pickToken(sceneIndex, tokens);
 
-  // Upload start image so Wan 2.2 can fetch it
+  // Prime-offset starting slot — same strategy as apify-image.ts
+  const startIdx = ((sceneIndex * PRIME_OFFSET) + VIDEO_KEY_OFFSET) % tokens.length;
+
+  // Upload the source image once (before we start trying tokens)
   const publicImageUrl = await uploadImageForVideo(imageUrl);
 
-  const runUrl = `https://api.apify.com/v2/actors/${VIDEO_ACTOR_ID}/runs?token=${token}`;
   const input: Record<string, any> = {
     imageUrl:       publicImageUrl,
     prompt:         videoPrompt,
@@ -116,22 +119,55 @@ export async function submitApifyVideoTask(
     cfgScale:       1,
   };
 
-  const submitRes = await fetch(runUrl, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(input),
-  });
+  let lastErr = "";
 
-  if (!submitRes.ok) {
-    const err = await submitRes.text();
-    throw new Error(`[apify-video] Submit failed (${submitRes.status}): ${err.slice(0, 200)}`);
+  // Try every token in rotation until one succeeds
+  for (let ki = 0; ki < tokens.length; ki++) {
+    const tokenIdx = (startIdx + ki) % tokens.length;
+    const token    = tokens[tokenIdx];
+    const keyLabel = `token_${tokenIdx + 1}`;
+
+    try {
+      console.log(`🎬 [apify-video] Scene ${sceneIndex + 1} submitting | ${keyLabel} | attempt ${ki + 1}/${tokens.length}`);
+
+      const runUrl = `https://api.apify.com/v2/actors/${VIDEO_ACTOR_ID}/runs?token=${token}`;
+      const submitRes = await fetch(runUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input),
+      });
+
+      if (!submitRes.ok) {
+        const errText = await submitRes.text();
+        // 403 = quota/limit exceeded, 429 = rate limited — rotate to next token
+        if (submitRes.status === 403 || submitRes.status === 429) {
+          console.warn(
+            `⚠️ [apify-video] [${keyLabel}] quota/rate limit (${submitRes.status}) — rotating to next token. Detail: ${errText.slice(0, 150)}`
+          );
+          lastErr = `[apify-video] Submit failed (${submitRes.status}): ${errText.slice(0, 200)}`;
+          continue; // try next token
+        }
+        // All other HTTP errors — throw immediately (no point rotating)
+        throw new Error(`[apify-video] Submit failed (${submitRes.status}): ${errText.slice(0, 200)}`);
+      }
+
+      const runId: string = (await submitRes.json()).data?.id;
+      if (!runId) throw new Error("[apify-video] No run ID returned");
+
+      console.log(`✅ [apify-video] Scene ${sceneIndex + 1} submitted | runId=${runId} | ${keyLabel}`);
+      return { runId, tokenIdx, sceneIndex };
+
+    } catch (err: any) {
+      // Re-throw non-quota errors immediately; quota errors were handled above via `continue`
+      if (lastErr && err.message === lastErr) continue; // already logged above
+      lastErr = err.message ?? String(err);
+      console.warn(`⚠️ [apify-video] [${keyLabel}] failed: ${lastErr.slice(0, 120)}`);
+    }
   }
 
-  const runId: string = (await submitRes.json()).data?.id;
-  if (!runId) throw new Error("[apify-video] No run ID returned");
-
-  console.log(`🎬 [apify-video] Scene ${sceneIndex + 1} submitted | runId=${runId} | token_${tokenIdx + 1}`);
-  return { runId, tokenIdx, sceneIndex };
+  throw new Error(
+    `[apify-video] All ${tokens.length} token(s) exhausted for Scene ${sceneIndex + 1}. Last error: ${lastErr.slice(0, 200)}`
+  );
 }
 
 // ─── Video Task Status Check ──────────────────────────────────────────────────
