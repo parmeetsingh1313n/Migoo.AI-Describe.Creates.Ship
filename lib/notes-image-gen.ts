@@ -55,12 +55,6 @@ async function callOpenRouterDirect(
 
         try {
             console.log(`🤖 Querying NvidiaAPI (${model})${keyTag} (attempt ${attempt + 1}/${retries})...`);
-            const response = await fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
-                method: "POST",
-                headers: {
-                    "Authorization": `Bearer ${apiKey}`,
-                    "Content-Type": "application/json",
-                },
                 const requestBody: Record<string, any> = {
                     model,
                     messages: [
