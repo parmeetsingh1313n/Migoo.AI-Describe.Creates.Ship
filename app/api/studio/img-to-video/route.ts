@@ -546,11 +546,10 @@ export async function processImgToVideo({
     let lastErr = "";
 
     for (let attempt = 0; attempt < MAX_RUN_ATTEMPTS; attempt++) {
-        // Shift the starting token slot on retry to avoid re-hitting the same account
-        const shiftedIndex = sceneIndex + attempt * Math.ceil(allTokens.length / 2);
+        const slotOffset = attempt * Math.ceil(allTokens.length / 2);
         try {
-            console.log(`🔄 [img-to-video] Wan 2.2 attempt ${attempt + 1}/${MAX_RUN_ATTEMPTS} (sceneSlot=${shiftedIndex})`);
-            const task = await submitApifyVideoTask(imageUrl, motionPrompt, shiftedIndex);
+            console.log(`🔄 [img-to-video] Wan 2.2 attempt ${attempt + 1}/${MAX_RUN_ATTEMPTS} (scene=${sceneIndex + 1}, aspect=${aspectRatio}, slotOffset=${slotOffset})`);
+            const task = await submitApifyVideoTask(imageUrl, motionPrompt, sceneIndex, aspectRatio, slotOffset);
 
             // Poll until done
             const startMs = Date.now();

@@ -100,11 +100,13 @@ export async function submitApifyVideoTask(
   imageUrl: string,
   videoPrompt: string,
   sceneIndex: number,
+  aspectRatio: "9:16" | "16:9" = "9:16",
+  tokenSlotOffset = 0,
 ): Promise<ApifyVideoTask> {
   const tokens = getApifyTokens();
 
   // Prime-offset starting slot — same strategy as apify-image.ts
-  const startIdx = ((sceneIndex * PRIME_OFFSET) + VIDEO_KEY_OFFSET) % tokens.length;
+  const startIdx = (((sceneIndex + tokenSlotOffset) * PRIME_OFFSET) + VIDEO_KEY_OFFSET) % tokens.length;
 
   // Upload the source image once (before we start trying tokens)
   const publicImageUrl = await uploadImageForVideo(imageUrl);
@@ -113,7 +115,7 @@ export async function submitApifyVideoTask(
     imageUrl:       publicImageUrl,
     prompt:         videoPrompt,
     resolution:     "480p",
-    aspectRatio:    "9:16",
+    aspectRatio:    aspectRatio,
     duration:       10,
     negativePrompt: "blur, distort, low quality, shaky camera, fast movement, rapid motion, jerky, abrupt motion, sudden jump, text, watermark, speed ramp",
     cfgScale:       1,
@@ -283,9 +285,10 @@ export async function generateApifyVideoSync(
   imageUrl: string,
   videoPrompt: string,
   sceneIndex = 0,
-  maxWaitMs = 300_000
+  maxWaitMs = 300_000,
+  aspectRatio: "9:16" | "16:9" = "9:16",
 ): Promise<string> {
-  const task = await submitApifyVideoTask(imageUrl, videoPrompt, sceneIndex);
+  const task = await submitApifyVideoTask(imageUrl, videoPrompt, sceneIndex, aspectRatio);
 
   const start = Date.now();
   while (Date.now() - start < maxWaitMs) {
@@ -307,13 +310,14 @@ export async function generateApifyVideoSync(
 export async function submitSeedanceVideoTask(
   imageUrl: string | undefined,
   videoPrompt: string,
-  _aspectRatio: string,
+  aspectRatio: string,
   sceneIndex = 0,
 ): Promise<{ taskId: string; apiKey: string }> {
   if (!imageUrl) {
     throw new Error("[apify-video] imageUrl is required for Wan 2.2 I2V — SKIP_T2V is no longer supported");
   }
-  const task = await submitApifyVideoTask(imageUrl, videoPrompt, sceneIndex);
+  const normalizedAspect: "9:16" | "16:9" = aspectRatio === "16:9" ? "16:9" : "9:16";
+  const task = await submitApifyVideoTask(imageUrl, videoPrompt, sceneIndex, normalizedAspect);
   return { taskId: task.runId, apiKey: String(task.tokenIdx) };
 }
 
