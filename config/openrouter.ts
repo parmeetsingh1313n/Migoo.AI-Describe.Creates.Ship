@@ -137,11 +137,12 @@ class OpenRouterClient {
         const message = data.choices[0]?.message;
         if (!message) throw new Error('No message in NvidiaAPI response');
 
-        let rawText = message.content;
+        const msg = message as any;
+        let rawText = msg.content;
         if (!rawText) {
-            const reasoning = message.reasoning_content || message.reasoning || (message as any).thinking;
+            const reasoning = msg.reasoning_content || msg.reasoning || msg.thinking;
             if (reasoning) {
-                console.log(`✅ NvidiaAPI [${model}] content=null but reasoning_content found (${reasoning.length} chars) — using as text`);
+                console.log(`✅ NvidiaAPI [${model}] content=null but reasoning_content found (${String(reasoning).length} chars) — using as text`);
                 rawText = reasoning;
             }
         }
