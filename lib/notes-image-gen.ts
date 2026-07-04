@@ -61,7 +61,7 @@ async function callOpenRouterDirect(
                     "Authorization": `Bearer ${apiKey}`,
                     "Content-Type": "application/json",
                 },
-                body: JSON.stringify({
+                const requestBody: Record<string, any> = {
                     model,
                     messages: [
                         { role: "system", content: systemPrompt },
@@ -69,29 +69,46 @@ async function callOpenRouterDirect(
                     ],
                     temperature: 0.6,
                     max_tokens: maxTokens,
-                    response_format: { type: "json_object" },
-                }),
-                signal: AbortSignal.timeout(180_000),
-            });
+                };
+                if (!model.includes("120b")) {
+                    requestBody.response_format = { type: "json_object" };
+                }
 
-            if (!response.ok) {
-                const errText = await response.text();
-                throw new Error(`OpenRouter API error (${response.status}): ${errText}`);
-            }
+                const response = await fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
+                    method: "POST",
+                    headers: {
+                        "Authorization": `Bearer ${apiKey}`,
+                        "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify(requestBody),
+                    signal: AbortSignal.timeout(180_000),
+                });
 
-            const data = await response.json();
-            const content = data.choices?.[0]?.message?.content?.trim() || "";
-            if (!content) throw new Error("Empty response from OpenRouter");
+                if (!response.ok) {
+                    const errText = await response.text();
+                    throw new Error(`OpenRouter API error (${response.status}): ${errText}`);
+                }
 
-            const jsonStart = content.search(/[{[]/);
-            if (jsonStart === -1) throw new Error("No JSON in response");
+                const data = await response.json();
+                const message = data.choices?.[0]?.message;
+                let content = (message?.content || "").trim();
+                if (!content) {
+                    const reasoning = message?.reasoning_content || message?.reasoning || message?.thinking;
+                    if (reasoning) {
+                        content = reasoning.trim();
+                    }
+                }
+                if (!content) throw new Error("Empty response from OpenRouter");
 
-            try {
-                return JSON.parse(content.substring(jsonStart));
-            } catch {
-                const fixed = content.substring(jsonStart).replace(/,(\s*[}\]])/g, "$1");
-                return JSON.parse(fixed);
-            }
+                const jsonStart = content.search(/[{[]/);
+                if (jsonStart === -1) throw new Error("No JSON in response");
+
+                try {
+                    return JSON.parse(content.substring(jsonStart));
+                } catch {
+                    const fixed = content.substring(jsonStart).replace(/,(\s*[}\]])/g, "$1");
+                    return JSON.parse(fixed);
+                }
 
         } catch (err: any) {
             lastError = err;

@@ -185,7 +185,7 @@ async function callOpenRouterDirect(
                     "Authorization": `Bearer ${apiKey}`,
                     "Content-Type": "application/json",
                 },
-                body: JSON.stringify({
+                const requestBody: Record<string, any> = {
                     model,
                     messages: [
                         { role: "system", content: systemPrompt },
@@ -193,39 +193,56 @@ async function callOpenRouterDirect(
                     ],
                     temperature: 0.55,
                     max_tokens: maxTokens,
-                    response_format: { type: "json_object" },
-                }),
-                signal: AbortSignal.timeout(180_000),
-            });
-
-            if (!response.ok) {
-                const errText = await response.text();
-                const isRateLimit = response.status === 429 || response.status === 402 ||
-                    errText.includes("rate_limit") ||
-                    errText.includes("credit") ||
-                    errText.includes("payment");
-                const isTooLarge = response.status === 413 ||
-                    errText.includes("too large");
-
-                if ((isRateLimit || isTooLarge) && attempt < retries - 1) {
-                    if (isTooLarge) {
-                        throw Object.assign(
-                            new Error(`TOO_LARGE: ${errText}`),
-                            { isTooLarge: true }
-                        );
-                    }
-                    keyIndex++;
-                    console.log(`  🔄 Rate/Credit limit → key ${keyIndex + 1}...`);
-                    await new Promise(r => setTimeout(r, 3000));
-                    continue;
+                };
+                if (!model.includes("120b")) {
+                    requestBody.response_format = { type: "json_object" };
                 }
 
-                throw new Error(`NvidiaAPI error (${response.status}): ${errText}`);
-            }
+                const response = await fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
+                    method: "POST",
+                    headers: {
+                        "Authorization": `Bearer ${apiKey}`,
+                        "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify(requestBody),
+                    signal: AbortSignal.timeout(180_000),
+                });
 
-            const data = await response.json();
-            const content = data.choices?.[0]?.message?.content?.trim() || "";
-            if (!content) throw new Error("Empty response from NvidiaAPI");
+                if (!response.ok) {
+                    const errText = await response.text();
+                    const isRateLimit = response.status === 429 || response.status === 402 ||
+                        errText.includes("rate_limit") ||
+                        errText.includes("credit") ||
+                        errText.includes("payment");
+                    const isTooLarge = response.status === 413 ||
+                        errText.includes("too large");
+
+                    if ((isRateLimit || isTooLarge) && attempt < retries - 1) {
+                        if (isTooLarge) {
+                            throw Object.assign(
+                                new Error(`TOO_LARGE: ${errText}`),
+                                { isTooLarge: true }
+                            );
+                        }
+                        keyIndex++;
+                        console.log(`  🔄 Rate/Credit limit → key ${keyIndex + 1}...`);
+                        await new Promise(r => setTimeout(r, 3000));
+                        continue;
+                    }
+
+                    throw new Error(`NvidiaAPI error (${response.status}): ${errText}`);
+                }
+
+                const data = await response.json();
+                const message = data.choices?.[0]?.message;
+                let content = (message?.content || "").trim();
+                if (!content) {
+                    const reasoning = message?.reasoning_content || message?.reasoning || message?.thinking;
+                    if (reasoning) {
+                        content = reasoning.trim();
+                    }
+                }
+                if (!content) throw new Error("Empty response from NvidiaAPI");
 
             const jsonStart = content.search(/[{[]/);
             if (jsonStart === -1) throw new Error("No JSON in response");

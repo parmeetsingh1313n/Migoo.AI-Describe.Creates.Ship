@@ -97,7 +97,7 @@ async function callModel(
         max_tokens: maxTokens,
     };
 
-    if (requireJson) {
+    if (requireJson && !model.includes('120b')) {
         // NVIDIA NIM API does NOT support assistant prefill (causes 400 BadRequestError).
         // Use response_format + a firm system instruction instead.
         body.response_format = { type: 'json_object' };

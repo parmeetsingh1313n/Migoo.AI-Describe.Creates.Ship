@@ -106,7 +106,15 @@ async function callMgModel(
     }
 
     const data = await res.json();
-    const content = data?.choices?.[0]?.message?.content;
+    const message = data?.choices?.[0]?.message;
+    let content = message?.content;
+    if (!content) {
+        const reasoning = message?.reasoning_content || message?.reasoning || message?.thinking;
+        if (reasoning) {
+            console.log(`✅ [mg-llm] [${model}] content=null but reasoning_content found (${reasoning.length} chars) — using as text`);
+            content = reasoning;
+        }
+    }
     if (!content) {
         const err: any = new Error(`[mg-llm] empty choices from [${model}]`);
         err.isRateLimit = true;
