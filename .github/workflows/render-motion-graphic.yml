@@ -33,18 +33,33 @@ jobs:
       - name: Install dependencies
         run: npm ci --legacy-peer-deps
 
-      # ── 4. Fetch Remotion props from API ──────────────────────────────────────
+      # ── 4. Fetch Remotion props from API (with retry) ────────────────────────
       - name: Fetch props from API
         env:
           WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
           PROPS_URL: ${{ github.event.client_payload.propsUrl }}
         run: |
           mkdir -p tmp out
-          curl -sf \
-            -H "Authorization: Bearer ${WEBHOOK_SECRET}" \
-            "${PROPS_URL}" \
-            -o tmp/props.json
-          echo "✅ Props fetched ($(wc -c < tmp/props.json) bytes)"
+          MAX_ATTEMPTS=10
+          WAIT_SECONDS=30
+          for i in $(seq 1 $MAX_ATTEMPTS); do
+            echo "⏳ Attempt $i/$MAX_ATTEMPTS — fetching props from ${PROPS_URL}"
+            HTTP_STATUS=$(curl -s -o tmp/props.json -w "%{http_code}" \
+              -H "Authorization: Bearer ${WEBHOOK_SECRET}" \
+              "${PROPS_URL}")
+            if [ "$HTTP_STATUS" = "200" ]; then
+              echo "✅ Props fetched ($(wc -c < tmp/props.json) bytes)"
+              exit 0
+            fi
+            BODY=$(cat tmp/props.json 2>/dev/null || echo "(no body)")
+            echo "⚠️  HTTP $HTTP_STATUS — props not ready yet. Body: $BODY"
+            if [ "$i" -lt "$MAX_ATTEMPTS" ]; then
+              echo "🔄 Waiting ${WAIT_SECONDS}s before retry..."
+              sleep $WAIT_SECONDS
+            fi
+          done
+          echo "❌ Props endpoint still not ready after $MAX_ATTEMPTS attempts. Aborting."
+          exit 1
 
       # ── 5. Render Motion Graphic video with Remotion ──────────────────────────
       - name: Render Motion Graphic
