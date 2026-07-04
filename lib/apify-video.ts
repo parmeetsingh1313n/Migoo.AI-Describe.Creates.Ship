@@ -516,16 +516,18 @@ async function smoothStretchVideoBuffer(
   // interpolation). `mi_mode=obmc` is invalid and makes FFmpeg abort.
   // IMPORTANT: setpts must run BEFORE minterpolate so the filter interpolates
   // the already-stretched timeline up to a true 30fps CFR output.
-  const obmbFilter  = `setpts=${ratio}*PTS,minterpolate=fps=30:mi_mode=mci:mc_mode=obmc:me_mode=bidir:vsbmc=1:scd=none,tpad=stop=6:stop_mode=clone`;
   const blendFilter = `setpts=${ratio}*PTS,minterpolate=fps=30:mi_mode=blend:scd=none,tpad=stop=6:stop_mode=clone`;
   const setptsFilter = `setpts=${ratio}*PTS,fps=30,tpad=stop=6:stop_mode=clone`;
 
+  // OBMC is disabled for stretching: at high ratios (3x+) motion-compensated
+  // interpolation is too CPU-heavy and always exceeds the Inngest step budget,
+  // wasting ~40s per scene before falling back. Use blend (temporal average)
+  // which is much cheaper, then setpts as the guaranteed fallback.
   const stretchTiers: Array<{ name: string; filter: string; timeout: number }> = [
-    // Tier 1: OBMC — motion-compensated, real smooth slow-motion look
-    { name: 'OBMC stretch',    filter: obmbFilter,   timeout: 40_000 },
-    // Tier 2: blend — smooth temporal average, fast
-    { name: 'blend stretch',   filter: blendFilter,  timeout: 25_000 },
-    // Tier 3: setpts only — instant, safe, always works
+    // Tier 1: blend — smooth temporal average, fast. Given a larger budget now
+    // that we no longer waste time on OBMC first.
+    { name: 'blend stretch',   filter: blendFilter,  timeout: 45_000 },
+    // Tier 2: setpts only — instant, safe, always works
     { name: 'setpts fallback', filter: setptsFilter, timeout: 15_000 },
   ];
 
