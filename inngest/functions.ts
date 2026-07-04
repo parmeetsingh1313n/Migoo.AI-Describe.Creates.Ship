@@ -2532,11 +2532,12 @@ export const generateMotionGraphic = inngest.createFunction(
         // Step 2b: Wan 2.2 video generation for key scenes (convert static images → animated clips)
         await step.run("update-status-kling", () => updateMotionGraphicStatus(projectId, "generating:video-clips"));
 
-        const klingData = await step.run("generate-kling-videos", async () => {
+        // First, identify the candidates to animate
+        const candidatesToAnimate = await step.run("identify-kling-candidates", async () => {
             const scenes = (project.sceneData as any[]) || [];
             // Determine which scenes should get Kling video treatment
             // Prioritize: video_hero, image_showcase, split_hero, logo_reveal (if has image)
-            const klingCandidates: { index: number; imageUrl: string; narration: string }[] = [];
+            const klingCandidates: { index: number; imageUrl: string; narration: string; animationOnDemand?: boolean; animationType?: string }[] = [];
             
             for (let i = 0; i < scenes.length; i++) {
                 const scene = scenes[i];
@@ -2574,42 +2575,42 @@ export const generateMotionGraphic = inngest.createFunction(
                         narration: scene.voiceoverLine || scene.headline || '',
                         animationOnDemand: true,
                         animationType: scene.animationType || 'cinematic_pan',
-                    } as any);
+                    });
                     continue;
                 }
 
-                // \u2500\u2500 Partial render: skip Kling for unchanged scenes \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+                // ── Partial render: skip Kling for unchanged scenes ──────────────────
                 if (isPartialRender && !changedSceneIndices.includes(i)) {
-                    console.log(`\u23ed\ufe0f Scene ${i + 1}: unchanged \u2014 skipping Kling`);
+                    console.log(`⏭️ Scene ${i + 1}: unchanged ── skipping Kling`);
                     continue;
                 }
 
-                // \u2500\u2500 Standard Kling eligibility \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+                // ── Standard Kling eligibility ───────────────────────────────────────
                 const finalImageUrl = uploadedUrl || generatedUrl || scene.imageUrl || '';
 
                 // CUMULATIVE: skip if already a Kling video (previous render animated this)
                 if (finalImageUrl.endsWith('.mp4') || finalImageUrl.endsWith('.webm') || finalImageUrl.includes('video-files')) {
-                    console.log(`\u23ed\ufe0f Scene ${i + 1}: already a Kling video \u2014 preserving`);
+                    console.log(`⏭️ Scene ${i + 1}: already a Kling video ── preserving`);
                     continue;
                 }
 
                 // AUTO-ANIMATE: logo_reveal with uploaded blob gets Kling on EVERY fresh project.
                 // The user's real logo is animated with a premium GPT-120b prompt.
                 if (uploadedUrl && scene.type === 'logo_reveal') {
-                    console.log(`\ud83c\udfac [auto-animate] Scene ${i + 1} (logo_reveal): uploaded logo \u2192 Kling`);
+                    console.log(`🎬 [auto-animate] Scene ${i + 1} (logo_reveal): uploaded logo → Kling`);
                     klingCandidates.push({
                         index: i,
                         imageUrl: uploadedUrl,
                         narration: scene.voiceoverLine || scene.headline || '',
                         animationOnDemand: true,
                         animationType: 'logo_kinetic_reveal',
-                    } as any);
+                    });
                     continue;
                 }
 
                 // All other uploaded assets stay static (screenshots, product photos)
                 if (uploadedUrl) {
-                    console.log(`\u23ed\ufe0f Scene ${i + 1} (${scene.type}): uploaded asset \u2014 keeping static`);
+                    console.log(`⏭️ Scene ${i + 1} (${scene.type}): uploaded asset ── keeping static`);
                     continue;
                 }
 
@@ -2627,66 +2628,74 @@ export const generateMotionGraphic = inngest.createFunction(
             // Animation-on-demand candidates are processed FIRST and don't count toward the cap
             const animationCandidates = klingCandidates.filter((c: any) => c.animationOnDemand);
             const standardCandidates  = klingCandidates.filter((c: any) => !c.animationOnDemand).slice(0, 2);
-            const toProcess = [...animationCandidates, ...standardCandidates];
+            return [...animationCandidates, ...standardCandidates];
+        });
 
-            if (toProcess.length === 0) {
-                console.log(`⏭️ No Wan 2.2-eligible scenes, skipping video generation`);
-                return { videoUrls: {} as Record<number, string> };
-            }
+        // Now process them in separate step runs sequentially.
+        // During Inngest retries/replays, the already finished steps will be fetched from cache immediately,
+        // and only the pending/failed ones will run in a fresh execution context (effectively resetting the 300s timeout).
+        const videoUrls: Record<number, string> = {};
 
-            console.log(`🎬 Generating ${toProcess.length} Wan 2.2 video clips for scenes: ${toProcess.map((c: any) => c.index + 1).join(', ')}`);
-            const videoUrls: Record<number, string> = {};
+        if (candidatesToAnimate.length > 0) {
+            console.log(`🎬 Generating ${candidatesToAnimate.length} Wan 2.2 video clips in separate steps for scenes: ${candidatesToAnimate.map((c: any) => c.index + 1).join(', ')}`);
 
             // Get an API key for Mistral prompt generation
             const mgKeys = (process.env.NVIDIA_API_KEY || '').split(',').map((k: string) => k.trim()).filter(Boolean);
             const promptApiKey = mgKeys[0] || '';
 
-            // Process Kling generations sequentially (they're long-running)
-            for (const candidate of toProcess) {
-                try {
-                    const { processImgToVideo } = await import('@/app/api/studio/img-to-video/route');
-                    console.log(`🎥 Wan 2.2: Scene ${(candidate as any).index + 1} → ${(candidate as any).imageUrl.substring(0, 60)}...`);
+            for (const candidate of candidatesToAnimate) {
+                const videoUrl = await step.run(`generate-video-scene-${candidate.index + 1}`, async () => {
+                    try {
+                        const { processImgToVideo } = await import('@/app/api/studio/img-to-video/route');
+                        console.log(`🎥 Wan 2.2: Scene ${candidate.index + 1} → ${candidate.imageUrl.substring(0, 60)}...`);
 
-                    // For animation-on-demand: generate a premium GPT-120b Kling prompt first
-                    let klingPrompt: string | undefined;
-                    if ((candidate as any).animationOnDemand && promptApiKey) {
-                        const { motionGraphicsLLM } = await import('@/lib/motion-graphics-llm');
-                        const scene = scenes[(candidate as any).index];
-                        klingPrompt = await motionGraphicsLLM.generateKlingPrompt(
-                            {
-                                type: scene.type,
-                                headline:     scene.headline,
-                                subtext:      scene.subtext,
-                                voiceoverLine: scene.voiceoverLine,
-                                animationType: (candidate as any).animationType,
-                            },
-                            promptApiKey,
-                        );
-                        console.log(`✨ GPT-120b Kling prompt: "${klingPrompt.slice(0, 80)}..."`);
+                        // For animation-on-demand: generate a premium GPT-120b Kling prompt first
+                        let klingPrompt: string | undefined;
+                        const scenes = (project.sceneData as any[]) || [];
+                        const scene = scenes[candidate.index];
+                        if (candidate.animationOnDemand && promptApiKey && scene) {
+                            const { motionGraphicsLLM } = await import('@/lib/motion-graphics-llm');
+                            klingPrompt = await motionGraphicsLLM.generateKlingPrompt(
+                                {
+                                    type: scene.type,
+                                    headline:     scene.headline,
+                                    subtext:      scene.subtext,
+                                    voiceoverLine: scene.voiceoverLine,
+                                    animationType: candidate.animationType,
+                                },
+                                promptApiKey,
+                            );
+                            console.log(`✨ GPT-120b Kling prompt: "${klingPrompt.slice(0, 80)}..."`);
+                        }
+
+                        const data = await processImgToVideo({
+                            imageUrl: candidate.imageUrl,
+                            sceneNarration: klingPrompt || candidate.narration, // premium prompt overrides narration
+                            sceneIndex: candidate.index,
+                            duration: 5,
+                            forceShorts: false,
+                        });
+
+                        if (data.ok && data.videoUrl) {
+                            console.log(`✅ Wan 2.2 scene ${candidate.index + 1} complete: ${data.videoUrl.substring(0, 80)}...`);
+                            return data.videoUrl;
+                        } else {
+                            console.warn(`⚠️ Wan 2.2 scene ${candidate.index + 1} returned no video: ${JSON.stringify(data).substring(0, 100)}`);
+                            return null;
+                        }
+                    } catch (err: any) {
+                        console.warn(`⚠️ Wan 2.2 scene ${candidate.index + 1} failed: ${err.message?.substring(0, 100)}`);
+                        return null;
                     }
+                });
 
-                    const data = await processImgToVideo({
-                        imageUrl: (candidate as any).imageUrl,
-                        sceneNarration: klingPrompt || (candidate as any).narration, // premium prompt overrides narration
-                        sceneIndex: (candidate as any).index,
-                        duration: 5,
-                        forceShorts: false,
-                    });
-
-                    if (data.ok && data.videoUrl) {
-                        videoUrls[(candidate as any).index] = data.videoUrl;
-                        console.log(`✅ Wan 2.2 scene ${(candidate as any).index + 1} complete: ${data.videoUrl.substring(0, 80)}...`);
-                    } else {
-                        console.warn(`⚠️ Wan 2.2 scene ${(candidate as any).index + 1} returned no video: ${JSON.stringify(data).substring(0, 100)}`);
-                    }
-                } catch (err: any) {
-                    console.warn(`⚠️ Wan 2.2 scene ${(candidate as any).index + 1} failed: ${err.message?.substring(0, 100)}`);
+                if (videoUrl) {
+                    videoUrls[candidate.index] = videoUrl;
                 }
             }
+        }
 
-            console.log(`✅ Wan 2.2 generation complete: ${Object.keys(videoUrls).length}/${toProcess.length} videos`);
-            return { videoUrls };
-        });
+        const klingData = { videoUrls };
         let voiceData: { audioUrl: string; audioDuration: number } | null = null;
 
         if (project.voiceoverEnabled) {
