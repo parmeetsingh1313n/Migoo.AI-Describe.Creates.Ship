@@ -16,6 +16,8 @@ const isPublicRoute = createRouteMatcher([
     '/api/video/webhook',   // GitHub Actions upload callback (secured by WEBHOOK_SECRET header)
     '/api/video/props(.*)', // Remotion render props endpoint (secured by WEBHOOK_SECRET header/query)
     '/api/stream-video(.*)', // Video streaming endpoint (needs to be public for video tags/players)
+    '/api/motion-graphics/(.*)/props',   // GitHub Actions fetch props (secured by WEBHOOK_SECRET)
+    '/api/motion-graphics/(.*)/webhook', // GitHub Actions upload callback (secured by WEBHOOK_SECRET)
 ])
 
 // Rate limiting store for middleware-level protection
