@@ -692,6 +692,7 @@ function SeriesVideosPageContent() {
                     handleGenerate(customTopic)
                 }}
                 seriesNiche={series.niche}
+                seriesName={series.title}
                 disabled={triggeringGeneration}
             />
         </div>
@@ -703,12 +704,14 @@ function GenerateTopicDialog({
     onClose,
     onGenerate,
     seriesNiche,
+    seriesName,
     disabled,
 }: {
     open: boolean
     onClose: () => void
     onGenerate: (customTopic?: string) => void
     seriesNiche: string
+    seriesName: string
     disabled: boolean
 }) {
     const [mode, setMode] = useState<'choose' | 'custom'>('choose')
@@ -761,7 +764,7 @@ function GenerateTopicDialog({
                                         <div>
                                             <span className="font-semibold text-sm text-foreground block">Let AI Choose</span>
                                             <span className="text-xs text-muted-foreground leading-relaxed">
-                                                AI picks a unique, viral-worthy angle from your &ldquo;{seriesNiche}&rdquo; niche
+                                                AI picks a unique, viral-worthy angle
                                             </span>
                                         </div>
                                     </button>
@@ -798,7 +801,7 @@ function GenerateTopicDialog({
                                         <textarea
                                             value={customTopic}
                                             onChange={(e) => setCustomTopic(e.target.value)}
-                                            placeholder={`e.g. "Top 5 myths about ${seriesNiche}" or "How ${seriesNiche} will change in 2025"`}
+                                            placeholder={`e.g. "Top 5 myths about ${seriesName}" or "How ${seriesName} will change in 2025"`}
                                             className="w-full px-4 py-3 rounded-xl border border-border/60 bg-muted/30 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/40 transition-all resize-none"
                                             rows={3}
                                             autoFocus
