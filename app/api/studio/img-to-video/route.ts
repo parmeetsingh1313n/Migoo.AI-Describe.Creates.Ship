@@ -1,5 +1,4 @@
 import { groq } from "@/config/groq";
-import { generateApifyVideoSync } from "@/lib/apify-video";
 import { NextRequest, NextResponse } from "next/server";
 import * as zlib from "node:zlib";
 
@@ -440,7 +439,7 @@ Write kinetic motion commands NOW — ACTIONS ONLY, absolutely no scene descript
         }
 
         const result = (refined + ANTI_TEXT_SUFFIX).slice(0, 800);
-        console.log(`\u2705 [img-to-video] Kling prompt (${categories.join('+')}, ${result.length} chars): "${result.slice(0, 150)}..."`);
+        console.log(`✅ [img-to-video] Wan 2.2 prompt (${categories.join('+')}, ${result.length} chars): "${result.slice(0, 150)}..."`);
         return result;
     } catch {
         return buildFallbackPrompt(caption, narration);
@@ -466,12 +465,11 @@ function buildFallbackPrompt(caption: string, _narration: string): string {
     return result;
 }
 
-// ─── Pollo Seedance 1.5 Pro — img-to-video ───────────────────────────────────
-// generateSeedanceVideo (from lib/pollo-video.ts) handles:
-//   1. Submitting the task to Pollo Seedance 1.5 Pro
-//   2. Polling for completion
-//   3. Downloading, FFmpeg-stretching, and uploading to Blob storage
-// No local image upload or API key rotation needed — Seedance accepts direct URLs.
+// ─── Apify Wan 2.2 — img-to-video ───────────────────────────────────────────
+// processImgToVideo:
+//   1. Captions the image with Groq Vision (or Sarvam fallback)
+//   2. Builds a Wan 2.2 motion prompt
+//   3. Submits to Apify Wan 2.2 actor with token rotation on ABORT/FAIL
 
 export async function processImgToVideo({ 
     imageUrl, 
@@ -489,7 +487,7 @@ export async function processImgToVideo({
     if (!imageUrl) throw new Error("imageUrl is required");
 
     const aspectRatio: "9:16" | "16:9" = forceShorts ? "9:16" : "16:9";
-    console.log(`📱 [img-to-video] Pollo Seedance 1.5 Pro | Format: ${aspectRatio} | ${duration}s`);
+    console.log(`📱 [img-to-video] Apify Wan 2.2 | Format: ${aspectRatio} | ${duration}s`);
 
     // ── Step 1: Download the image for captioning ──────────────────────────
     let imgBuf: Buffer | null = null;
@@ -521,28 +519,68 @@ export async function processImgToVideo({
         }
     }
 
-    // ── Step 3: Build Seedance motion prompt (reuse Groq prompt builder) ───
-    console.log("✍️ [img-to-video] Step 2: Building Seedance motion prompt...");
+    // ── Step 3: Build Wan 2.2 motion prompt ────────────────────────────────
+    console.log("✍️ [img-to-video] Step 2: Building Wan 2.2 motion prompt...");
     const motionPrompt = await buildKlingPrompt(caption, sceneNarration);
-    console.log(`📝 [img-to-video] Final Seedance prompt: "${motionPrompt.slice(0, 120)}..."`);
+    console.log(`📝 [img-to-video] Final Wan 2.2 prompt: "${motionPrompt.slice(0, 120)}..."`);
 
-    // ── Step 4: Apify Wan 2.2 Image-to-Video ──────────────────────────
+    // ── Step 4: Apify Wan 2.2 Image-to-Video with token rotation on abort ──
     console.log(`🎬 [img-to-video] Step 3: Submitting to Apify Wan 2.2 actor...`);
-    const videoUrl = await generateApifyVideoSync(
-        imageUrl,
-        motionPrompt,
-        sceneIndex
-    );
 
-    console.log(`🎉 [img-to-video] Apify Wan 2.2 complete: ${videoUrl.slice(0, 80)}`);
+    const { submitApifyVideoTask, checkApifyVideoTask } = await import("@/lib/apify-video");
 
-    return {
-        ok: true,
-        videoUrl: videoUrl,
-        durationSec: 5,
-        isKlingFallback: false,
-        isShorts: forceShorts,
-    };
+    // Collect all tokens for rotation
+    const allTokens: string[] = [];
+    for (let i = 1; i <= 10; i++) {
+        const t = process.env[`APIFY_TOKEN_${i}`];
+        if (t && t.length > 0 && !t.includes("PLACEHOLDER")) allTokens.push(t);
+    }
+
+    // submitApifyVideoTask already rotates internally on 403/429.
+    // But if the run itself gets ABORTED/FAILED shortly after submission
+    // (e.g. actor memory limit, actor crashed), we retry with a different
+    // starting token offset by shifting sceneIndex by allTokens.length/2.
+    const MAX_RUN_ATTEMPTS = 2;
+    const POLL_INTERVAL_MS = 8_000;
+    const MAX_POLL_MS = 300_000;
+    let lastErr = "";
+
+    for (let attempt = 0; attempt < MAX_RUN_ATTEMPTS; attempt++) {
+        // Shift the starting token slot on retry to avoid re-hitting the same account
+        const shiftedIndex = sceneIndex + attempt * Math.ceil(allTokens.length / 2);
+        try {
+            console.log(`🔄 [img-to-video] Wan 2.2 attempt ${attempt + 1}/${MAX_RUN_ATTEMPTS} (sceneSlot=${shiftedIndex})`);
+            const task = await submitApifyVideoTask(imageUrl, motionPrompt, shiftedIndex);
+
+            // Poll until done
+            const startMs = Date.now();
+            while (Date.now() - startMs < MAX_POLL_MS) {
+                await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
+                const result = await checkApifyVideoTask(task);
+                if (result.status === "complete" && result.videoUrl) {
+                    console.log(`🎉 [img-to-video] Wan 2.2 complete (attempt ${attempt + 1}): ${result.videoUrl.slice(0, 80)}`);
+                    return {
+                        ok: true,
+                        videoUrl: result.videoUrl,
+                        durationSec: 5,
+                        isKlingFallback: false,
+                        isShorts: forceShorts,
+                    };
+                }
+                if (result.status === "failed") {
+                    lastErr = `[img-to-video] Wan 2.2 run failed/aborted on attempt ${attempt + 1}`;
+                    console.warn(`⚠️ ${lastErr} — ${attempt + 1 < MAX_RUN_ATTEMPTS ? "retrying with different token slot..." : "all attempts exhausted"}`);
+                    break; // break inner poll loop → retry outer attempt loop
+                }
+                // else pending — continue polling
+            }
+        } catch (err: any) {
+            lastErr = err.message ?? String(err);
+            console.warn(`⚠️ [img-to-video] Wan 2.2 attempt ${attempt + 1} threw: ${lastErr.slice(0, 120)}`);
+        }
+    }
+
+    throw new Error(`[img-to-video] Wan 2.2 failed after ${MAX_RUN_ATTEMPTS} attempt(s). Last: ${lastErr.slice(0, 200)}`);
 }
 
 // ─── POST /api/studio/img-to-video ───────────────────────────────────────────

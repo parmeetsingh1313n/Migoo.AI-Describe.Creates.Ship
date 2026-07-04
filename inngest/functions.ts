@@ -2529,7 +2529,7 @@ export const generateMotionGraphic = inngest.createFunction(
             console.log(`✅ Generated ${imageUrls.filter(u => u).length}/${imagePrompts.length} images (parallel)`);
             return { imageUrls, sceneIndices, uploadedSceneUrls };
         });
-        // Step 2b: Kling video generation for key scenes (convert static images → animated clips)
+        // Step 2b: Wan 2.2 video generation for key scenes (convert static images → animated clips)
         await step.run("update-status-kling", () => updateMotionGraphicStatus(projectId, "generating:video-clips"));
 
         const klingData = await step.run("generate-kling-videos", async () => {
@@ -2630,11 +2630,11 @@ export const generateMotionGraphic = inngest.createFunction(
             const toProcess = [...animationCandidates, ...standardCandidates];
 
             if (toProcess.length === 0) {
-                console.log(`⏭️ No Kling-eligible scenes, skipping video generation`);
+                console.log(`⏭️ No Wan 2.2-eligible scenes, skipping video generation`);
                 return { videoUrls: {} as Record<number, string> };
             }
 
-            console.log(`🎬 Generating ${toProcess.length} Kling video clips for scenes: ${toProcess.map((c: any) => c.index + 1).join(', ')}`);
+            console.log(`🎬 Generating ${toProcess.length} Wan 2.2 video clips for scenes: ${toProcess.map((c: any) => c.index + 1).join(', ')}`);
             const videoUrls: Record<number, string> = {};
 
             // Get an API key for Mistral prompt generation
@@ -2645,7 +2645,7 @@ export const generateMotionGraphic = inngest.createFunction(
             for (const candidate of toProcess) {
                 try {
                     const { processImgToVideo } = await import('@/app/api/studio/img-to-video/route');
-                    console.log(`🎥 Kling: Scene ${(candidate as any).index + 1} → ${(candidate as any).imageUrl.substring(0, 60)}...`);
+                    console.log(`🎥 Wan 2.2: Scene ${(candidate as any).index + 1} → ${(candidate as any).imageUrl.substring(0, 60)}...`);
 
                     // For animation-on-demand: generate a premium GPT-120b Kling prompt first
                     let klingPrompt: string | undefined;
@@ -2675,16 +2675,16 @@ export const generateMotionGraphic = inngest.createFunction(
 
                     if (data.ok && data.videoUrl) {
                         videoUrls[(candidate as any).index] = data.videoUrl;
-                        console.log(`✅ Kling scene ${(candidate as any).index + 1} complete: ${data.videoUrl.substring(0, 80)}...`);
+                        console.log(`✅ Wan 2.2 scene ${(candidate as any).index + 1} complete: ${data.videoUrl.substring(0, 80)}...`);
                     } else {
-                        console.warn(`⚠️ Kling scene ${(candidate as any).index + 1} returned no video: ${JSON.stringify(data).substring(0, 100)}`);
+                        console.warn(`⚠️ Wan 2.2 scene ${(candidate as any).index + 1} returned no video: ${JSON.stringify(data).substring(0, 100)}`);
                     }
                 } catch (err: any) {
-                    console.warn(`⚠️ Kling scene ${(candidate as any).index + 1} failed: ${err.message?.substring(0, 100)}`);
+                    console.warn(`⚠️ Wan 2.2 scene ${(candidate as any).index + 1} failed: ${err.message?.substring(0, 100)}`);
                 }
             }
 
-            console.log(`✅ Kling generation complete: ${Object.keys(videoUrls).length}/${toProcess.length} videos`);
+            console.log(`✅ Wan 2.2 generation complete: ${Object.keys(videoUrls).length}/${toProcess.length} videos`);
             return { videoUrls };
         });
         let voiceData: { audioUrl: string; audioDuration: number } | null = null;
