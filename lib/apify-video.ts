@@ -466,9 +466,10 @@ async function smoothStretchVideoBuffer(
     const trimDur = targetDuration;
     console.log(`✂️  [apify-video] Scene ${sceneIndex + 1}: trim path → ${trimDur.toFixed(2)}s (converting to 30fps CFR)`);
 
-    // Tier A: OBMC motion-compensated interpolation → best quality, no timeout risk
+    // Tier A: OBMC motion-compensated interpolation → best quality.
+    // NOTE: `obmc` is a mc_mode value, valid ONLY with mi_mode=mci.
     if (await tryCmd(
-      `minterpolate=fps=30:mi_mode=obmc:scd=none`,
+      `minterpolate=fps=30:mi_mode=mci:mc_mode=obmc:me_mode=bidir:vsbmc=1:scd=none`,
       trimDur, 25_000
     )) {
       const buf = await applySmallSizeGate(readOutput()!);
@@ -509,11 +510,14 @@ async function smoothStretchVideoBuffer(
 
   console.log(`📐 [apify-video] Scene ${sceneIndex + 1}: stretch → target=${needed.toFixed(2)}s (ratio=${stretchRatio.toFixed(2)}x)`);
 
-  // Pre-built filters (no MCI anywhere)
-  // OBMC = Overlapped Block Motion Compensation: real motion-compensated interpolation,
-  // smoother than blend, far faster than MCI, no timeout risk even at 4x+ ratios.
-  const obmbFilter  = `minterpolate=fps=30:mi_mode=obmc:scd=none,setpts=${ratio}*PTS,tpad=stop=6:stop_mode=clone`;
-  const blendFilter = `minterpolate=fps=30:mi_mode=blend:scd=none,setpts=${ratio}*PTS,tpad=stop=6:stop_mode=clone`;
+  // Pre-built filters.
+  // OBMC = Overlapped Block Motion Compensation. In FFmpeg it is a `mc_mode`
+  // value that is ONLY valid together with mi_mode=mci (motion-compensated
+  // interpolation). `mi_mode=obmc` is invalid and makes FFmpeg abort.
+  // IMPORTANT: setpts must run BEFORE minterpolate so the filter interpolates
+  // the already-stretched timeline up to a true 30fps CFR output.
+  const obmbFilter  = `setpts=${ratio}*PTS,minterpolate=fps=30:mi_mode=mci:mc_mode=obmc:me_mode=bidir:vsbmc=1:scd=none,tpad=stop=6:stop_mode=clone`;
+  const blendFilter = `setpts=${ratio}*PTS,minterpolate=fps=30:mi_mode=blend:scd=none,tpad=stop=6:stop_mode=clone`;
   const setptsFilter = `setpts=${ratio}*PTS,fps=30,tpad=stop=6:stop_mode=clone`;
 
   const stretchTiers: Array<{ name: string; filter: string; timeout: number }> = [
