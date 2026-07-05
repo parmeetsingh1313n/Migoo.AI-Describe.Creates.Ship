@@ -624,8 +624,16 @@ const ComparisonScene: React.FC<{ scene: MotionGraphicScene; palette: typeof PAL
     const afterItem = items[1] || { label: 'After', value: 'The new way' };
 
     // Parse description text — split by commas or bullet points for list display
-    const beforePoints = (beforeItem.value || '').split(/[,•·]/).map(s => s.trim()).filter(Boolean);
-    const afterPoints = (afterItem.value || '').split(/[,•·]/).map(s => s.trim()).filter(Boolean);
+    // Coerce to string first: value may arrive as a number/object/array from upstream data
+    const toText = (v: unknown): string => {
+        if (v == null) return '';
+        if (Array.isArray(v)) return v.map(toText).join(', ');
+        if (typeof v === 'string') return v;
+        if (typeof v === 'number' || typeof v === 'boolean') return String(v);
+        return '';
+    };
+    const beforePoints = toText(beforeItem.value).split(/[,•·]/).map(s => s.trim()).filter(Boolean);
+    const afterPoints = toText(afterItem.value).split(/[,•·]/).map(s => s.trim()).filter(Boolean);
 
     return (
         <AbsoluteFill style={{ background: colors.bg || palette.gradient, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', padding: '4% 5%' }}>
