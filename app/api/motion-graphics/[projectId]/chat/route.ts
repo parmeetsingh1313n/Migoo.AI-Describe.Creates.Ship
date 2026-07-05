@@ -107,11 +107,19 @@ export async function POST(
         }
 
         const { projectId } = await params;
-        const { message } = await req.json();
+        const { message, mode, targetSceneIndex } = await req.json();
 
         if (!message || typeof message !== "string" || message.trim().length < 1) {
             return NextResponse.json({ error: "Message is required" }, { status: 400 });
         }
+
+        // Explicit chat mode from the scene selector dropdown (optional, backward compatible):
+        //   'edit' + targetSceneIndex → deterministic patch of that one scene
+        //   'add'                     → append exactly one new best-fit scene
+        //   'create' / undefined      → full-video generation (legacy behaviour)
+        const chatMode: 'create' | 'add' | 'edit' | undefined =
+            mode === 'edit' || mode === 'add' || mode === 'create' ? mode : undefined;
+        const targetIdx = Number.isInteger(targetSceneIndex) ? targetSceneIndex : null;
 
         // Verify project ownership
         console.log(`[CHAT] Checking project ownership. projectId: ${projectId}, userId: ${user.primaryEmailAddress.emailAddress}`);
@@ -227,19 +235,56 @@ INSTRUCTION: For each row, find the matching scene type in your output and set i
 
         const hasSceneNumRef  = SCENE_NUM_RE.test(trimmedMessage);
         const hasSemanticRef  = SCENE_TYPE_RE.test(trimmedMessage) && REFINEMENT_RE.test(trimmedMessage);
-        const isPartialUpdate = !useChunked && explicitSceneCount === 0 && hasExistingScenes
-                                && (hasSceneNumRef || hasSemanticRef);
+
+        // Explicit-mode targeting from the dropdown takes priority over regex heuristics.
+        const validTargetIdx = targetIdx !== null && targetIdx >= 0 && targetIdx < existingScenes.length ? targetIdx : null;
+        const forceEdit = chatMode === 'edit' && validTargetIdx !== null;
+        const forceAdd  = chatMode === 'add' && hasExistingScenes;
+
+        const isPartialUpdate = forceEdit || (
+            !forceAdd && chatMode !== 'create' && !useChunked && explicitSceneCount === 0 && hasExistingScenes
+            && (hasSceneNumRef || hasSemanticRef)
+        );
 
         let aiResponse: any;
         let changedSceneIndices: number[]    = [];
         let animationRequestedIndices: number[] = [];
 
-        if (isPartialUpdate) {
+        if (forceAdd) {
+            // ── ADD MODE: generate exactly ONE new scene and append it ───────
+            console.log(`[mg-chat] Add-scene mode — appending 1 new scene to ${existingScenes.length}`);
+            const existingTypes = existingScenes.map((s: any) => s.type).join(', ');
+            const single = await motionGraphicsLLM.json(
+                MOTION_GRAPHIC_SYSTEM_PROMPT,
+                `${projectContext}${assetBlock}\n\nThe video already has ${existingScenes.length} scenes (types: ${existingTypes}).\n` +
+                `The user wants to ADD ONE NEW SCENE. Pick the single best-fit scene type for this request and design ONLY that one scene. Do NOT regenerate or return the existing scenes.\n\n` +
+                `User: ${trimmedMessage}\n\n` +
+                `Output JSON: { "reply": "your short message", "scenesJson": { "scenes": [ ONE_NEW_SCENE_OBJECT ], "voiceoverLines": ["line for the new scene"] } }`,
+                { temperature: 0.8, maxTokens: 4096 }
+            );
+            const newScenes: any[] = single?.scenesJson?.scenes || single?.scenes || [];
+            if (newScenes.length > 0) {
+                const appended = [...existingScenes, newScenes[0]];
+                changedSceneIndices = [appended.length - 1];
+                aiResponse = {
+                    reply: single?.reply || `Added a new ${newScenes[0].type?.replace(/_/g, ' ')} scene as Scene ${appended.length}.`,
+                    scenesJson: { scenes: appended, voiceoverLines: appended.map((s: any) => s.voiceoverLine).filter(Boolean) },
+                };
+            } else {
+                aiResponse = { reply: single?.reply || "I couldn't design that scene — could you add a bit more detail?", scenesJson: null };
+            }
+
+        } else if (isPartialUpdate) {
             // ── PATCH MODE: only update what the user specified ──────────────
-            console.log(`[mg-chat] Partial update detected — using patch mode`);
+            console.log(`[mg-chat] Partial update detected — using patch mode${forceEdit ? ` (targeting Scene ${validTargetIdx! + 1})` : ''}`);
+            // When the dropdown selected a specific scene, name it explicitly so the
+            // patch model edits exactly that scene regardless of the user's phrasing.
+            const patchRequest = forceEdit
+                ? `Apply this change to Scene ${validTargetIdx! + 1} (type: ${existingScenes[validTargetIdx!]?.type}) ONLY: ${trimmedMessage}`
+                : trimmedMessage;
             const patchResult = await motionGraphicsLLM.patch(
                 existingScenes,
-                trimmedMessage,
+                patchRequest,
                 assetBlock,
             );
 

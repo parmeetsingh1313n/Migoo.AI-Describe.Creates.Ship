@@ -94,6 +94,11 @@ export default function MotionGraphicProjectPage() {
     const [uploadedImages, setUploadedImages] = useState<Array<{ url: string; name: string; description?: string }>>([])
     const [uploading, setUploading] = useState(false)
     const textareaRef = useRef<HTMLTextAreaElement>(null)
+    // Scene-targeting mode for the chat (only shown after the first prompt creates scenes):
+    //   'add'  → next message appends a new scene
+    //   number → next message edits that scene index (0-based)
+    const [sceneTarget, setSceneTarget] = useState<'add' | number>('add')
+    const [enhancing, setEnhancing] = useState(false)
 
     // Auto-resize textarea
     useEffect(() => {
@@ -281,18 +286,49 @@ export default function MotionGraphicProjectPage() {
             // Just send the user's text — the chat API reads assets from DB separately.
             const messageForAI = userText || `I've uploaded ${uploadedImages.length} reference image(s). Please use them in the most relevant scenes.`;
 
+            // Resolve the explicit chat mode from the scene selector. Only meaningful
+            // once scenes exist; the first prompt always runs in 'create' mode.
+            const scenesExist = ((project?.sceneData as any[] | undefined)?.length || 0) > 0
+            const mode = !scenesExist ? 'create' : (sceneTarget === 'add' ? 'add' : 'edit')
+            const targetSceneIndex = mode === 'edit' ? (sceneTarget as number) : undefined
+
             const res = await fetch(`/api/motion-graphics/${projectId}/chat`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ message: messageForAI }),
+                body: JSON.stringify({ message: messageForAI, mode, targetSceneIndex }),
             })
             const data = await res.json()
             if (data.success) {
                 const aiMsg: Message = { id: Date.now() + 1, role: 'assistant', content: data.reply, metadata: data.scenesData ? { type: 'scene_update', sceneData: data.scenesData } : null, createdAt: new Date().toISOString() }
                 setMessages(prev => [...prev, aiMsg])
-                if (data.scenesData?.scenes) { fetchProject(); toast.success('Scenes generated!') }
+                if (data.scenesData?.scenes) { fetchProject(); setSceneTarget('add'); toast.success(mode === 'edit' ? 'Scene updated!' : mode === 'add' ? 'Scene added!' : 'Scenes generated!') }
             } else { toast.error(data.error || 'Failed') }
         } catch { toast.error('Failed to send') } finally { setSending(false) }
+    }
+
+    // Enhance the current chat input into a structured, component-aware prompt.
+    // Fills the input box for the user to review/edit — does NOT auto-send.
+    const handleEnhancePrompt = async () => {
+        const raw = chatInput.trim()
+        if (!raw || enhancing || sending || isGenerating) return
+        const scenesExist = ((project?.sceneData as any[] | undefined)?.length || 0) > 0
+        const mode = !scenesExist ? 'create' : (sceneTarget === 'add' ? 'add' : 'edit')
+        const targetSceneIndex = mode === 'edit' ? (sceneTarget as number) : undefined
+        setEnhancing(true)
+        try {
+            const res = await fetch(`/api/motion-graphics/${projectId}/enhance-prompt`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ message: raw, mode, targetSceneIndex }),
+            })
+            const data = await res.json()
+            if (data.success && data.enhanced) {
+                setChatInput(data.enhanced)
+                toast.success('Prompt enhanced — review and send')
+            } else {
+                toast.error(data.error || 'Could not enhance prompt')
+            }
+        } catch { toast.error('Could not enhance prompt') } finally { setEnhancing(false) }
     }
 
     const handleGenerate = async () => {
@@ -564,7 +600,34 @@ export default function MotionGraphicProjectPage() {
                                 </div>
                             )}
                             {/* Input */}
+                            {(() => {
+                                const scenesArr = (project?.sceneData as any[]) || []
+                                const hasScenesInput = scenesArr.length > 0
+                                const targetType = typeof sceneTarget === 'number' ? (scenesArr[sceneTarget]?.type || 'scene').replace(/_/g, ' ') : ''
+                                const dynamicPlaceholder = !hasScenesInput
+                                    ? 'Describe your vision...'
+                                    : sceneTarget === 'add'
+                                        ? `Describe Scene ${scenesArr.length + 1} to add...`
+                                        : `Describe changes to Scene ${(sceneTarget as number) + 1} (${targetType})...`
+                                return (
                             <div className="p-4 border-t border-border shrink-0 bg-white/80">
+                                {/* Scene targeting selector — only after the first prompt has created scenes */}
+                                {hasScenesInput && (
+                                    <div className="flex items-center gap-2 mb-2">
+                                        <select
+                                            value={sceneTarget === 'add' ? 'add' : String(sceneTarget)}
+                                            onChange={(e) => setSceneTarget(e.target.value === 'add' ? 'add' : Number(e.target.value))}
+                                            disabled={sending || isGenerating}
+                                            title="Choose which scene to edit, or add a new one"
+                                            className="flex-1 text-xs rounded-lg border border-border bg-muted/40 px-2.5 py-2 text-foreground focus:ring-2 focus:ring-primary/20 disabled:opacity-50 cursor-pointer"
+                                        >
+                                            <option value="add">➕ Add New Scene (Scene {scenesArr.length + 1})</option>
+                                            {scenesArr.map((s: any, i: number) => (
+                                                <option key={i} value={i}>✏️ Edit Scene {i + 1} — {(s.type || 'scene').replace(/_/g, ' ')}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                )}
                                 <div className="flex gap-2">
                                     <input ref={imageInputRef} type="file" accept="image/*" multiple className="hidden" onChange={handleImageUpload} />
                                     <button
@@ -574,6 +637,14 @@ export default function MotionGraphicProjectPage() {
                                         className="p-2.5 rounded-xl border border-border text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors cursor-pointer disabled:opacity-50 shrink-0 self-end"
                                     >
                                         {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <ImagePlus className="w-4 h-4" />}
+                                    </button>
+                                    <button
+                                        onClick={handleEnhancePrompt}
+                                        disabled={!chatInput.trim() || enhancing || sending || isGenerating}
+                                        title="Enhance prompt with AI (fills the box for you to review)"
+                                        className="p-2.5 rounded-xl border border-primary/40 text-primary hover:bg-primary/10 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shrink-0 self-end"
+                                    >
+                                        {enhancing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
                                     </button>
                                     <textarea
                                         id="chat-input"
@@ -586,7 +657,7 @@ export default function MotionGraphicProjectPage() {
                                                 handleSendWithImages()
                                             }
                                         }}
-                                        placeholder="Describe your vision..."
+                                        placeholder={dynamicPlaceholder}
                                         disabled={sending || isGenerating}
                                         rows={1}
                                         className="flex-1 px-4 py-2.5 rounded-xl bg-muted/40 border border-border text-foreground placeholder:text-muted-foreground/50 text-sm focus:ring-2 focus:ring-primary/20 disabled:opacity-50 resize-none min-h-[42px] max-h-48 overflow-y-auto"
@@ -601,6 +672,8 @@ export default function MotionGraphicProjectPage() {
                                     </button>
                                 </div>
                             </div>
+                                )
+                            })()}
                         </>
                     ) : (
                         /* Theme Panel */

@@ -1,0 +1,22 @@
+{
+  "theme": { "palette": "midnight", "font": "Inter", "animationStyle": "smooth" },
+  "fps": 30,
+  "width": 1920,
+  "height": 1080,
+  "durationInFrames": 330,
+  "voiceoverEnabled": false,
+  "scenes": [
+    { "type": "title_reveal", "headline": "Create Faster", "subtext": "Introducing", "content": "AI motion graphics", "durationSec": 3 },
+    { "type": "particle_text", "headline": "Imagine More", "subtext": "Powered by AI", "durationSec": 3 },
+    { "type": "card_stack_3d", "headline": "How it works", "items": [ { "icon": "Wand2", "label": "Create", "value": "Describe your idea" }, { "icon": "Film", "label": "Generate", "value": "AI builds scenes" }, { "icon": "Share2", "label": "Share", "value": "Publish anywhere" } ], "durationSec": 3 },
+    { "type": "chart_race", "headline": "The numbers", "items": [ { "label": "Migoo AI", "value": "95" }, { "label": "Legacy Tools", "value": 62 }, { "label": "Manual", "value": "38%" } ], "durationSec": 3 },
+    { "type": "big_number", "stat": { "value": "150000", "suffix": "+", "label": "Creators" }, "content": "and growing every day", "durationSec": 3 },
+    { "type": "pricing_table", "headline": "Simple pricing", "items": [ { "label": "Starter", "value": "$0" }, { "label": "Pro", "value": "$29" }, { "label": "Studio", "value": "$99" } ], "durationSec": 3 },
+    { "type": "map_reveal", "headline": "Global reach", "items": [ { "label": "New York", "value": "32%" }, { "label": "London", "value": 24 }, { "label": "Tokyo", "value": "19%" } ], "durationSec": 3 },
+    { "type": "ui_showcase", "headline": "Your studio", "subtext": "Everything in one place", "items": [ { "icon": "CheckCircle", "label": "Done" }, { "icon": "TrendingUp", "label": "+240%" } ], "durationSec": 3 },
+    { "type": "text_mask_reveal", "headline": "CREATE", "subtext": "Bring ideas to life", "durationSec": 3 },
+    { "type": "floating_cards", "headline": "Why us", "items": [ { "icon": "Zap", "label": "Fast", "value": "Instant renders" }, { "icon": "Sparkles", "label": "Smart", "value": 42 } ], "durationSec": 3 },
+    { "type": "timeline_reveal", "headline": "Our journey", "items": [ { "year": "2023", "label": "Founded", "value": "The idea" }, { "year": "2024", "label": "Launch", "value": "10K users" } ], "durationSec": 3 },
+    { "type": "comparison", "headline": "Before vs After", "items": [ { "label": "Before", "value": "Slow, expensive, complex" }, { "label": "After", "value": 100 } ], "durationSec": 3 }
+  ]
+}

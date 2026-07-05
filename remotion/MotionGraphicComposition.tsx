@@ -1,8 +1,11 @@
 /**
  * MotionGraphicComposition — Remotion composition for AI motion graphic videos.
- * Supports 8 scene types: title_reveal, kinetic_text, stat_counter, icon_grid,
- * comparison, image_showcase, call_to_action, logo_reveal
+ * Supports 35 scene types (title_reveal, search_reveal, comparison, phone_mockup,
+ * code_terminal, metric_dashboard, floating_cards, timeline_reveal, particle_text,
+ * card_stack_3d, chart_race, ui_showcase, text_mask_reveal, big_number,
+ * pricing_table, map_reveal, …) dispatched by SceneRenderer.
  *
+ * Shared animation vocabulary and ambient effect layers live in ./lib/motion.
  * This composition reads structured scene data from AI and renders animated scenes
  * with professional transitions, text animations, and optional voiceover/music.
  */
@@ -22,6 +25,23 @@ import {
     useCurrentFrame,
     useVideoConfig,
 } from 'remotion';
+import {
+    getEntrance,
+    getCharStagger,
+    seededRandom,
+    toText,
+    parseNum,
+    Grain,
+    ParticleField,
+    FloatingShapes,
+    Spotlight,
+    VignetteGlow,
+    GradientMesh,
+    KenBurns,
+    ParallaxLayer,
+    MeshBg,
+    OrbBg,
+} from './lib/motion';
 
 // ─── Smart Icon Component ────────────────────────────────────────────────────
 // Handles both Emojis and dynamic Lucide icons with a premium glow effect.
@@ -117,7 +137,7 @@ const Img: React.FC<React.ComponentProps<typeof RemotionImg>> = (props) => {
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export interface MotionGraphicScene {
-    type: 'title_reveal' | 'kinetic_text' | 'stat_counter' | 'icon_grid' | 'comparison' | 'image_showcase' | 'call_to_action' | 'logo_reveal' | 'search_reveal' | 'feature_list' | 'split_hero' | 'neon_glow' | 'gradient_burst' | 'floating_cards' | 'timeline_reveal' | 'bento_grid' | 'video_hero' | 'phone_mockup' | 'browser_mockup' | 'timeline' | 'testimonial' | 'metric_dashboard' | 'process_steps' | 'notification_stack' | 'code_terminal' | 'glass_card' | 'quote_reveal' | string;
+    type: 'title_reveal' | 'kinetic_text' | 'stat_counter' | 'icon_grid' | 'comparison' | 'image_showcase' | 'call_to_action' | 'logo_reveal' | 'search_reveal' | 'feature_list' | 'split_hero' | 'neon_glow' | 'gradient_burst' | 'floating_cards' | 'timeline_reveal' | 'bento_grid' | 'video_hero' | 'phone_mockup' | 'browser_mockup' | 'timeline' | 'testimonial' | 'metric_dashboard' | 'process_steps' | 'notification_stack' | 'code_terminal' | 'glass_card' | 'quote_reveal' | 'particle_text' | 'card_stack_3d' | 'chart_race' | 'ui_showcase' | 'text_mask_reveal' | 'big_number' | 'pricing_table' | 'map_reveal' | string;
     headline?: string;
     subtext?: string;
     content?: string;
@@ -198,70 +218,11 @@ const PALETTES: Record<string, { bg: string; text: string; accent: string; secon
     },
 };
 
-// ─── Animation Helpers ───────────────────────────────────────────────────────
-
-function getEntrance(frame: number, fps: number, type: string = 'fade', delay: number = 0) {
-    const f = Math.max(0, frame - delay * fps);
-    const duration = fps * 0.8;
-
-    switch (type) {
-        case 'slide-up':
-            return {
-                opacity: interpolate(f, [0, duration], [0, 1], { extrapolateRight: 'clamp' }),
-                transform: `translateY(${interpolate(f, [0, duration], [60, 0], { extrapolateRight: 'clamp' })}px)`,
-            };
-        case 'slide-left':
-            return {
-                opacity: interpolate(f, [0, duration], [0, 1], { extrapolateRight: 'clamp' }),
-                transform: `translateX(${interpolate(f, [0, duration], [80, 0], { extrapolateRight: 'clamp' })}px)`,
-            };
-        case 'scale':
-            return {
-                opacity: interpolate(f, [0, duration], [0, 1], { extrapolateRight: 'clamp' }),
-                transform: `scale(${interpolate(f, [0, duration], [0.6, 1], { extrapolateRight: 'clamp' })})`,
-            };
-        case 'bounce': {
-            const s = spring({ frame: f, fps, config: { damping: 8, stiffness: 120 } });
-            return {
-                opacity: interpolate(f, [0, duration * 0.3], [0, 1], { extrapolateRight: 'clamp' }),
-                transform: `scale(${s})`,
-            };
-        }
-        case 'typewriter':
-            return {
-                opacity: 1,
-                clipPath: `inset(0 ${interpolate(f, [0, duration * 1.5], [100, 0], { extrapolateRight: 'clamp' })}% 0 0)`,
-            };
-        case 'glitch': {
-            const glitchX = f < duration * 0.5 ? Math.sin(f * 2) * 5 : 0;
-            return {
-                opacity: interpolate(f, [0, duration * 0.3], [0, 1], { extrapolateRight: 'clamp' }),
-                transform: `translateX(${glitchX}px)`,
-            };
-        }
-        default: // fade
-            return {
-                opacity: interpolate(f, [0, duration], [0, 1], { extrapolateRight: 'clamp' }),
-                transform: 'none',
-            };
-    }
-}
-
-// ─── Shared Backgrounds ──────────────────────────────────────────────────────
-const MeshBg: React.FC<{ color: string }> = ({ color }) => (
-    <div style={{ position: 'absolute', inset: 0, backgroundImage: `linear-gradient(${color}12 1px, transparent 1px), linear-gradient(90deg, ${color}12 1px, transparent 1px)`, backgroundSize: '80px 80px', zIndex: 0 }} />
-);
-
-const OrbBg: React.FC<{ color: string; secondary: string; frame: number; fps: number }> = ({ color, secondary, frame, fps }) => {
-    const pulse = interpolate(frame, [0, fps * 2], [1, 1.2], { extrapolateRight: 'clamp' });
-    return (
-        <>
-            <div style={{ position: 'absolute', width: '50%', height: '50%', top: '25%', left: '25%', background: `radial-gradient(circle, ${color}25 0%, transparent 70%)`, filter: 'blur(80px)', transform: `scale(${pulse})`, zIndex: 0 }} />
-            <div style={{ position: 'absolute', width: '30%', height: '30%', top: '10%', right: '15%', background: `radial-gradient(circle, ${secondary}20 0%, transparent 70%)`, filter: 'blur(60px)', zIndex: 0 }} />
-            <div style={{ position: 'absolute', width: '25%', height: '25%', bottom: '15%', left: '10%', background: `radial-gradient(circle, ${color}15 0%, transparent 70%)`, filter: 'blur(50px)', zIndex: 0 }} />
-        </>
-    );
-};
+// ─── Animation helpers & shared backgrounds ──────────────────────────────────
+// getEntrance / getExit / getCharStagger and the ambient effect layers
+// (Grain, ParticleField, FloatingShapes, Spotlight, VignetteGlow, GradientMesh,
+// KenBurns, ParallaxLayer, MeshBg, OrbBg) now live in ./lib/motion and are
+// imported at the top of this file — shared by every scene below.
 
 // ─── Scene Components ────────────────────────────────────────────────────────
 
@@ -269,27 +230,38 @@ const TitleRevealScene: React.FC<{ scene: MotionGraphicScene; palette: typeof PA
     const frame = useCurrentFrame();
     const { fps } = useVideoConfig();
     const colors = { ...palette, ...scene.colors };
-    const headlineAnim = getEntrance(frame, fps, scene.animation || 'scale', 0.2);
     const subtextAnim = getEntrance(frame, fps, 'slide-up', 0.7);
     const lineWidth = interpolate(frame, [fps * 0.4, fps * 1.5], [0, 320], { extrapolateRight: 'clamp' });
-    const bgScale = interpolate(frame, [0, fps * 3], [1, 1.1], { extrapolateRight: 'clamp' });
+    // Per-character kinetic reveal of the headline (falls back gracefully for long strings).
+    const headline = scene.headline || '';
+    const useCharStagger = headline.length > 0 && headline.length <= 42;
+    const headlineAnim = getEntrance(frame, fps, scene.animation || 'blur-in', 0.2);
     return (
         <AbsoluteFill style={{ background: colors.bg || palette.bg, overflow: 'hidden' }}>
+            <GradientMesh color={colors.accent} secondary={colors.secondary || colors.accent} bg={colors.bg || palette.bg} />
+            <FloatingShapes color={colors.accent} secondary={colors.secondary || colors.accent} seed={4} />
             <OrbBg color={colors.accent} secondary={colors.secondary || colors.accent} frame={frame} fps={fps} />
             <MeshBg color={colors.accent} />
             {scene.imageUrl && (
-                <div style={{ position: 'absolute', inset: 0 }}>
-                    <Img src={scene.imageUrl} style={{ width: '100%', height: '100%', objectFit: 'cover', filter: 'brightness(0.2) blur(4px)', transform: `scale(${bgScale})` }} />
-                </div>
+                <KenBurns durationSec={(scene.durationSec || 5) + 1}>
+                    <Img src={scene.imageUrl} style={{ width: '100%', height: '100%', objectFit: 'cover', filter: 'brightness(0.2) blur(4px)' }} />
+                </KenBurns>
             )}
+            <ParticleField color={colors.secondary || colors.accent} count={22} seed={9} />
             <div style={{ position: 'relative', zIndex: 2, textAlign: 'center', padding: '10%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
                 {scene.subtext && <div style={{ ...getEntrance(frame, fps, 'fade', 0.1), fontSize: 22, fontWeight: 600, letterSpacing: 8, textTransform: 'uppercase', color: colors.accent, marginBottom: 28 }}>{scene.subtext}</div>}
-                <div style={{ ...headlineAnim, fontSize: 96, fontWeight: 900, color: colors.text, lineHeight: 1.0, letterSpacing: '-3px', textShadow: `0 0 80px ${colors.accent}40` }}>
-                    {scene.headline || ''}
+                <div style={{ ...(useCharStagger ? {} : headlineAnim), fontSize: 96, fontWeight: 900, color: colors.text, lineHeight: 1.0, letterSpacing: '-3px', textShadow: `0 0 80px ${colors.accent}40` }}>
+                    {useCharStagger
+                        ? headline.split('').map((ch, i) => (
+                            <span key={i} style={getCharStagger(frame, fps, i, 0.2)}>{ch === ' ' ? ' ' : ch}</span>
+                          ))
+                        : headline}
                 </div>
                 <div style={{ width: lineWidth, height: 5, background: `linear-gradient(90deg, transparent, ${colors.accent}, ${colors.secondary || colors.accent}, transparent)`, margin: '36px auto', borderRadius: 3 }} />
                 <div style={{ ...subtextAnim, fontSize: 28, color: `${colors.text}88`, fontWeight: 400 }}>{scene.content || ''}</div>
             </div>
+            <VignetteGlow color={colors.accent} />
+            <Grain />
         </AbsoluteFill>
     );
 };
@@ -489,6 +461,7 @@ const StatCounterScene: React.FC<{ scene: MotionGraphicScene; palette: typeof PA
                 </div>
             )}
             <MeshBg color={colors.accent} />
+            <FloatingShapes color={colors.accent} secondary={colors.secondary || colors.accent} seed={11} count={3} />
             <div style={{ position: 'relative', zIndex: 2, width: '90%', display: 'flex', gap: 60, alignItems: 'center', justifyContent: 'center' }}>
                 {/* Left: Circular progress + stat */}
                 <div style={{ ...containerAnim, display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1 }}>
@@ -566,6 +539,7 @@ const StatCounterScene: React.FC<{ scene: MotionGraphicScene; palette: typeof PA
                     </div>
                 </div>
             </div>
+            <Grain opacity={0.05} />
         </AbsoluteFill>
     );
 };
@@ -624,19 +598,13 @@ const ComparisonScene: React.FC<{ scene: MotionGraphicScene; palette: typeof PAL
     const afterItem = items[1] || { label: 'After', value: 'The new way' };
 
     // Parse description text — split by commas or bullet points for list display
-    // Coerce to string first: value may arrive as a number/object/array from upstream data
-    const toText = (v: unknown): string => {
-        if (v == null) return '';
-        if (Array.isArray(v)) return v.map(toText).join(', ');
-        if (typeof v === 'string') return v;
-        if (typeof v === 'number' || typeof v === 'boolean') return String(v);
-        return '';
-    };
+    // (toText coerces number/object/array values to string; imported from ./lib/motion)
     const beforePoints = toText(beforeItem.value).split(/[,•·]/).map(s => s.trim()).filter(Boolean);
     const afterPoints = toText(afterItem.value).split(/[,•·]/).map(s => s.trim()).filter(Boolean);
 
     return (
         <AbsoluteFill style={{ background: colors.bg || palette.gradient, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', padding: '4% 5%' }}>
+            <FloatingShapes color={colors.accent} secondary={colors.secondary || colors.accent} seed={6} count={4} />
             <MeshBg color={colors.accent} />
 
             {/* Title */}
@@ -719,6 +687,8 @@ const ComparisonScene: React.FC<{ scene: MotionGraphicScene; palette: typeof PAL
                     {scene.subtext}
                 </div>
             )}
+            <VignetteGlow color={colors.accent} />
+            <Grain />
         </AbsoluteFill>
     );
 };
@@ -983,12 +953,14 @@ const BentoGridScene: React.FC<{ scene: MotionGraphicScene; palette: typeof PALE
     
     return (
         <AbsoluteFill style={{ background: colors.bg || palette.bg, padding: '5%', display: 'flex', flexDirection: 'column' }}>
+            <GradientMesh color={colors.accent} secondary={colors.secondary || colors.accent} bg={colors.bg || palette.bg} />
+            <FloatingShapes color={colors.accent} secondary={colors.secondary || colors.accent} seed={8} count={3} />
             {scene.headline && (
-                <div style={{ ...getEntrance(frame, fps, 'slide-up', 0.1), fontSize: 64, fontWeight: 900, color: colors.text, marginBottom: 40, textAlign: 'center' }}>
+                <div style={{ ...getEntrance(frame, fps, 'slide-up', 0.1), fontSize: 64, fontWeight: 900, color: colors.text, marginBottom: 40, textAlign: 'center', zIndex: 2 }}>
                     {scene.headline}
                 </div>
             )}
-            <div style={{ flex: 1, display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gridTemplateRows: 'repeat(2, 1fr)', gap: 32 }}>
+            <div style={{ flex: 1, display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gridTemplateRows: 'repeat(2, 1fr)', gap: 32, position: 'relative', zIndex: 2 }}>
                 {/* Main large cell */}
                 <div style={{ ...getEntrance(frame, fps, 'scale', 0.2), gridColumn: '1 / 3', gridRow: '1 / 3', background: `${colors.accent}15`, borderRadius: 40, padding: 50, position: 'relative', overflow: 'hidden', border: `2px solid ${colors.accent}40`, boxShadow: `0 30px 60px rgba(0,0,0,0.4)` }}>
                     {scene.imageUrl && <div style={{ position: 'absolute', inset: 0 }}><Img src={scene.imageUrl} style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: 0.6 }} /></div>}
@@ -1038,14 +1010,20 @@ const PhoneMockupScene: React.FC<{ scene: MotionGraphicScene; palette: typeof PA
     const screenGlow = interpolate(frame, [fps * 0.8, fps * 2], [0, 1], { extrapolateRight: 'clamp' });
     return (
         <AbsoluteFill style={{ background: colors.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+            <GradientMesh color={colors.accent} secondary={colors.secondary || colors.accent} bg={colors.bg} />
             <OrbBg color={colors.accent} secondary={colors.secondary || colors.accent} frame={frame} fps={fps} />
-            <div style={{ ...phoneAnim, width: 380, height: 780, borderRadius: 50, border: `4px solid rgba(255,255,255,0.2)`, background: '#111', padding: 12, boxShadow: `0 40px 100px ${colors.accent}40, 0 0 0 1px rgba(255,255,255,0.05)`, position: 'relative' }}>
+            <ParticleField color={colors.secondary || colors.accent} count={18} seed={12} />
+            <ParallaxLayer depth={1.2} style={{ ...phoneAnim, width: 380, height: 780, borderRadius: 50, border: `4px solid rgba(255,255,255,0.2)`, background: '#111', padding: 12, boxShadow: `0 40px 100px ${colors.accent}40, 0 0 0 1px rgba(255,255,255,0.05)`, position: 'relative', zIndex: 2 }}>
                 <div style={{ width: '100%', height: '100%', borderRadius: 38, overflow: 'hidden', position: 'relative' }}>
                     {scene.imageUrl ? <Img src={scene.imageUrl} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <div style={{ width: '100%', height: '100%', background: `linear-gradient(180deg, ${colors.accent}30, ${colors.bg})`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><div style={{ fontSize: 48, fontWeight: 800, color: colors.text, textAlign: 'center', padding: 32 }}>{scene.headline}</div></div>}
                 </div>
                 <div style={{ position: 'absolute', top: 16, left: '50%', transform: 'translateX(-50%)', width: 120, height: 28, borderRadius: 20, background: '#000' }} />
-            </div>
-            {scene.subtext && <div style={{ position: 'absolute', bottom: '12%', textAlign: 'center', ...getEntrance(frame, fps, 'fade', 1.2) }}><div style={{ fontSize: 36, fontWeight: 700, color: colors.text }}>{scene.subtext}</div></div>}
+                {/* Screen glow */}
+                <div style={{ position: 'absolute', inset: 12, borderRadius: 38, boxShadow: `inset 0 0 60px ${colors.accent}${Math.round(screenGlow * 40).toString(16).padStart(2, '0')}`, pointerEvents: 'none' }} />
+            </ParallaxLayer>
+            {scene.subtext && <div style={{ position: 'absolute', bottom: '12%', textAlign: 'center', zIndex: 3, ...getEntrance(frame, fps, 'fade', 1.2) }}><div style={{ fontSize: 36, fontWeight: 700, color: colors.text }}>{scene.subtext}</div></div>}
+            <VignetteGlow color={colors.accent} />
+            <Grain />
         </AbsoluteFill>
     );
 };
@@ -1170,6 +1148,7 @@ const MetricDashboardScene: React.FC<{ scene: MotionGraphicScene; palette: typeo
                     );
                 })}
             </div>
+            <Grain opacity={0.05} />
         </AbsoluteFill>
     );
 };
@@ -1228,13 +1207,16 @@ const CodeTerminalScene: React.FC<{ scene: MotionGraphicScene; palette: typeof P
     let charCount = 0; const visibleLines = lines.map(line => { const start = charCount; charCount += line.length + 1; const visible = Math.max(0, Math.min(line.length, currentChars - start)); return line.substring(0, visible); });
     return (
         <AbsoluteFill style={{ background: colors.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '8%', overflow: 'hidden' }}>
-            <div style={{ ...getEntrance(frame, fps, 'scale', 0.1), width: '90%', borderRadius: 20, overflow: 'hidden', boxShadow: '0 40px 80px rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.1)' }}>
+            <GradientMesh color={colors.accent} secondary={colors.secondary || colors.accent} bg={colors.bg} />
+            <FloatingShapes color={colors.accent} secondary={colors.secondary || colors.accent} seed={15} count={3} />
+            <div style={{ ...getEntrance(frame, fps, 'flip-3d', 0.1), width: '90%', borderRadius: 20, overflow: 'hidden', boxShadow: `0 40px 80px rgba(0,0,0,0.5), 0 0 60px ${colors.accent}20`, border: '1px solid rgba(255,255,255,0.1)', zIndex: 2 }}>
                 <div style={{ background: '#1e1e1e', padding: '14px 20px', display: 'flex', gap: 8 }}>{['#ff5f57','#febc2e','#28c840'].map((c,i) => <div key={i} style={{ width: 14, height: 14, borderRadius: '50%', background: c }} />)}</div>
                 <div style={{ background: '#0d0d0d', padding: 36, fontFamily: "'Fira Code', 'Courier New', monospace", fontSize: 24, lineHeight: 2, minHeight: 300 }}>
                     {visibleLines.map((line, i) => <div key={i} style={{ color: line.startsWith('>') ? colors.accent : line.includes('✅') ? '#28c840' : '#e0e0e0' }}><span style={{ color: '#666', marginRight: 16 }}>$</span>{line}</div>)}
                     <span style={{ display: 'inline-block', width: 12, height: 24, background: colors.accent, opacity: frame % 30 < 15 ? 1 : 0 }} />
                 </div>
             </div>
+            <Grain opacity={0.05} />
         </AbsoluteFill>
     );
 };
@@ -1275,6 +1257,353 @@ const QuoteRevealScene: React.FC<{ scene: MotionGraphicScene; palette: typeof PA
     );
 };
 
+// ─── Filled + New Scene Types ────────────────────────────────────────────────
+
+// floating_cards — cards drifting in 3D space with parallax depth (previously
+// fell back to title_reveal).
+const FloatingCardsScene: React.FC<{ scene: MotionGraphicScene; palette: typeof PALETTES.midnight }> = ({ scene, palette }) => {
+    const frame = useCurrentFrame(); const { fps } = useVideoConfig(); const colors = { ...palette, ...scene.colors };
+    const items = scene.items?.length ? scene.items : [
+        { icon: 'Zap', label: 'Fast', value: 'Instant renders' },
+        { icon: 'Sparkles', label: 'Smart', value: 'AI-driven scenes' },
+        { icon: 'Layers', label: 'Flexible', value: 'Endless styles' },
+    ];
+    return (
+        <AbsoluteFill style={{ background: colors.bg || palette.gradient, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', perspective: '1400px' }}>
+            <GradientMesh color={colors.accent} secondary={colors.secondary || colors.accent} bg={colors.bg || palette.bg} />
+            <FloatingShapes color={colors.accent} secondary={colors.secondary || colors.accent} seed={5} />
+            {scene.headline && <div style={{ ...getEntrance(frame, fps, 'blur-in', 0.1), fontSize: 60, fontWeight: 900, color: colors.text, marginBottom: 56, textAlign: 'center', zIndex: 3, letterSpacing: '-0.02em' }}>{scene.headline}</div>}
+            <div style={{ display: 'flex', gap: 40, zIndex: 2 }}>
+                {items.slice(0, 4).map((item, i) => {
+                    const a = getEntrance(frame, fps, 'flip-3d', 0.3 + i * 0.2);
+                    const floatY = Math.sin(frame * 0.04 + i * 1.5) * 18;
+                    const tilt = Math.sin(frame * 0.03 + i) * 4;
+                    return (
+                        <div key={i} style={{ ...a, transform: `${a.transform || ''} translateY(${floatY}px) rotateZ(${tilt}deg)`, width: 300, padding: '44px 36px', borderRadius: 32, background: 'rgba(255,255,255,0.06)', border: `1px solid ${colors.accent}40`, backdropFilter: 'blur(20px)', boxShadow: `0 30px 60px rgba(0,0,0,0.4), 0 0 40px ${colors.accent}20`, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 20, textAlign: 'center' }}>
+                            <div style={{ padding: 20, borderRadius: '50%', background: `${colors.accent}20`, border: `1px solid ${colors.accent}40` }}>
+                                <SmartIcon name={item.icon} color={colors.accent} size={48} />
+                            </div>
+                            <div style={{ fontSize: 30, fontWeight: 800, color: colors.text }}>{item.label}</div>
+                            {item.value && <div style={{ fontSize: 20, color: `${colors.text}99`, lineHeight: 1.4 }}>{toText(item.value)}</div>}
+                        </div>
+                    );
+                })}
+            </div>
+            <VignetteGlow color={colors.accent} />
+            <Grain />
+        </AbsoluteFill>
+    );
+};
+
+// timeline_reveal — vertical chronological reveal with a growing spine (previously
+// fell back to title_reveal).
+const TimelineRevealScene: React.FC<{ scene: MotionGraphicScene; palette: typeof PALETTES.midnight }> = ({ scene, palette }) => {
+    const frame = useCurrentFrame(); const { fps } = useVideoConfig(); const colors = { ...palette, ...scene.colors };
+    const items = scene.items?.length ? scene.items : [
+        { year: '2023', label: 'Founded', value: 'The idea was born' },
+        { year: '2024', label: 'Launch', value: 'First 10K users' },
+        { year: '2025', label: 'Scale', value: 'Global expansion' },
+    ];
+    const spineH = interpolate(frame, [fps * 0.3, fps * 3], [0, 100], { extrapolateRight: 'clamp' });
+    return (
+        <AbsoluteFill style={{ background: colors.bg || palette.bg, padding: '7% 12%', display: 'flex', flexDirection: 'column', justifyContent: 'center', overflow: 'hidden' }}>
+            <GradientMesh color={colors.accent} secondary={colors.secondary || colors.accent} bg={colors.bg || palette.bg} />
+            {scene.headline && <div style={{ ...getEntrance(frame, fps, 'slide-up', 0.1), fontSize: 56, fontWeight: 900, color: colors.text, marginBottom: 48, zIndex: 2 }}>{scene.headline}</div>}
+            <div style={{ position: 'relative', zIndex: 2, paddingLeft: 60 }}>
+                {/* Growing vertical spine */}
+                <div style={{ position: 'absolute', left: 20, top: 8, bottom: 8, width: 4, background: `${colors.accent}20`, borderRadius: 2 }}>
+                    <div style={{ width: '100%', height: `${spineH}%`, background: `linear-gradient(to bottom, ${colors.accent}, ${colors.secondary || colors.accent})`, borderRadius: 2, boxShadow: `0 0 16px ${colors.accent}` }} />
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 40 }}>
+                    {items.map((item, i) => {
+                        const a = getEntrance(frame, fps, 'slide-left', 0.5 + i * 0.4);
+                        return (
+                            <div key={i} style={{ ...a, display: 'flex', alignItems: 'center', gap: 32 }}>
+                                <div style={{ position: 'absolute', left: 8, width: 28, height: 28, borderRadius: '50%', background: `linear-gradient(135deg, ${colors.accent}, ${colors.secondary || colors.accent})`, border: `4px solid ${colors.bg}`, boxShadow: `0 0 20px ${colors.accent}`, transform: 'translateX(-4px)' }} />
+                                <div>
+                                    {item.year && <div style={{ fontSize: 22, fontWeight: 800, color: colors.accent, letterSpacing: 2 }}>{item.year}</div>}
+                                    <div style={{ fontSize: 36, fontWeight: 800, color: colors.text }}>{item.label}</div>
+                                    {item.value && <div style={{ fontSize: 22, color: `${colors.text}88`, marginTop: 4 }}>{toText(item.value)}</div>}
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>
+            </div>
+            <Grain opacity={0.05} />
+        </AbsoluteFill>
+    );
+};
+
+// particle_text — headline that assembles from a burst of particles (kinetic typography).
+const ParticleTextScene: React.FC<{ scene: MotionGraphicScene; palette: typeof PALETTES.midnight }> = ({ scene, palette }) => {
+    const frame = useCurrentFrame(); const { fps } = useVideoConfig(); const colors = { ...palette, ...scene.colors };
+    const headline = scene.headline || 'Imagine More';
+    const assemble = spring({ frame, fps, config: { damping: 16, stiffness: 60 } });
+    return (
+        <AbsoluteFill style={{ background: colors.bg || '#050510', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+            <GradientMesh color={colors.accent} secondary={colors.secondary || colors.accent} bg={colors.bg || '#050510'} />
+            <ParticleField color={colors.accent} count={60} seed={21} />
+            <FloatingShapes color={colors.accent} secondary={colors.secondary || colors.accent} seed={2} count={4} />
+            <div style={{ position: 'relative', zIndex: 2, textAlign: 'center', padding: '10%' }}>
+                <div style={{ fontSize: 100, fontWeight: 900, color: colors.text, letterSpacing: '-3px', lineHeight: 1.0, textShadow: `0 0 80px ${colors.accent}60` }}>
+                    {headline.split('').map((ch, i) => {
+                        const r = seededRandom(i * 3.7);
+                        const px = (r - 0.5) * 600 * (1 - assemble);
+                        const py = (seededRandom(i * 1.9) - 0.5) * 400 * (1 - assemble);
+                        return (
+                            <span key={i} style={{ display: 'inline-block', opacity: interpolate(frame, [i * 1.5, i * 1.5 + fps * 0.5], [0, 1], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' }), transform: `translate(${px}px, ${py}px) scale(${0.5 + assemble * 0.5})`, filter: `blur(${(1 - assemble) * 8}px)`, color: i % 5 === 0 ? colors.accent : colors.text }}>
+                                {ch === ' ' ? ' ' : ch}
+                            </span>
+                        );
+                    })}
+                </div>
+                {scene.subtext && <div style={{ ...getEntrance(frame, fps, 'fade', 1.4), fontSize: 32, color: colors.accent, marginTop: 32, fontWeight: 600, letterSpacing: 4 }}>{scene.subtext}</div>}
+            </div>
+            <VignetteGlow color={colors.accent} />
+            <Grain />
+        </AbsoluteFill>
+    );
+};
+
+// card_stack_3d — a fanned stack of 3D cards that spreads out to showcase features.
+const CardStack3DScene: React.FC<{ scene: MotionGraphicScene; palette: typeof PALETTES.midnight }> = ({ scene, palette }) => {
+    const frame = useCurrentFrame(); const { fps } = useVideoConfig(); const colors = { ...palette, ...scene.colors };
+    const items = scene.items?.length ? scene.items : [
+        { icon: 'Wand2', label: 'Create', value: 'Describe your idea' },
+        { icon: 'Film', label: 'Generate', value: 'AI builds the scenes' },
+        { icon: 'Share2', label: 'Share', value: 'Publish anywhere' },
+    ];
+    const spread = spring({ frame, fps, config: { damping: 15, stiffness: 55 } });
+    const n = items.length;
+    return (
+        <AbsoluteFill style={{ background: colors.bg || palette.bg, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', perspective: '1600px' }}>
+            <GradientMesh color={colors.accent} secondary={colors.secondary || colors.accent} bg={colors.bg || palette.bg} />
+            <Spotlight color={colors.accent} />
+            {scene.headline && <div style={{ ...getEntrance(frame, fps, 'slide-up', 0.1), fontSize: 58, fontWeight: 900, color: colors.text, marginBottom: 70, zIndex: 3, textAlign: 'center', letterSpacing: '-0.02em' }}>{scene.headline}</div>}
+            <div style={{ position: 'relative', width: 420, height: 520, zIndex: 2, transformStyle: 'preserve-3d' }}>
+                {items.slice(0, 5).map((item, i) => {
+                    const center = (n - 1) / 2;
+                    const offset = (i - center);
+                    const x = offset * spread * 230;
+                    const rot = offset * spread * 14;
+                    const z = -Math.abs(offset) * 60;
+                    const a = interpolate(frame, [fps * 0.2 + i * 3, fps * 0.9 + i * 3], [0, 1], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' });
+                    return (
+                        <div key={i} style={{ position: 'absolute', inset: 0, opacity: a, transform: `translateX(${x}px) translateZ(${z}px) rotateY(${rot}deg) rotateZ(${rot * 0.3}deg)`, transformOrigin: 'center bottom', borderRadius: 32, background: `linear-gradient(160deg, ${colors.accent}25, rgba(255,255,255,0.04))`, border: `1px solid ${colors.accent}50`, backdropFilter: 'blur(16px)', boxShadow: `0 40px 80px rgba(0,0,0,0.5)`, padding: 44, display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                            <div style={{ padding: 18, borderRadius: 20, background: `${colors.accent}30`, alignSelf: 'flex-start' }}>
+                                <SmartIcon name={item.icon} color={colors.text} size={44} />
+                            </div>
+                            <div>
+                                <div style={{ fontSize: 40, fontWeight: 900, color: colors.text, marginBottom: 12 }}>{item.label}</div>
+                                <div style={{ fontSize: 24, color: `${colors.text}cc`, lineHeight: 1.4 }}>{toText(item.value)}</div>
+                            </div>
+                            <div style={{ fontSize: 80, fontWeight: 900, color: `${colors.accent}40`, position: 'absolute', top: 24, right: 32 }}>{i + 1}</div>
+                        </div>
+                    );
+                })}
+            </div>
+            <VignetteGlow color={colors.accent} />
+            <Grain />
+        </AbsoluteFill>
+    );
+};
+
+// chart_race — animated ranked horizontal bars that grow and reorder-in (data reveal).
+const ChartRaceScene: React.FC<{ scene: MotionGraphicScene; palette: typeof PALETTES.midnight }> = ({ scene, palette }) => {
+    const frame = useCurrentFrame(); const { fps } = useVideoConfig(); const colors = { ...palette, ...scene.colors };
+    const raw = scene.items?.length ? scene.items : [
+        { label: 'Migoo AI', value: '95' }, { label: 'Legacy Tools', value: '62' },
+        { label: 'Manual Editing', value: '38' }, { label: 'Templates', value: '21' },
+    ];
+    const parsed = raw.map((it, i) => ({ label: it.label || `Item ${i + 1}`, num: parseNum(it.value, 10 + i), icon: it.icon }));
+    const max = Math.max(...parsed.map(p => p.num), 1);
+    return (
+        <AbsoluteFill style={{ background: colors.bg || palette.bg, padding: '7% 9%', display: 'flex', flexDirection: 'column', justifyContent: 'center', overflow: 'hidden' }}>
+            <GradientMesh color={colors.accent} secondary={colors.secondary || colors.accent} bg={colors.bg || palette.bg} />
+            {scene.headline && <div style={{ ...getEntrance(frame, fps, 'slide-up', 0.1), fontSize: 54, fontWeight: 900, color: colors.text, marginBottom: 48, zIndex: 2 }}>{scene.headline}</div>}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 26, zIndex: 2 }}>
+                {parsed.map((p, i) => {
+                    const grow = interpolate(frame, [fps * 0.4 + i * 5, fps * 1.8 + i * 5], [0, 1], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' });
+                    const widthPct = (p.num / max) * 100 * grow;
+                    const shownVal = Math.round(p.num * grow);
+                    const isLeader = i === 0;
+                    return (
+                        <div key={i} style={{ ...getEntrance(frame, fps, 'slide-left', 0.3 + i * 0.15), display: 'flex', alignItems: 'center', gap: 24 }}>
+                            <div style={{ width: 260, fontSize: 28, fontWeight: 700, color: colors.text, textAlign: 'right', flexShrink: 0 }}>{p.label}</div>
+                            <div style={{ flex: 1, height: 56, borderRadius: 14, background: 'rgba(255,255,255,0.05)', position: 'relative', overflow: 'hidden' }}>
+                                <div style={{ height: '100%', width: `${widthPct}%`, borderRadius: 14, background: isLeader ? `linear-gradient(90deg, ${colors.accent}, ${colors.secondary || colors.accent})` : `${colors.accent}70`, boxShadow: isLeader ? `0 0 24px ${colors.accent}80` : 'none', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: 18, transition: 'width 0.2s' }}>
+                                    <span style={{ fontSize: 26, fontWeight: 900, color: '#fff' }}>{shownVal}</span>
+                                </div>
+                            </div>
+                        </div>
+                    );
+                })}
+            </div>
+            <Grain opacity={0.05} />
+        </AbsoluteFill>
+    );
+};
+
+// ui_showcase — UI-style overlay: a main screen with animated floating panels around it.
+const UIShowcaseScene: React.FC<{ scene: MotionGraphicScene; palette: typeof PALETTES.midnight }> = ({ scene, palette }) => {
+    const frame = useCurrentFrame(); const { fps } = useVideoConfig(); const colors = { ...palette, ...scene.colors };
+    const chips = scene.items?.length ? scene.items : [
+        { icon: 'CheckCircle', label: 'Task done' }, { icon: 'TrendingUp', label: '+240%' }, { icon: 'Users', label: '12K online' },
+    ];
+    const screenAnim = getEntrance(frame, fps, 'scale', 0.2);
+    return (
+        <AbsoluteFill style={{ background: colors.bg || palette.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', perspective: '1400px' }}>
+            <GradientMesh color={colors.accent} secondary={colors.secondary || colors.accent} bg={colors.bg || palette.bg} />
+            <FloatingShapes color={colors.accent} secondary={colors.secondary || colors.accent} seed={14} count={4} />
+            {/* Main app window */}
+            <div style={{ ...screenAnim, width: '62%', height: '72%', borderRadius: 28, overflow: 'hidden', boxShadow: `0 50px 100px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.1)`, transform: `${screenAnim.transform || ''} rotateY(${interpolate(frame, [0, fps * 2], [8, 0], { extrapolateRight: 'clamp' })}deg)`, zIndex: 2, position: 'relative' }}>
+                <div style={{ background: '#161616', padding: '14px 20px', display: 'flex', gap: 8, alignItems: 'center' }}>
+                    {['#ff5f57', '#febc2e', '#28c840'].map((c, i) => <div key={i} style={{ width: 13, height: 13, borderRadius: '50%', background: c }} />)}
+                    <div style={{ flex: 1, marginLeft: 12, background: '#242424', borderRadius: 8, padding: '7px 14px', fontSize: 14, color: '#999' }}>{scene.query || 'app.migoo.ai/studio'}</div>
+                </div>
+                <div style={{ height: '100%', position: 'relative', background: '#0d0d0d' }}>
+                    {scene.imageUrl
+                        ? <Img src={scene.imageUrl} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                        : <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 40, textAlign: 'center' }}><div style={{ fontSize: 54, fontWeight: 900, color: colors.text }}>{scene.headline}</div>{scene.subtext && <div style={{ fontSize: 26, color: colors.accent, marginTop: 18 }}>{scene.subtext}</div>}</div>}
+                </div>
+            </div>
+            {/* Floating UI chips */}
+            {chips.slice(0, 3).map((chip, i) => {
+                const positions = [{ top: '18%', left: '12%' }, { bottom: '20%', left: '9%' }, { top: '24%', right: '11%' }];
+                const pos = positions[i % positions.length];
+                const a = getEntrance(frame, fps, 'spring-pop', 0.8 + i * 0.25);
+                const floatY = Math.sin(frame * 0.05 + i * 2) * 12;
+                return (
+                    <div key={i} style={{ position: 'absolute', ...pos, ...a, transform: `${a.transform || ''} translateY(${floatY}px)`, zIndex: 3, display: 'flex', alignItems: 'center', gap: 14, padding: '18px 26px', borderRadius: 20, background: 'rgba(255,255,255,0.08)', border: `1px solid ${colors.accent}50`, backdropFilter: 'blur(20px)', boxShadow: `0 20px 40px rgba(0,0,0,0.4)` }}>
+                        <SmartIcon name={chip.icon} color={colors.accent} size={30} />
+                        <span style={{ fontSize: 24, fontWeight: 700, color: colors.text }}>{chip.label}</span>
+                    </div>
+                );
+            })}
+            <VignetteGlow color={colors.accent} />
+            <Grain />
+        </AbsoluteFill>
+    );
+};
+
+// text_mask_reveal — headline text clipped over a moving image/video (mixed media).
+const TextMaskRevealScene: React.FC<{ scene: MotionGraphicScene; palette: typeof PALETTES.midnight }> = ({ scene, palette }) => {
+    const frame = useCurrentFrame(); const { fps } = useVideoConfig(); const colors = { ...palette, ...scene.colors };
+    const headline = scene.headline || 'CREATE';
+    const wipe = interpolate(frame, [fps * 0.2, fps * 1.4], [100, 0], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' });
+    return (
+        <AbsoluteFill style={{ background: colors.bg || '#000', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+            {/* The media that shows THROUGH the text */}
+            <div style={{ position: 'absolute', inset: 0 }}>
+                {scene.imageUrl
+                    ? <KenBurns durationSec={(scene.durationSec || 5) + 1} zoom={1.2}><Img src={scene.imageUrl} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /></KenBurns>
+                    : <div style={{ width: '100%', height: '100%', background: `linear-gradient(135deg, ${colors.accent}, ${colors.secondary || colors.accent})` }} />}
+            </div>
+            <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.35)' }} />
+            {/* Huge masked headline: text is transparent windows onto the media */}
+            <div style={{ position: 'relative', zIndex: 2, textAlign: 'center', clipPath: `inset(0 0 ${wipe}% 0)` }}>
+                <div style={{ fontSize: 200, fontWeight: 900, letterSpacing: '-6px', lineHeight: 0.95, color: '#fff', mixBlendMode: 'overlay', textTransform: 'uppercase', WebkitTextStroke: `2px ${colors.text}` }}>
+                    {headline}
+                </div>
+            </div>
+            {scene.subtext && <div style={{ position: 'absolute', bottom: '14%', zIndex: 3, ...getEntrance(frame, fps, 'slide-up', 1.4), fontSize: 34, fontWeight: 600, color: '#fff', letterSpacing: 4, textShadow: '0 4px 20px rgba(0,0,0,0.6)' }}>{scene.subtext}</div>}
+            <VignetteGlow color={colors.accent} strength={0.65} />
+            <Grain />
+        </AbsoluteFill>
+    );
+};
+
+// big_number — a single huge editorial statistic with kinetic emphasis.
+const BigNumberScene: React.FC<{ scene: MotionGraphicScene; palette: typeof PALETTES.midnight }> = ({ scene, palette }) => {
+    const frame = useCurrentFrame(); const { fps } = useVideoConfig(); const colors = { ...palette, ...scene.colors };
+    const stat: any = scene.stat || {};
+    const target = parseNum(stat.value ?? scene.headline, 100);
+    const progress = interpolate(frame, [fps * 0.3, fps * 2.2], [0, 1], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' });
+    const current = Math.round(target * progress);
+    const pop = spring({ frame, fps, config: { damping: 12, stiffness: 90 } });
+    return (
+        <AbsoluteFill style={{ background: colors.bg || '#050510', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+            <GradientMesh color={colors.accent} secondary={colors.secondary || colors.accent} bg={colors.bg || '#050510'} />
+            <ParticleField color={colors.accent} count={40} seed={31} />
+            <Spotlight color={colors.accent} />
+            {(stat.label || scene.subtext) && <div style={{ ...getEntrance(frame, fps, 'slide-up', 0.2), fontSize: 30, fontWeight: 700, letterSpacing: 8, textTransform: 'uppercase', color: colors.accent, marginBottom: 20, zIndex: 2 }}>{stat.label || scene.subtext}</div>}
+            <div style={{ zIndex: 2, fontSize: 300, fontWeight: 900, color: colors.text, lineHeight: 0.9, letterSpacing: '-10px', transform: `scale(${0.7 + pop * 0.3})`, textShadow: `0 0 120px ${colors.accent}80`, fontVariantNumeric: 'tabular-nums' }}>
+                {stat.prefix || ''}{current.toLocaleString()}{stat.suffix || ''}
+            </div>
+            {scene.content && <div style={{ ...getEntrance(frame, fps, 'fade', 1.6), fontSize: 34, color: `${colors.text}aa`, marginTop: 28, zIndex: 2, maxWidth: '70%', textAlign: 'center' }}>{scene.content}</div>}
+            <VignetteGlow color={colors.accent} />
+            <Grain />
+        </AbsoluteFill>
+    );
+};
+
+// pricing_table — animated plan cards with a highlighted "featured" tier.
+const PricingTableScene: React.FC<{ scene: MotionGraphicScene; palette: typeof PALETTES.midnight }> = ({ scene, palette }) => {
+    const frame = useCurrentFrame(); const { fps } = useVideoConfig(); const colors = { ...palette, ...scene.colors };
+    const plans = scene.items?.length ? scene.items : [
+        { label: 'Starter', value: '$0' }, { label: 'Pro', value: '$29' }, { label: 'Studio', value: '$99' },
+    ];
+    return (
+        <AbsoluteFill style={{ background: colors.bg || palette.bg, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', padding: '5%' }}>
+            <GradientMesh color={colors.accent} secondary={colors.secondary || colors.accent} bg={colors.bg || palette.bg} />
+            {scene.headline && <div style={{ ...getEntrance(frame, fps, 'slide-up', 0.1), fontSize: 58, fontWeight: 900, color: colors.text, marginBottom: 50, zIndex: 2, textAlign: 'center' }}>{scene.headline}</div>}
+            <div style={{ display: 'flex', gap: 32, zIndex: 2, alignItems: 'stretch' }}>
+                {plans.slice(0, 4).map((plan, i) => {
+                    const featured = i === Math.floor(plans.length / 2);
+                    const a = getEntrance(frame, fps, 'spring-pop', 0.3 + i * 0.18);
+                    return (
+                        <div key={i} style={{ ...a, transform: `${a.transform || ''} ${featured ? 'scale(1.06)' : ''}`, width: 300, padding: '48px 36px', borderRadius: 32, background: featured ? `linear-gradient(160deg, ${colors.accent}30, rgba(255,255,255,0.04))` : 'rgba(255,255,255,0.04)', border: `2px solid ${featured ? colors.accent : 'rgba(255,255,255,0.1)'}`, boxShadow: featured ? `0 30px 70px ${colors.accent}40` : '0 20px 40px rgba(0,0,0,0.3)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, position: 'relative' }}>
+                            {featured && <div style={{ position: 'absolute', top: -16, background: colors.accent, color: '#fff', fontSize: 15, fontWeight: 800, padding: '6px 18px', borderRadius: 20, letterSpacing: 1, textTransform: 'uppercase' }}>Popular</div>}
+                            <div style={{ fontSize: 26, fontWeight: 700, color: `${colors.text}cc`, textTransform: 'uppercase', letterSpacing: 2 }}>{plan.label}</div>
+                            <div style={{ fontSize: 68, fontWeight: 900, color: featured ? colors.accent : colors.text }}>{toText(plan.value)}</div>
+                            {plan.icon && <SmartIcon name={plan.icon} color={colors.accent} size={40} />}
+                            <div style={{ marginTop: 'auto', padding: '14px 40px', borderRadius: 40, background: featured ? `linear-gradient(135deg, ${colors.accent}, ${colors.secondary || colors.accent})` : `${colors.accent}20`, color: featured ? '#fff' : colors.accent, fontWeight: 800, fontSize: 20 }}>Choose</div>
+                        </div>
+                    );
+                })}
+            </div>
+            <Grain opacity={0.05} />
+        </AbsoluteFill>
+    );
+};
+
+// map_reveal — a stylized world grid with pins popping in for "global reach" beats.
+const MapRevealScene: React.FC<{ scene: MotionGraphicScene; palette: typeof PALETTES.midnight }> = ({ scene, palette }) => {
+    const frame = useCurrentFrame(); const { fps } = useVideoConfig(); const colors = { ...palette, ...scene.colors };
+    const pins = scene.items?.length ? scene.items : [
+        { label: 'New York', value: '32%' }, { label: 'London', value: '24%' }, { label: 'Tokyo', value: '19%' }, { label: 'Berlin', value: '14%' },
+    ];
+    // Deterministic pin positions across the "map" area.
+    const spots = pins.map((p, i) => ({ ...p, x: 12 + seededRandom(i * 4.4) * 76, y: 22 + seededRandom(i * 8.1) * 52 }));
+    return (
+        <AbsoluteFill style={{ background: colors.bg || palette.bg, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+            <GradientMesh color={colors.accent} secondary={colors.secondary || colors.accent} bg={colors.bg || palette.bg} />
+            {/* Dotted map grid */}
+            <div style={{ position: 'absolute', inset: '10%', backgroundImage: `radial-gradient(${colors.accent}30 2px, transparent 2px)`, backgroundSize: '34px 34px', opacity: 0.5, borderRadius: 24, zIndex: 1 }} />
+            {scene.headline && <div style={{ ...getEntrance(frame, fps, 'slide-up', 0.1), fontSize: 56, fontWeight: 900, color: colors.text, position: 'absolute', top: '10%', zIndex: 3, textAlign: 'center' }}>{scene.headline}</div>}
+            <div style={{ position: 'absolute', inset: '10%', zIndex: 2 }}>
+                {spots.map((s, i) => {
+                    const pop = spring({ frame: Math.max(0, frame - (fps * 0.4 + i * 8)), fps, config: { damping: 10, stiffness: 140 } });
+                    const ring = interpolate(frame, [fps * 0.4 + i * 8, fps * 1.4 + i * 8], [0, 1], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' });
+                    return (
+                        <div key={i} style={{ position: 'absolute', left: `${s.x}%`, top: `${s.y}%`, transform: `translate(-50%, -50%) scale(${pop})` }}>
+                            <div style={{ position: 'absolute', left: '50%', top: '50%', width: 60, height: 60, borderRadius: '50%', border: `2px solid ${colors.accent}`, transform: `translate(-50%, -50%) scale(${1 + ring * 1.6})`, opacity: (1 - ring) * 0.7 }} />
+                            <div style={{ width: 22, height: 22, borderRadius: '50%', background: colors.accent, boxShadow: `0 0 20px ${colors.accent}`, border: '3px solid #fff' }} />
+                            <div style={{ position: 'absolute', top: 28, left: '50%', transform: 'translateX(-50%)', whiteSpace: 'nowrap', padding: '6px 14px', borderRadius: 12, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(10px)', border: `1px solid ${colors.accent}40`, opacity: pop }}>
+                                <span style={{ fontSize: 18, fontWeight: 700, color: '#fff' }}>{s.label}</span>
+                                {s.value && <span style={{ fontSize: 18, fontWeight: 800, color: colors.accent, marginLeft: 8 }}>{toText(s.value)}</span>}
+                            </div>
+                        </div>
+                    );
+                })}
+            </div>
+            <VignetteGlow color={colors.accent} />
+            <Grain opacity={0.05} />
+        </AbsoluteFill>
+    );
+};
+
 // ─── Scene Renderer ──────────────────────────────────────────────────────────
 
 const SceneRenderer: React.FC<{ scene: MotionGraphicScene; palette: typeof PALETTES.midnight }> = ({ scene, palette }) => {
@@ -1304,6 +1633,16 @@ const SceneRenderer: React.FC<{ scene: MotionGraphicScene; palette: typeof PALET
         case 'code_terminal': return <CodeTerminalScene scene={scene} palette={palette} />;
         case 'glass_card': return <GlassCardScene scene={scene} palette={palette} />;
         case 'quote_reveal': return <QuoteRevealScene scene={scene} palette={palette} />;
+        case 'floating_cards': return <FloatingCardsScene scene={scene} palette={palette} />;
+        case 'timeline_reveal': return <TimelineRevealScene scene={scene} palette={palette} />;
+        case 'particle_text': return <ParticleTextScene scene={scene} palette={palette} />;
+        case 'card_stack_3d': return <CardStack3DScene scene={scene} palette={palette} />;
+        case 'chart_race': return <ChartRaceScene scene={scene} palette={palette} />;
+        case 'ui_showcase': return <UIShowcaseScene scene={scene} palette={palette} />;
+        case 'text_mask_reveal': return <TextMaskRevealScene scene={scene} palette={palette} />;
+        case 'big_number': return <BigNumberScene scene={scene} palette={palette} />;
+        case 'pricing_table': return <PricingTableScene scene={scene} palette={palette} />;
+        case 'map_reveal': return <MapRevealScene scene={scene} palette={palette} />;
         default: return <TitleRevealScene scene={scene} palette={palette} />;
     }
 };

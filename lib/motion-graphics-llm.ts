@@ -236,9 +236,113 @@ async function tryMgModels(
     throw lastErr ?? new Error('[mg-llm] all models exhausted');
 }
 
+// ── Scene catalogue ───────────────────────────────────────────────────────────
+// Single source of truth describing every renderable scene component + when to
+// pick it. Fed to the prompt-enhancer so the model always maps user intent onto
+// components that actually exist in remotion/MotionGraphicComposition.tsx.
+export const SCENE_CATALOGUE = `AVAILABLE SCENE COMPONENTS (choose the best-fit type for each beat):
+- logo_reveal: brand logo entrance with rings/particles/shimmer. Use for intros/outros with a logo.
+- title_reveal: big kinetic headline + eyebrow + underline over a mesh/particle bg. Use for opening statements.
+- particle_text: headline that assembles from a burst of particles. Use for dramatic hero titles.
+- text_mask_reveal: huge headline clipped over a moving image/video (mixed media). Use with a strong background image.
+- kinetic_text: word-by-word staggered slide-up sentence. Use for punchy taglines.
+- split_hero: left image / right text panel. Use to pair a visual with a value prop.
+- video_hero: full-screen darkened image/video with giant headline. Use for cinematic openers.
+- ui_showcase: app window mockup with floating UI chips around it. Use to show a product/dashboard.
+- browser_mockup: macOS browser chrome framing a screenshot/headline. Use for websites/web apps.
+- phone_mockup: iPhone frame showing an image/headline. Use for mobile app screens.
+- card_stack_3d: fanned 3D cards that spread out. Use for a 3-5 step process or feature set.
+- bento_grid: one large feature cell + small stat cells. Use for a feature overview grid.
+- feature_list: vertical list of feature cards with an animated cursor. Use for enumerating features.
+- icon_grid: grid of bouncing icon+label cards. Use for capabilities/categories.
+- floating_cards: cards drifting in 3D space. Use for a light, airy feature trio.
+- glass_card: single glassmorphism card with icon pills. Use for one highlighted feature.
+- comparison: Before (❌) vs After (✅) two-column cards. Use for old-way vs new-way. items = 2 (Before/After), value = comma-separated points.
+- stat_counter: animated count-up ring + bar chart + line graph. Use for a metric with supporting charts.
+- big_number: one giant editorial statistic. Use to hammer a single impressive number. Set stat.value/suffix/label.
+- metric_dashboard: 2x2 KPI cards with donuts + sparklines. Use for a metrics summary. items = 4.
+- chart_race: animated ranked horizontal bars. Use to rank options/competitors. items with numeric value.
+- pricing_table: animated plan cards with a featured tier. Use for pricing. items = plans (label + value like "$29").
+- timeline: horizontal step timeline with a progress line. Use for a roadmap/sequence.
+- timeline_reveal: vertical chronological reveal with a growing spine. Use for company history/milestones. items with year.
+- process_steps: horizontal step cards with arrows. Use for a linear how-it-works.
+- map_reveal: world grid with location pins popping in. Use for global reach/coverage. items = places.
+- notification_stack: stacked toast notifications sliding in. Use for social proof / activity.
+- testimonial: glass quote card with avatar. Use for a customer quote. content = quote, subtext = name.
+- quote_reveal: italic quote with a growing accent bar. Use for an inspirational quote.
+- code_terminal: terminal typing out code/commands. Use for developer/technical content. content = the code.
+- search_reveal: Google-style search bar typing a query then revealing a result. Use to frame a question/answer.
+- neon_glow: neon flickering headline with scanlines. Use for edgy/tech vibes.
+- gradient_burst: rotating conic-gradient burst behind a headline. Use for energetic transitions.
+- image_showcase: full-bleed zooming image with a caption card. Use to spotlight one image.
+- call_to_action: big headline + pulsing CTA button. Use for the closing ask. subtext = button label.`;
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 export const motionGraphicsLLM = {
+    /**
+     * Prompt enhancer — rewrites a user's rough chat text into a structured,
+     * component-aware brief the scene-generation model can act on. Returns a
+     * single plain-text prompt (NOT JSON). Mode-aware:
+     *   - 'create': expand into a full multi-scene video brief.
+     *   - 'add':    describe ONE new scene using the best-fit component.
+     *   - 'edit':   phrase as a targeted change to a specific existing scene.
+     * Reuses the same NVIDIA key rotation + model fallback as the rest of the module.
+     */
+    async enhancePrompt(
+        rawPrompt: string,
+        opts?: {
+            mode?: 'create' | 'add' | 'edit';
+            targetScene?: { index: number; type?: string; headline?: string } | null;
+            sceneCount?: number;
+        },
+    ): Promise<string> {
+        const mode = opts?.mode || 'create';
+        const target = opts?.targetScene || null;
+        const sceneCount = opts?.sceneCount ?? 0;
+
+        const modeGuidance =
+            mode === 'edit' && target
+                ? `MODE: EDIT an existing scene.\nThe user wants to change Scene ${target.index + 1}` +
+                  `${target.type ? ` (a "${target.type}" scene)` : ''}${target.headline ? ` titled "${target.headline}"` : ''}.\n` +
+                  `Rewrite the request as a precise, unambiguous edit instruction that names Scene ${target.index + 1} and states exactly what to change (text, colors, animation, image, or scene type). Do NOT describe other scenes.`
+                : mode === 'add'
+                ? `MODE: ADD one new scene.\nThe video currently has ${sceneCount} scene(s); this will become Scene ${sceneCount + 1}.\n` +
+                  `Rewrite the request into a vivid single-scene brief. Pick the ONE best-fit component from the catalogue for what the user wants to show, and describe the exact on-screen content (headline, subtext, items/stats as relevant). Do NOT redesign the whole video.`
+                : `MODE: CREATE a full video.\nRewrite the request into a structured multi-scene brief: a punchy opener, 3-6 body scenes that each map to a distinct best-fit component, and a closing call_to_action. For each scene name the component type and its on-screen content.`;
+
+        const SYSTEM =
+            'You are a motion-graphics creative director and prompt engineer. You turn a vague user idea into a precise, ' +
+            'production-ready prompt for a downstream AI that generates animated scenes. You know EXACTLY which visual ' +
+            'components exist and pick the ones that best fit the user intent.\n\n' +
+            SCENE_CATALOGUE +
+            '\n\nRULES:\n' +
+            '- Reference ONLY component types from the catalogue above (use their exact snake_case names).\n' +
+            '- Be concrete: specify real headlines, subtext, and item/stat content — never placeholders like "your text here".\n' +
+            '- Match the number of scenes to the intent; do not pad.\n' +
+            '- Keep the tone cinematic and modern. Prefer dark backgrounds with a vivid accent.\n' +
+            '- Output ONLY the enhanced prompt as plain prose/bullet text the user can read and edit. No JSON, no markdown code fences, no preamble like "Here is".';
+
+        const user =
+            `${modeGuidance}\n\nUSER REQUEST:\n"""${(rawPrompt || '').trim() || '(the user gave no text — infer a strong default from the mode)'}"""\n\n` +
+            `Write the enhanced prompt now.`;
+
+        const raw = await tryMgModels(
+            [MG_VOICEOVER_MODEL, MG_PRIMARY_MODEL, MG_FALLBACK_MODEL, MG_LAST_RESORT_MODEL],
+            SYSTEM,
+            user,
+            0.7,
+            1200,
+        );
+
+        // Strip accidental code fences / leading labels the model may add.
+        return raw
+            .replace(/^```[a-z]*\n?/i, '')
+            .replace(/\n?```$/i, '')
+            .replace(/^\s*(here('|’)s|here is)[^\n:]*:\s*/i, '')
+            .trim();
+    },
+
     /**
      * Generate and parse a JSON scene array for Motion Graphics.
      * Primary: openrouter/owl-alpha
