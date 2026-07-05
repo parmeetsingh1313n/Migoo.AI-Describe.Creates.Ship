@@ -2594,17 +2594,10 @@ export const generateMotionGraphic = inngest.createFunction(
                     continue;
                 }
 
-                // AUTO-ANIMATE: logo_reveal with uploaded blob gets Kling on EVERY fresh project.
-                // The user's real logo is animated with a premium GPT-120b prompt.
+                // logo_reveal with uploaded assets: animated purely in Remotion (pixel-perfect, no Wan hallucination)
+                // Remotion's LogoRevealScene provides rings, particle orbits, shimmer, glow — all without text distortion.
                 if (uploadedUrl && scene.type === 'logo_reveal') {
-                    console.log(`🎬 [auto-animate] Scene ${i + 1} (logo_reveal): uploaded logo → Kling`);
-                    klingCandidates.push({
-                        index: i,
-                        imageUrl: uploadedUrl,
-                        narration: scene.voiceoverLine || scene.headline || '',
-                        animationOnDemand: true,
-                        animationType: 'logo_kinetic_reveal',
-                    });
+                    console.log(`✨ [logo-reveal] Scene ${i + 1}: uploaded logo → Remotion CSS animation (skipping Wan)`);
                     continue;
                 }
 

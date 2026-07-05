@@ -791,38 +791,99 @@ const LogoRevealScene: React.FC<{ scene: MotionGraphicScene; palette: typeof PAL
     scene, palette
 }) => {
     const frame = useCurrentFrame();
-    const { fps } = useVideoConfig();
+    const { fps, width, height } = useVideoConfig();
     const colors = { ...palette, ...scene.colors };
-    const logoScale = spring({ frame, fps, config: { damping: 12, stiffness: 80 } });
-    const glowOpacity = interpolate(frame, [fps * 0.5, fps * 1.5], [0, 0.8], { extrapolateRight: 'clamp' });
-    const subtextAnim = getEntrance(frame, fps, 'fade', 1.0);
-    const bgPulse = interpolate(frame, [0, fps * 3], [1, 1.15], { extrapolateRight: 'clamp' });
+    const accent = colors.accent || '#a855f7';
+
+    // ── Core timing ──────────────────────────────────────────────────────────
+    const logoScale  = spring({ frame, fps, config: { damping: 14, stiffness: 70 } });
+    const logoOpacity = interpolate(frame, [0, fps * 0.3], [0, 1], { extrapolateRight: 'clamp' });
+
+    // ── Background breathing glow ─────────────────────────────────────────────
+    const bgGlow = 0.6 + Math.sin(frame * 0.06) * 0.25;
+    const bgScale = 1 + Math.sin(frame * 0.04) * 0.08;
+
+    // ── Shimmer sweep across the logo ─────────────────────────────────────────
+    const shimmerX = interpolate(frame, [fps * 0.5, fps * 1.5], [-600, 1200], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' });
+
+    // ── 5 expanding rings ─────────────────────────────────────────────────────
+    const rings = [0, 0.4, 0.8, 1.2, 1.6].map((delay, idx) => {
+        const ringFrame = Math.max(0, frame - delay * fps);
+        const ringScale  = spring({ frame: ringFrame, fps, config: { damping: 18, stiffness: 40 } });
+        const ringOpacity = interpolate(ringFrame, [0, fps * 0.5, fps * 2], [0, 0.6 - idx * 0.1, 0], { extrapolateRight: 'clamp' });
+        return { scale: ringScale, opacity: ringOpacity, size: 420 + idx * 120 };
+    });
+
+    // ── 8 orbiting particles ──────────────────────────────────────────────────
+    const orbitRadius = 320;
+    const particles = Array.from({ length: 8 }, (_, i) => {
+        const angle = (i / 8) * Math.PI * 2 + frame * 0.025;
+        const particleOpacity = interpolate(frame, [fps * 0.8, fps * 1.4], [0, 1], { extrapolateRight: 'clamp' });
+        const pulse = 0.6 + Math.sin(frame * 0.1 + i) * 0.4;
+        return {
+            x: Math.cos(angle) * orbitRadius,
+            y: Math.sin(angle) * orbitRadius,
+            opacity: particleOpacity * pulse,
+            size: 6 + (i % 3) * 4,
+        };
+    });
+
+    // ── Subtext ───────────────────────────────────────────────────────────────
+    const subtextOpacity   = interpolate(frame, [fps * 1.2, fps * 1.8], [0, 1], { extrapolateRight: 'clamp' });
+    const subtextTranslate = interpolate(frame, [fps * 1.2, fps * 1.8], [30, 0], { extrapolateRight: 'clamp' });
 
     return (
-        <AbsoluteFill style={{ background: colors.bg || palette.gradient, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-            {/* Background glow */}
-            <div style={{ position: 'absolute', width: '80%', height: '80%', background: `radial-gradient(circle, ${colors.accent}25 0%, transparent 70%)`, filter: 'blur(100px)', transform: `scale(${bgPulse})` }} />
-            {/* Logo image or text */}
-            <div style={{ textAlign: 'center', zIndex: 1, transform: `scale(${logoScale})` }}>
-                {scene.imageUrl ? (
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                        <div style={{ width: 500, height: 500, display: 'flex', alignItems: 'center', justifyContent: 'center', filter: `drop-shadow(0 0 60px ${colors.accent}80)` }}>
+        <AbsoluteFill style={{ background: colors.bg || '#050510', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+
+            {/* Deep background ambient glow */}
+            <div style={{ position: 'absolute', width: '90%', height: '90%', background: `radial-gradient(circle, ${accent}${Math.round(bgGlow * 40).toString(16).padStart(2,'0')} 0%, transparent 65%)`, filter: 'blur(120px)', transform: `scale(${bgScale})` }} />
+
+            {/* 5 expanding rings */}
+            {rings.map((ring, i) => (
+                <div key={i} style={{ position: 'absolute', width: ring.size, height: ring.size, borderRadius: '50%', border: `${2 - i * 0.3}px solid ${accent}`, opacity: ring.opacity, transform: `scale(${ring.scale})` }} />
+            ))}
+
+            {/* 8 orbiting particles */}
+            {particles.map((p, i) => (
+                <div key={i} style={{ position: 'absolute', width: p.size, height: p.size, borderRadius: '50%', background: i % 2 === 0 ? accent : `${accent}80`, opacity: p.opacity, transform: `translate(${p.x}px, ${p.y}px)`, boxShadow: `0 0 ${p.size * 3}px ${accent}80` }} />
+            ))}
+
+            {/* Logo image — pixel-perfect, zero Wan distortion */}
+            <div style={{ position: 'relative', zIndex: 2, transform: `scale(${logoScale})`, opacity: logoOpacity, overflow: 'hidden' }}>
+
+                {/* Shimmer sweep */}
+                <div style={{ position: 'absolute', inset: 0, background: `linear-gradient(105deg, transparent 30%, rgba(255,255,255,0.25) 50%, transparent 70%)`, transform: `translateX(${shimmerX}px)`, pointerEvents: 'none', zIndex: 10 }} />
+
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                    <div style={{
+                        width: 520, height: 340,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        filter: `drop-shadow(0 0 50px ${accent}90) drop-shadow(0 0 100px ${accent}50)`,
+                    }}>
+                        {scene.imageUrl ? (
                             <Img src={scene.imageUrl} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
-                        </div>
-                        {scene.subtext && <div style={{ ...subtextAnim, fontSize: 36, color: `${colors.text}cc`, marginTop: 32, fontWeight: 600, letterSpacing: 4, textTransform: 'uppercase' }}>{scene.subtext}</div>}
+                        ) : (
+                            <div style={{ fontSize: 120, fontWeight: 900, color: colors.text || '#fff', letterSpacing: '-4px', textShadow: `0 0 60px ${accent}80` }}>
+                                {scene.headline || '✦'}
+                            </div>
+                        )}
                     </div>
-                ) : (
-                    <>
-                        <div style={{ fontSize: 120, fontWeight: 900, color: colors.text, letterSpacing: '-4px', textShadow: `0 0 60px ${colors.accent}80, 0 0 120px ${colors.accent}40` }}>{scene.headline || '✦'}</div>
-                        {scene.subtext && <div style={{ ...subtextAnim, fontSize: 32, color: `${colors.text}aa`, marginTop: 24, fontWeight: 500 }}>{scene.subtext}</div>}
-                    </>
-                )}
+
+                    {/* Subtext with slide-up */}
+                    {scene.subtext && (
+                        <div style={{ opacity: subtextOpacity, transform: `translateY(${subtextTranslate}px)`, fontSize: 32, color: `${colors.text || '#fff'}cc`, marginTop: 28, fontWeight: 600, letterSpacing: 6, textTransform: 'uppercase' }}>
+                            {scene.subtext}
+                        </div>
+                    )}
+                </div>
             </div>
-            {/* Decorative ring */}
-            <div style={{ position: 'absolute', width: 600, height: 600, borderRadius: '50%', border: `2px solid ${colors.accent}30`, opacity: glowOpacity, transform: `scale(${logoScale})` }} />
+
+            {/* Inner glow ring tightly around logo */}
+            <div style={{ position: 'absolute', width: 560, height: 380, borderRadius: 32, border: `1px solid ${accent}50`, opacity: 0.4 + Math.sin(frame * 0.08) * 0.2, zIndex: 1 }} />
         </AbsoluteFill>
     );
 };
+
 
 // ─── New Scene Types ─────────────────────────────────────────────────────────
 
