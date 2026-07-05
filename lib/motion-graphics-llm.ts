@@ -539,8 +539,10 @@ export const motionGraphicsLLM = {
         // Base motion guidance per animation type — seed for gpt-oss-120b to expand on
         const ANIMATION_SEEDS: Record<string, string> = {
             logo_kinetic_reveal:
+                'CRITICAL: preserve the exact logo text and spelling unchanged — do NOT alter any letters. ' +
                 'The logo emerges from pure black with a golden particle burst, light rays sweep left to right, ' +
-                'particles spiral inward then explode outward, depth-of-field rack from blur to sharp, slow motion at 120fps feel',
+                'particles spiral inward then explode outward, depth-of-field rack from blur to sharp, slow motion at 120fps feel. ' +
+                'Logo text must remain pixel-perfect, maintain exact brand name spelling throughout entire clip.',
             product_float:
                 'Product levitates weightlessly, gentle oscillating float up and down 8px, ' +
                 'soft rim light rotates 360 degrees, microscopic dust particles orbit in slow motion, premium commercial mood',

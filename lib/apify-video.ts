@@ -117,7 +117,7 @@ export async function submitApifyVideoTask(
     resolution:     "480p",
     aspectRatio:    aspectRatio,
     duration:       10,
-    negativePrompt: "blur, distort, low quality, shaky camera, fast movement, rapid motion, jerky, abrupt motion, sudden jump, text, watermark, speed ramp",
+    negativePrompt: "altered text, changed letters, misspelled words, modified logo text, different spelling, distorted typography, text hallucination, redrawn text, changed brand name, blur, distort, low quality, shaky camera, fast movement, rapid motion, jerky, abrupt motion, sudden jump, watermark, speed ramp",
     cfgScale:       1,
   };
 
