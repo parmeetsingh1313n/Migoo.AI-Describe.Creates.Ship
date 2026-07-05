@@ -26,6 +26,7 @@ import {
     ImagePlus,
     X,
     Upload,
+    Volume2,
 } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
@@ -88,6 +89,64 @@ const MUSIC_OPTIONS = Object.entries(MUSIC_URLS).map(([key]) => ({
     label: key.charAt(0).toUpperCase() + key.slice(1),
 }))
 
+// Sarvam AI voiceover languages
+const LANGUAGES = [
+    { id: 'en-IN', label: 'English (India)', flag: '🇮🇳' },
+    { id: 'hi-IN', label: 'Hindi', flag: '🇮🇳' },
+    { id: 'bn-IN', label: 'Bengali', flag: '🇮🇳' },
+    { id: 'ta-IN', label: 'Tamil', flag: '🇮🇳' },
+    { id: 'te-IN', label: 'Telugu', flag: '🇮🇳' },
+    { id: 'gu-IN', label: 'Gujarati', flag: '🇮🇳' },
+    { id: 'kn-IN', label: 'Kannada', flag: '🇮🇳' },
+    { id: 'ml-IN', label: 'Malayalam', flag: '🇮🇳' },
+    { id: 'mr-IN', label: 'Marathi', flag: '🇮🇳' },
+    { id: 'pa-IN', label: 'Punjabi', flag: '🇮🇳' },
+    { id: 'od-IN', label: 'Odia', flag: '🇮🇳' },
+]
+
+// Sarvam Bulbul v3 speakers with gender and characteristics info
+const SPEAKERS = [
+    { id: 'shubh', label: 'Shubh', type: 'Male', mood: 'Default · Clear' },
+    { id: 'aditya', label: 'Aditya', type: 'Male', mood: 'Professional' },
+    { id: 'ritu', label: 'Ritu', type: 'Female', mood: 'Warm' },
+    { id: 'priya', label: 'Priya', type: 'Female', mood: 'Friendly' },
+    { id: 'neha', label: 'Neha', type: 'Female', mood: 'Soft' },
+    { id: 'rahul', label: 'Rahul', type: 'Male', mood: 'Energetic' },
+    { id: 'pooja', label: 'Pooja', type: 'Female', mood: 'Calm' },
+    { id: 'rohan', label: 'Rohan', type: 'Male', mood: 'Casual' },
+    { id: 'simran', label: 'Simran', type: 'Female', mood: 'Cheerful' },
+    { id: 'kavya', label: 'Kavya', type: 'Female', mood: 'Expressive' },
+    { id: 'amit', label: 'Amit', type: 'Male', mood: 'Firm' },
+    { id: 'dev', label: 'Dev', type: 'Male', mood: 'Deep' },
+    { id: 'ishita', label: 'Ishita', type: 'Female', mood: 'Lively' },
+    { id: 'shreya', label: 'Shreya', type: 'Female', mood: 'Bright' },
+    { id: 'kabir', label: 'Kabir', type: 'Male', mood: 'Confident' },
+    { id: 'anand', label: 'Anand', type: 'Male', mood: 'Pleasant' },
+    { id: 'roopa', label: 'Roopa', type: 'Female', mood: 'Gentle' },
+    { id: 'varun', label: 'Varun', type: 'Male', mood: 'Dynamic' },
+    { id: 'tanya', label: 'Tanya', type: 'Female', mood: 'Bold' },
+    { id: 'sunny', label: 'Sunny', type: 'Male', mood: 'Upbeat' },
+    { id: 'shruti', label: 'Shruti', type: 'Female', mood: 'Melodic' },
+    { id: 'mohit', label: 'Mohit', type: 'Male', mood: 'Smooth' },
+    { id: 'rupali', label: 'Rupali', type: 'Female', mood: 'Graceful' },
+    { id: 'sophia', label: 'Sophia', type: 'Female', mood: 'Modern' },
+]
+
+// Preview texts by language
+const PREVIEW_TEXTS: Record<string, string> = {
+    'en-IN': 'Welcome to Migoo! Your stories deserve to be seen by the world.',
+    'hi-IN': 'मिगू में आपका स्वागत है! आपकी कहानियाँ दुनिया के सामने आने के काबिल हैं।',
+    'bn-IN': 'মিগুতে আপনাকে স্বাগতম! আপনার গল্পগুলো বিশ্বের কাছে পৌঁছানোর যোগ্য।',
+    'ta-IN': 'மிகூவிற்கு வரவேற்கிறோம்! உங்கள் கதைகள் உலகை சென்றடைய வேண்டும்.',
+    'te-IN': 'మిగూకి స్వాగతం! మీ కథలు ప్రపంచానికి చేరాలి.',
+    'gu-IN': 'મિગુમાં તમારું સ્વાગત છે! તમારી વાર્તાઓ દુનિયા સુધી પહોંચવી જોઈએ.',
+    'kn-IN': 'ಮಿಗೂಗೆ ಸ್ವಾಗತ! ನಿಮ್ಮ ಕಥೆಗಳು ಜಗತ್ತಿನ ಮುಂದೆ ಬರಬೇಕು.',
+    'ml-IN': 'മിഗൂവിലേക്ക് സ്വാഗതം! നിങ്ങളുടെ കഥകൾ ലോകത്തിന് മുന്നിൽ എത്തണം.',
+    'mr-IN': 'मिगूमध्ये आपले स्वागत आहे! तुमच्या कथा जगासमोर यायला हव्यात.',
+    'pa-IN': 'ਮਿਗੂ ਵਿੱਚ ਤੁਹਾਡਾ ਸਵਾਗਤ ਹੈ! ਤੁਹਾਡੀਆਂ ਕਹਾਣੀਆਂ ਦੁਨੀਆ ਤੱਕ ਪਹੁੰਚਣੀਆਂ ਚਾਹੀਦੀਆਂ ਹਨ।',
+    'od-IN': 'ମିଗୁକୁ ଆପଣଙ୍କ ସ୍ୱାଗତ! ଆପଣଙ୍କ କାହାଣୀ ଦୁନିଆ ଆଗରେ ଆସିବା ଉଚିତ।',
+}
+
 export default function MotionGraphicsPage() {
     const { isSignedIn } = useUser()
     const router = useRouter()
@@ -97,11 +156,83 @@ export default function MotionGraphicsPage() {
     const [duration, setDuration] = useState(30)
     const [aspectRatio, setAspectRatio] = useState('16:9')
     const [voiceoverEnabled, setVoiceoverEnabled] = useState(false)
+    const [voice, setVoice] = useState('rahul')
+    const [language, setLanguage] = useState('en-IN')
+    const [playingVoice, setPlayingVoice] = useState<string | null>(null)
+    const audioRef = useRef<HTMLAudioElement | null>(null)
     const [music, setMusic] = useState('cinematic')
     const [isCreating, setIsCreating] = useState(false)
     const [uploadedAssets, setUploadedAssets] = useState<Array<{ file: File; preview: string; name: string }>>([])
     const [uploadingAssets, setUploadingAssets] = useState(false)
     const assetInputRef = useRef<HTMLInputElement>(null)
+
+    // Stop audio on unmount
+    useEffect(() => {
+        return () => {
+            if (audioRef.current) {
+                audioRef.current.pause()
+                audioRef.current = null
+            }
+        }
+    }, [])
+
+    const handlePreview = async (speakerId: string) => {
+        if (audioRef.current) {
+            audioRef.current.pause()
+            audioRef.current = null
+        }
+
+        if (playingVoice === speakerId) {
+            setPlayingVoice(null)
+            return
+        }
+
+        setPlayingVoice(speakerId)
+
+        try {
+            const previewText = PREVIEW_TEXTS[language] || PREVIEW_TEXTS['en-IN']
+
+            const response = await fetch('/api/tts-preview', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    text: previewText,
+                    speaker: speakerId,
+                    language: language,
+                }),
+            })
+
+            if (!response.ok) {
+                throw new Error('Preview failed')
+            }
+
+            const { audio } = await response.json()
+
+            const audioBlob = new Blob(
+                [Uint8Array.from(atob(audio), c => c.charCodeAt(0))],
+                { type: 'audio/wav' }
+            )
+            const audioUrl = URL.createObjectURL(audioBlob)
+            const audioElement = new Audio(audioUrl)
+            audioRef.current = audioElement
+
+            audioElement.onended = () => {
+                setPlayingVoice(null)
+                URL.revokeObjectURL(audioUrl)
+            }
+
+            audioElement.onerror = () => {
+                setPlayingVoice(null)
+                toast.error('Audio playback failed')
+            }
+
+            await audioElement.play()
+        } catch (error) {
+            setPlayingVoice(null)
+            toast.error('Voice preview unavailable right now')
+            console.error('TTS Preview error:', error)
+        }
+    }
 
     // Projects
     const [projects, setProjects] = useState<Project[]>([])
@@ -170,7 +301,7 @@ export default function MotionGraphicsPage() {
             const res = await fetch('/api/motion-graphics', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ prompt: prompt.trim(), duration, aspectRatio, voiceoverEnabled, music }),
+                body: JSON.stringify({ prompt: prompt.trim(), duration, aspectRatio, voiceoverEnabled, voice, language, music }),
             })
             const data = await res.json()
             if (data.success && data.projectId) {
@@ -434,9 +565,60 @@ export default function MotionGraphicsPage() {
                                     </div>
                                 </button>
                                 {voiceoverEnabled && (
-                                    <p className="text-[11px] text-emerald-600 mt-1.5 px-1">
-                                        ✨ Energetic professional narration — separate from on-screen text
-                                    </p>
+                                    <>
+                                        <p className="text-[11px] text-emerald-600 mt-1.5 px-1 mb-3">
+                                            ✨ Energetic professional narration — separate from on-screen text
+                                        </p>
+                                        <div className="space-y-3 p-3.5 rounded-xl border border-emerald-100 bg-emerald-50/20 text-left">
+                                            <div className="grid grid-cols-2 gap-3">
+                                                <div>
+                                                    <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block mb-1">
+                                                        Language
+                                                    </label>
+                                                    <select
+                                                        value={language}
+                                                        onChange={(e) => setLanguage(e.target.value)}
+                                                        className="w-full px-2.5 py-1.5 rounded-lg bg-white border border-border text-foreground text-xs focus:ring-2 focus:ring-primary/20 cursor-pointer"
+                                                    >
+                                                        {LANGUAGES.map(lang => (
+                                                            <option key={lang.id} value={lang.id}>{lang.flag} {lang.label}</option>
+                                                        ))}
+                                                    </select>
+                                                </div>
+
+                                                <div>
+                                                    <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block mb-1">
+                                                        Voice
+                                                    </label>
+                                                    <div className="flex gap-1.5 items-center">
+                                                        <select
+                                                            value={voice}
+                                                            onChange={(e) => setVoice(e.target.value)}
+                                                            className="flex-1 px-2.5 py-1.5 rounded-lg bg-white border border-border text-foreground text-xs focus:ring-2 focus:ring-primary/20 cursor-pointer"
+                                                        >
+                                                            {SPEAKERS.map(speaker => (
+                                                                <option key={speaker.id} value={speaker.id}>
+                                                                    {speaker.label} ({speaker.type})
+                                                                </option>
+                                                            ))}
+                                                        </select>
+                                                        <button
+                                                            onClick={() => handlePreview(voice)}
+                                                            type="button"
+                                                            className="p-1.5 rounded-lg border border-border bg-white text-primary hover:bg-muted/50 cursor-pointer flex items-center justify-center transition-colors"
+                                                            title="Preview voice"
+                                                        >
+                                                            {playingVoice === voice ? (
+                                                                <Loader2 className="w-3.5 h-3.5 animate-spin text-primary" />
+                                                            ) : (
+                                                                <Volume2 className="w-3.5 h-3.5" />
+                                                            )}
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </>
                                 )}
                             </div>
                         </div>
