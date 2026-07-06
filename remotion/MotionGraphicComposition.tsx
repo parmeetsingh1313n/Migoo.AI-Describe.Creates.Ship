@@ -41,6 +41,9 @@ import {
     ParallaxLayer,
     MeshBg,
     OrbBg,
+    DottedGlobe,
+    CITY_COORDS,
+    type GlobePin,
 } from './lib/motion';
 
 // ─── Smart Icon Component ────────────────────────────────────────────────────
@@ -1309,22 +1312,21 @@ const TimelineRevealScene: React.FC<{ scene: MotionGraphicScene; palette: typeof
         <AbsoluteFill style={{ background: colors.bg || palette.bg, padding: '7% 12%', display: 'flex', flexDirection: 'column', justifyContent: 'center', overflow: 'hidden' }}>
             <GradientMesh color={colors.accent} secondary={colors.secondary || colors.accent} bg={colors.bg || palette.bg} />
             {scene.headline && <div style={{ ...getEntrance(frame, fps, 'slide-up', 0.1), fontSize: 56, fontWeight: 900, color: colors.text, marginBottom: 48, zIndex: 2 }}>{scene.headline}</div>}
-            <div style={{ position: 'relative', zIndex: 2, paddingLeft: 60 }}>
-                {/* Growing vertical spine */}
-                <div style={{ position: 'absolute', left: 20, top: 8, bottom: 8, width: 4, background: `${colors.accent}20`, borderRadius: 2 }}>
+            <div style={{ position: 'relative', zIndex: 2 }}>
+                {/* Growing vertical spine (centered under the dots) */}
+                <div style={{ position: 'absolute', left: 17, top: 12, bottom: 12, width: 4, background: `${colors.accent}20`, borderRadius: 2 }}>
                     <div style={{ width: '100%', height: `${spineH}%`, background: `linear-gradient(to bottom, ${colors.accent}, ${colors.secondary || colors.accent})`, borderRadius: 2, boxShadow: `0 0 16px ${colors.accent}` }} />
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 40 }}>
                     {items.map((item, i) => {
                         const a = getEntrance(frame, fps, 'slide-left', 0.5 + i * 0.4);
                         return (
-                            <div key={i} style={{ ...a, display: 'flex', alignItems: 'center', gap: 32 }}>
-                                <div style={{ position: 'absolute', left: 8, width: 28, height: 28, borderRadius: '50%', background: `linear-gradient(135deg, ${colors.accent}, ${colors.secondary || colors.accent})`, border: `4px solid ${colors.bg}`, boxShadow: `0 0 20px ${colors.accent}`, transform: 'translateX(-4px)' }} />
-                                <div>
-                                    {item.year && <div style={{ fontSize: 22, fontWeight: 800, color: colors.accent, letterSpacing: 2 }}>{item.year}</div>}
-                                    <div style={{ fontSize: 36, fontWeight: 800, color: colors.text }}>{item.label}</div>
-                                    {item.value && <div style={{ fontSize: 22, color: `${colors.text}88`, marginTop: 4 }}>{toText(item.value)}</div>}
-                                </div>
+                            // Row reserves the left gutter (paddingLeft) so the dot never overlaps text.
+                            <div key={i} style={{ ...a, position: 'relative', paddingLeft: 72 }}>
+                                <div style={{ position: 'absolute', left: 5, top: 6, width: 28, height: 28, borderRadius: '50%', background: `linear-gradient(135deg, ${colors.accent}, ${colors.secondary || colors.accent})`, border: `4px solid ${colors.bg || palette.bg}`, boxShadow: `0 0 20px ${colors.accent}` }} />
+                                {item.year && <div style={{ fontSize: 22, fontWeight: 800, color: colors.accent, letterSpacing: 2 }}>{item.year}</div>}
+                                <div style={{ fontSize: 36, fontWeight: 800, color: colors.text, lineHeight: 1.1 }}>{item.label}</div>
+                                {item.value && <div style={{ fontSize: 22, color: `${colors.text}88`, marginTop: 4 }}>{toText(item.value)}</div>}
                             </div>
                         );
                     })}
@@ -1381,24 +1383,29 @@ const CardStack3DScene: React.FC<{ scene: MotionGraphicScene; palette: typeof PA
             <GradientMesh color={colors.accent} secondary={colors.secondary || colors.accent} bg={colors.bg || palette.bg} />
             <Spotlight color={colors.accent} />
             {scene.headline && <div style={{ ...getEntrance(frame, fps, 'slide-up', 0.1), fontSize: 58, fontWeight: 900, color: colors.text, marginBottom: 70, zIndex: 3, textAlign: 'center', letterSpacing: '-0.02em' }}>{scene.headline}</div>}
-            <div style={{ position: 'relative', width: 420, height: 520, zIndex: 2, transformStyle: 'preserve-3d' }}>
+            <div style={{ position: 'relative', width: 340, height: 460, zIndex: 2, transformStyle: 'preserve-3d' }}>
                 {items.slice(0, 5).map((item, i) => {
                     const center = (n - 1) / 2;
                     const offset = (i - center);
-                    const x = offset * spread * 230;
-                    const rot = offset * spread * 14;
-                    const z = -Math.abs(offset) * 60;
+                    // Wide step (≈ card width) so cards fan out with only a small overlap — no clipped text.
+                    const x = offset * spread * 320;
+                    const rot = offset * spread * 10;
+                    const z = -Math.abs(offset) * 70;
                     const a = interpolate(frame, [fps * 0.2 + i * 3, fps * 0.9 + i * 3], [0, 1], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' });
+                    const cardBg = colors.bg || palette.bg || '#0a0a14';
                     return (
-                        <div key={i} style={{ position: 'absolute', inset: 0, opacity: a, transform: `translateX(${x}px) translateZ(${z}px) rotateY(${rot}deg) rotateZ(${rot * 0.3}deg)`, transformOrigin: 'center bottom', borderRadius: 32, background: `linear-gradient(160deg, ${colors.accent}25, rgba(255,255,255,0.04))`, border: `1px solid ${colors.accent}50`, backdropFilter: 'blur(16px)', boxShadow: `0 40px 80px rgba(0,0,0,0.5)`, padding: 44, display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-                            <div style={{ padding: 18, borderRadius: 20, background: `${colors.accent}30`, alignSelf: 'flex-start' }}>
-                                <SmartIcon name={item.icon} color={colors.text} size={44} />
+                        // Opaque card background so back cards don't bleed through the front ones.
+                        <div key={i} style={{ position: 'absolute', inset: 0, opacity: a, transform: `translateX(${x}px) translateZ(${z}px) rotateY(${rot}deg) rotateZ(${rot * 0.25}deg)`, transformOrigin: 'center bottom', borderRadius: 32, background: `linear-gradient(160deg, ${colors.accent}33, ${cardBg}fa)`, border: `1.5px solid ${colors.accent}66`, boxShadow: `0 40px 80px rgba(0,0,0,0.6)`, padding: 40, display: 'flex', flexDirection: 'column', justifyContent: 'space-between', overflow: 'hidden' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                <div style={{ padding: 16, borderRadius: 18, background: `${colors.accent}30` }}>
+                                    <SmartIcon name={item.icon} color={colors.text} size={40} />
+                                </div>
+                                <div style={{ fontSize: 44, fontWeight: 900, color: `${colors.accent}55`, lineHeight: 1 }}>{i + 1}</div>
                             </div>
                             <div>
-                                <div style={{ fontSize: 40, fontWeight: 900, color: colors.text, marginBottom: 12 }}>{item.label}</div>
-                                <div style={{ fontSize: 24, color: `${colors.text}cc`, lineHeight: 1.4 }}>{toText(item.value)}</div>
+                                <div style={{ fontSize: 38, fontWeight: 900, color: colors.text, marginBottom: 10 }}>{item.label}</div>
+                                <div style={{ fontSize: 23, color: `${colors.text}cc`, lineHeight: 1.35 }}>{toText(item.value)}</div>
                             </div>
-                            <div style={{ fontSize: 80, fontWeight: 900, color: `${colors.accent}40`, position: 'absolute', top: 24, right: 32 }}>{i + 1}</div>
                         </div>
                     );
                 })}
@@ -1568,35 +1575,29 @@ const PricingTableScene: React.FC<{ scene: MotionGraphicScene; palette: typeof P
     );
 };
 
-// map_reveal — a stylized world grid with pins popping in for "global reach" beats.
+// map_reveal — a rotating dotted globe with location pins plotted at real
+// coordinates ("global reach"). Renders in Remotion via useCurrentFrame math.
 const MapRevealScene: React.FC<{ scene: MotionGraphicScene; palette: typeof PALETTES.midnight }> = ({ scene, palette }) => {
     const frame = useCurrentFrame(); const { fps } = useVideoConfig(); const colors = { ...palette, ...scene.colors };
-    const pins = scene.items?.length ? scene.items : [
-        { label: 'New York', value: '32%' }, { label: 'London', value: '24%' }, { label: 'Tokyo', value: '19%' }, { label: 'Berlin', value: '14%' },
+    const rawPins = scene.items?.length ? scene.items : [
+        { label: 'New York', value: '1.2M' }, { label: 'London', value: '860K' }, { label: 'Mumbai', value: '740K' }, { label: 'Tokyo', value: '610K' }, { label: 'São Paulo', value: '430K' }, { label: 'Sydney', value: '210K' },
     ];
-    // Deterministic pin positions across the "map" area.
-    const spots = pins.map((p, i) => ({ ...p, x: 12 + seededRandom(i * 4.4) * 76, y: 22 + seededRandom(i * 8.1) * 52 }));
+    // Resolve each pin to lon/lat: known city → real coords; otherwise a deterministic
+    // point spread around the globe so unknown labels still land somewhere sensible.
+    const pins: GlobePin[] = rawPins.slice(0, 8).map((p, i) => {
+        const coord = CITY_COORDS[(p.label || '').trim().toLowerCase()];
+        const lon = coord ? coord[0] : -160 + seededRandom(i * 4.4) * 320;
+        const lat = coord ? coord[1] : -30 + seededRandom(i * 8.1) * 80;
+        return { label: p.label, value: p.value != null ? toText(p.value) : undefined, lon, lat };
+    });
+    const globeIn = getEntrance(frame, fps, 'scale', 0.15);
     return (
         <AbsoluteFill style={{ background: colors.bg || palette.bg, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
             <GradientMesh color={colors.accent} secondary={colors.secondary || colors.accent} bg={colors.bg || palette.bg} />
-            {/* Dotted map grid */}
-            <div style={{ position: 'absolute', inset: '10%', backgroundImage: `radial-gradient(${colors.accent}30 2px, transparent 2px)`, backgroundSize: '34px 34px', opacity: 0.5, borderRadius: 24, zIndex: 1 }} />
-            {scene.headline && <div style={{ ...getEntrance(frame, fps, 'slide-up', 0.1), fontSize: 56, fontWeight: 900, color: colors.text, position: 'absolute', top: '10%', zIndex: 3, textAlign: 'center' }}>{scene.headline}</div>}
-            <div style={{ position: 'absolute', inset: '10%', zIndex: 2 }}>
-                {spots.map((s, i) => {
-                    const pop = spring({ frame: Math.max(0, frame - (fps * 0.4 + i * 8)), fps, config: { damping: 10, stiffness: 140 } });
-                    const ring = interpolate(frame, [fps * 0.4 + i * 8, fps * 1.4 + i * 8], [0, 1], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' });
-                    return (
-                        <div key={i} style={{ position: 'absolute', left: `${s.x}%`, top: `${s.y}%`, transform: `translate(-50%, -50%) scale(${pop})` }}>
-                            <div style={{ position: 'absolute', left: '50%', top: '50%', width: 60, height: 60, borderRadius: '50%', border: `2px solid ${colors.accent}`, transform: `translate(-50%, -50%) scale(${1 + ring * 1.6})`, opacity: (1 - ring) * 0.7 }} />
-                            <div style={{ width: 22, height: 22, borderRadius: '50%', background: colors.accent, boxShadow: `0 0 20px ${colors.accent}`, border: '3px solid #fff' }} />
-                            <div style={{ position: 'absolute', top: 28, left: '50%', transform: 'translateX(-50%)', whiteSpace: 'nowrap', padding: '6px 14px', borderRadius: 12, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(10px)', border: `1px solid ${colors.accent}40`, opacity: pop }}>
-                                <span style={{ fontSize: 18, fontWeight: 700, color: '#fff' }}>{s.label}</span>
-                                {s.value && <span style={{ fontSize: 18, fontWeight: 800, color: colors.accent, marginLeft: 8 }}>{toText(s.value)}</span>}
-                            </div>
-                        </div>
-                    );
-                })}
+            <FloatingShapes color={colors.accent} secondary={colors.secondary || colors.accent} seed={19} count={4} />
+            {scene.headline && <div style={{ ...getEntrance(frame, fps, 'slide-up', 0.1), fontSize: 54, fontWeight: 900, color: colors.text, position: 'absolute', top: '8%', zIndex: 4, textAlign: 'center', width: '100%' }}>{scene.headline}</div>}
+            <div style={{ ...globeIn, position: 'absolute', top: '54%', left: '50%', width: 860, height: 860, transform: `translate(-50%, -50%) ${globeIn.transform || ''}`, zIndex: 2 }}>
+                <DottedGlobe color={colors.accent} secondary={colors.secondary || colors.accent} pins={pins} frame={frame} fps={fps} />
             </div>
             <VignetteGlow color={colors.accent} />
             <Grain opacity={0.05} />

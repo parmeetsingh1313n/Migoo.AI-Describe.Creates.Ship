@@ -261,6 +261,175 @@ export const OrbBg: React.FC<{ color: string; secondary: string; frame: number; 
     );
 };
 
+// ─── World map (vector continents) ───────────────────────────────────────────
+// Equirectangular projection: lon/lat → percentage of the map box.
+// x% = (lon + 180) / 360 * 100 ; y% = (90 - lat) / 180 * 100
+export const lonLatToPct = (lon: number, lat: number) => ({
+    x: ((lon + 180) / 360) * 100,
+    y: ((90 - lat) / 180) * 100,
+});
+
+// Coordinates [lon, lat] for common cities, so map pins land in the right place.
+export const CITY_COORDS: Record<string, [number, number]> = {
+    'new york': [-74, 40.7], 'san francisco': [-122.4, 37.8], 'los angeles': [-118.2, 34],
+    'toronto': [-79.4, 43.7], 'mexico city': [-99.1, 19.4], 'chicago': [-87.6, 41.9],
+    'são paulo': [-46.6, -23.5], 'sao paulo': [-46.6, -23.5], 'buenos aires': [-58.4, -34.6],
+    'rio de janeiro': [-43.2, -22.9], 'bogota': [-74.1, 4.7], 'lima': [-77, -12],
+    'london': [-0.1, 51.5], 'paris': [2.3, 48.9], 'berlin': [13.4, 52.5], 'madrid': [-3.7, 40.4],
+    'rome': [12.5, 41.9], 'amsterdam': [4.9, 52.4], 'moscow': [37.6, 55.8], 'istanbul': [29, 41],
+    'dubai': [55.3, 25.2], 'lagos': [3.4, 6.5], 'cairo': [31.2, 30], 'johannesburg': [28, -26.2],
+    'nairobi': [36.8, -1.3], 'mumbai': [72.9, 19.1], 'delhi': [77.2, 28.6], 'bangalore': [77.6, 13],
+    'singapore': [103.8, 1.4], 'bangkok': [100.5, 13.8], 'jakarta': [106.8, -6.2],
+    'hong kong': [114.2, 22.3], 'shanghai': [121.5, 31.2], 'beijing': [116.4, 39.9],
+    'tokyo': [139.7, 35.7], 'seoul': [127, 37.6], 'sydney': [151.2, -33.9], 'melbourne': [145, -37.8],
+    'auckland': [174.8, -36.9],
+};
+
+// Continent outlines as [lon, lat] vertex rings (approximate but recognizable).
+const CONTINENTS: [number, number][][] = [
+    // North America
+    [[-165, 62], [-155, 71], [-125, 71], [-95, 72], [-82, 63], [-64, 60], [-52, 47], [-70, 42], [-80, 27], [-83, 9], [-97, 16], [-110, 23], [-123, 40], [-125, 60], [-140, 69]],
+    // South America
+    [[-77, 11], [-60, 5], [-50, -1], [-35, -8], [-48, -25], [-58, -34], [-68, -55], [-75, -52], [-73, -42], [-71, -30], [-70, -20], [-75, -15], [-81, -6], [-80, 4]],
+    // Europe
+    [[-10, 36], [-9, 44], [-2, 48], [2, 51], [-5, 58], [8, 63], [25, 71], [40, 66], [30, 50], [28, 45], [16, 40], [3, 37]],
+    // Africa
+    [[-16, 15], [-17, 22], [-5, 36], [11, 34], [25, 32], [35, 31], [43, 12], [51, 12], [41, -2], [40, -15], [33, -26], [25, -34], [18, -35], [12, -18], [9, -1], [-8, 4]],
+    // Asia
+    [[28, 45], [30, 55], [40, 68], [70, 73], [110, 77], [160, 70], [180, 66], [160, 60], [143, 45], [140, 34], [122, 30], [120, 22], [105, 9], [95, 6], [80, 8], [77, 20], [67, 24], [57, 25], [45, 40]],
+    // India peninsula (fills the Asia gap for recognizability)
+    [[68, 24], [72, 20], [77, 8], [80, 13], [88, 22], [80, 27]],
+    // Southeast Asia / Indonesia
+    [[95, 6], [105, 1], [120, -2], [132, -4], [140, -8], [120, -9], [105, -7], [98, 2]],
+    // Australia
+    [[113, -22], [122, -18], [132, -12], [142, -11], [147, -19], [153, -27], [150, -38], [138, -37], [128, -32], [115, -34]],
+];
+
+// Vector world map backdrop. Fills its container box exactly (preserveAspectRatio
+// 'none') so pins projected with lonLatToPct align pixel-for-pixel.
+export const WorldMap: React.FC<{ color: string; secondary?: string; opacity?: number }> = ({ color, secondary, opacity = 0.5 }) => {
+    const W = 1000, H = 500;
+    const toPath = (pts: [number, number][]) =>
+        'M' + pts.map(([lo, la]) => {
+            const x = ((lo + 180) / 360) * W;
+            const y = ((90 - la) / 180) * H;
+            return `${x.toFixed(1)},${y.toFixed(1)}`;
+        }).join(' L') + ' Z';
+    const stroke = secondary || color;
+    return (
+        <svg viewBox="0 0 1000 500" preserveAspectRatio="none" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', opacity }}>
+            {CONTINENTS.map((c, i) => (
+                <path key={i} d={toPath(c)} fill={`${color}26`} stroke={`${stroke}88`} strokeWidth={1.2} strokeLinejoin="round" />
+            ))}
+        </svg>
+    );
+};
+
+// ─── Dotted rotating globe (Remotion-native, no d3/canvas/fetch) ─────────────
+// Orthographic projection driven by useCurrentFrame — land rendered as a dot
+// halftone derived from CONTINENTS, city pins plotted at real lon/lat with
+// back-hemisphere culling.
+
+const _inLonLatPoly = (lon: number, lat: number, poly: [number, number][]): boolean => {
+    let inside = false;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+        const [xi, yi] = poly[i];
+        const [xj, yj] = poly[j];
+        if ((yi > lat) !== (yj > lat) && lon < ((xj - xi) * (lat - yi)) / (yj - yi) + xi) inside = !inside;
+    }
+    return inside;
+};
+
+// Sample a lon/lat grid once and keep the points that fall on land.
+const GLOBE_LAND_DOTS: [number, number][] = (() => {
+    const dots: [number, number][] = [];
+    for (let lon = -180; lon <= 180; lon += 3) {
+        for (let lat = -56; lat <= 78; lat += 3) {
+            if (CONTINENTS.some((c) => _inLonLatPoly(lon, lat, c))) dots.push([lon, lat]);
+        }
+    }
+    return dots;
+})();
+
+export type GlobePin = { label?: string; value?: string; lon: number; lat: number };
+
+export const DottedGlobe: React.FC<{
+    color: string;
+    secondary?: string;
+    pins?: GlobePin[];
+    frame: number;
+    fps: number;
+    spinSpeed?: number;
+}> = ({ color, secondary, pins = [], frame, fps, spinSpeed = 0.55 }) => {
+    const R = 250, cx = 300, cy = 300;
+    const yaw = frame * spinSpeed;                 // degrees — slow spin
+    const tilt = (-18 * Math.PI) / 180;            // northern tilt
+    const sec = secondary || color;
+
+    const project = (lon: number, lat: number) => {
+        const lam = ((lon - yaw) * Math.PI) / 180;
+        const phi = (lat * Math.PI) / 180;
+        const cosc = Math.sin(tilt) * Math.sin(phi) + Math.cos(tilt) * Math.cos(phi) * Math.cos(lam);
+        const x = R * Math.cos(phi) * Math.sin(lam);
+        const y = R * (Math.cos(tilt) * Math.sin(phi) - Math.sin(tilt) * Math.cos(phi) * Math.cos(lam));
+        return { x: cx + x, y: cy - y, front: cosc > 0.02 };
+    };
+
+    return (
+        <svg viewBox="0 0 600 600" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', overflow: 'visible' }}>
+            <defs>
+                <radialGradient id="mg-globe-ocean" cx="42%" cy="38%" r="72%">
+                    <stop offset="0%" stopColor={`${color}22`} />
+                    <stop offset="70%" stopColor="#05050c" />
+                    <stop offset="100%" stopColor="#02020a" />
+                </radialGradient>
+            </defs>
+
+            {/* Sphere body + glow rim */}
+            <circle cx={cx} cy={cy} r={R + 8} fill="none" stroke={`${sec}33`} strokeWidth={2} />
+            <circle cx={cx} cy={cy} r={R} fill="url(#mg-globe-ocean)" stroke={`${color}66`} strokeWidth={1.5} />
+
+            {/* Land dots (front hemisphere only) */}
+            {GLOBE_LAND_DOTS.map(([lon, lat], i) => {
+                const p = project(lon, lat);
+                if (!p.front) return null;
+                // Fade dots slightly toward the limb for a rounded feel.
+                const d = Math.hypot(p.x - cx, p.y - cy) / R;
+                return <circle key={i} cx={p.x} cy={p.y} r={1.8} fill={color} opacity={0.35 + (1 - d) * 0.45} />;
+            })}
+
+            {/* City pins */}
+            {pins.map((pin, i) => {
+                const p = project(pin.lon, pin.lat);
+                const appear = interpolate(frame, [fps * 0.5 + i * 7, fps * 1.1 + i * 7], [0, 1], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' });
+                const ring = interpolate(frame, [fps * 0.5 + i * 7, fps * 1.5 + i * 7], [0, 1], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' });
+                const vis = (p.front ? 1 : 0) * appear;
+                if (vis <= 0.01) return null;
+                const labelLeft = p.x > cx;
+                return (
+                    <g key={`pin${i}`} opacity={vis}>
+                        <circle cx={p.x} cy={p.y} r={6 + ring * 22} fill="none" stroke={sec} strokeWidth={2} opacity={(1 - ring) * 0.8} />
+                        <circle cx={p.x} cy={p.y} r={7} fill={color} stroke="#fff" strokeWidth={2} />
+                        <circle cx={p.x} cy={p.y} r={13} fill={color} opacity={0.25} />
+                        {pin.label && (
+                            <g transform={`translate(${labelLeft ? p.x - 16 : p.x + 16}, ${p.y})`}>
+                                <text x={labelLeft ? -0 : 0} y={-2} textAnchor={labelLeft ? 'end' : 'start'} fontSize={19} fontWeight={800} fill="#fff" style={{ paintOrder: 'stroke', stroke: '#000', strokeWidth: 4, strokeLinejoin: 'round' }}>
+                                    {pin.label}
+                                </text>
+                                {pin.value && (
+                                    <text x={labelLeft ? -0 : 0} y={20} textAnchor={labelLeft ? 'end' : 'start'} fontSize={17} fontWeight={800} fill={sec} style={{ paintOrder: 'stroke', stroke: '#000', strokeWidth: 4, strokeLinejoin: 'round' }}>
+                                        {String(pin.value)}
+                                    </text>
+                                )}
+                            </g>
+                        )}
+                    </g>
+                );
+            })}
+        </svg>
+    );
+};
+
 // Small string→text coercion used by data scenes before .split/.map (guards the
 // class of crash where an upstream value arrives as a number/object/array).
 export const toText = (v: unknown): string => {
