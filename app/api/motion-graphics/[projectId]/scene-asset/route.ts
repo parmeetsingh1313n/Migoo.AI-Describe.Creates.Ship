@@ -175,30 +175,37 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
             ...(sceneDuration ? { durationSec: sceneDuration } : {}),
         };
 
-        // ── Auto-redesign this ONE scene around the asset (non-fatal) ────────────
+        // ── Auto-redesign this ONE scene's TEXT around the asset (non-fatal) ─────
+        // IMPORTANT: the scene TYPE must never change here. Every scene type has a
+        // bespoke Remotion animation (e.g. logo_reveal's rings/particles/shimmer,
+        // search_reveal's typing bar) — swapping types on upload was the bug the
+        // user reported (logo_reveal → generic layout, search_reveal → caption
+        // card). Only headline/subtext/content are rewritten to fit the asset.
         try {
+            const currentType = scenes[sceneIndex].type;
             const kind = isImage
                 ? `a user-uploaded image described as: "${visionDescription || "a reference image"}"`
                 : `a user-uploaded video clip`;
             const request =
-                `Scene ${sceneIndex + 1} now contains ${kind}. Redesign ONLY Scene ${sceneIndex + 1} so the layout best showcases this asset. ` +
-                (isVideo
-                    ? `Because it is a video, set the scene type to "video_hero" (full-bleed) or "image_showcase". `
-                    : `Choose the scene type that frames a real image best (image_showcase, split_hero, phone_mockup, browser_mockup, or video_hero). `) +
-                `Write a fitting headline and subtext that complement the asset. Do NOT change imageUrl — it is LOCKED to the uploaded asset. Do not touch any other scene.`;
+                `Scene ${sceneIndex + 1} (type: "${currentType}") now contains ${kind}. ` +
+                `Rewrite ONLY its headline/subtext/content so the on-screen text fits this asset. ` +
+                `Do NOT change the scene type — it must remain exactly "${currentType}". ` +
+                `Do NOT change imageUrl — it is LOCKED to the uploaded asset. Do not touch any other scene.`;
 
             const { patches } = await motionGraphicsLLM.patch(scenes, request, "");
             const mine = (patches || []).find((p) => p.index === sceneIndex);
             if (mine?.updates) {
                 const u = { ...mine.updates };
-                // Never let the redesign override the locked media / duration.
+                // Never let the redesign override the locked media, duration, or type.
                 delete (u as any).imageUrl;
                 delete (u as any).animationRequested;
                 delete (u as any).animationType;
+                delete (u as any).type;
                 if (sceneDuration) delete (u as any).durationSec;
                 scenes[sceneIndex] = {
                     ...scenes[sceneIndex],
                     ...u,
+                    type: currentType,
                     imageUrl: sceneImageUrl,
                     userAsset: true,
                     assetType: isImage ? "image" : "video",
