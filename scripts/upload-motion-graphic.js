@@ -56,12 +56,16 @@ async function upload() {
 
     const finalSizeBytes   = fs.statSync(filePath).size;
     const fileSizeMB       = (finalSizeBytes / 1024 / 1024).toFixed(1);
-    const CHUNK_SIZE_BYTES = 44 * 1024 * 1024; // 44 MB per chunk (under Appwrite 50 MB limit)
+    const CHUNK_SIZE_BYTES = 44 * 1024 * 1024; // 44 MB per chunk WHEN splitting is required
+    // Upload as a SINGLE file (→ direct Appwrite view URL) whenever the render fits
+    // under Appwrite's 50 MB per-file limit. Only genuinely large renders fall back
+    // to chunk-splitting (which stores JSON metadata served via the /stream route).
+    const SINGLE_FILE_MAX  = 49 * 1024 * 1024; // ~49 MB — safe margin under the 50 MB cap
 
     console.log(`☁️  Uploading ${filePath} (${fileSizeMB} MB) → Appwrite (bucket: ${bucketId})...`);
 
     try {
-        if (finalSizeBytes > CHUNK_SIZE_BYTES) {
+        if (finalSizeBytes > SINGLE_FILE_MAX) {
             // ── Chunked upload ───────────────────────────────────────────────
             const totalChunks = Math.ceil(finalSizeBytes / CHUNK_SIZE_BYTES);
             console.log(`✂️  Splitting → ${totalChunks} chunks of ≤44 MB...`);

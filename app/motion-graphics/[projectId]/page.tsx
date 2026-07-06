@@ -777,6 +777,14 @@ export default function MotionGraphicProjectPage() {
                         <div className="w-full max-w-2xl mx-auto">
                             {project.videoUrl ? (
                                 <>
+                                    {/* Large renders (≥44 MB) are chunked into Appwrite and stored as JSON
+                                        metadata, not a playable URL — stream those through the reassembly
+                                        endpoint. Direct single-file URLs play as-is. */}
+                                    {(() => {
+                                        const isChunked = project.videoUrl.trim().startsWith('{') || project.videoUrl.includes('"chunked"')
+                                        const playbackUrl = isChunked ? `/api/motion-graphics/${project.projectId}/stream` : project.videoUrl
+                                        return (
+                                    <>
                                     {/* Real video player */}
                                     <div className="rounded-2xl overflow-hidden bg-black border border-border shadow-xl mb-4"
                                         style={{
@@ -785,7 +793,7 @@ export default function MotionGraphicProjectPage() {
                                         }}
                                     >
                                         <video
-                                            src={project.videoUrl}
+                                            src={playbackUrl}
                                             controls
                                             autoPlay
                                             loop
@@ -794,7 +802,7 @@ export default function MotionGraphicProjectPage() {
                                     </div>
                                     <div className="flex items-center justify-center gap-3">
                                         <a
-                                            href={project.videoUrl}
+                                            href={playbackUrl}
                                             download={`motion-graphic-${project.projectId}.mp4`}
                                             className="group relative px-6 py-2.5 rounded-xl bg-gradient-to-r from-primary to-accent text-white text-sm font-bold transition-all hover:shadow-lg hover:shadow-primary/20 flex items-center gap-2 overflow-hidden"
                                         >
@@ -814,6 +822,9 @@ export default function MotionGraphicProjectPage() {
                                             <RotateCcw className="w-4 h-4" /> Start from Scratch
                                         </button>
                                     </div>
+                                    </>
+                                        )
+                                    })()}
                                 </>
                             ) : (
                                 /* remotionProps saved but video still being finalized */
