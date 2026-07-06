@@ -169,9 +169,11 @@ export async function POST(
 
         // ── Asset table for model — clean markdown table, URL is the key ──
         // Read assets from the dedicated 'role: assets' DB message (stores Groq Vision analysis).
+        // Exclude per-scene-locked assets (sceneIndex set) — those are bound to a specific
+        // scene via the scene-asset upload flow and must NOT be re-placed by category guessing.
         const assetsMsg = existingMessages.find(m => m.role === "assets");
         const uploadedAssets: { url: string; name: string; description: string; category?: string }[] =
-            (assetsMsg?.metadata as any)?.assets || [];
+            ((assetsMsg?.metadata as any)?.assets || []).filter((a: any) => a.sceneIndex == null);
 
         let assetBlock = '';
         if (uploadedAssets.length > 0) {
@@ -375,6 +377,7 @@ INSTRUCTION: For each row, find the matching scene type in your output and set i
                 for (let i = 0; i < scenesData.scenes.length; i++) {
                     if (!targets.has(scenesData.scenes[i].type)) continue;
                     if (claimed.has(i)) continue;
+                    if (scenesData.scenes[i].userAsset) continue; // locked to a per-scene upload — never overwrite
 
                     const currentUrl = scenesData.scenes[i].imageUrl;
                     if (isVideo(currentUrl)) {
@@ -395,6 +398,7 @@ INSTRUCTION: For each row, find the matching scene type in your output and set i
                 if (!injected) {
                     for (let i = 0; i < scenesData.scenes.length; i++) {
                         if (claimed.has(i)) continue;
+                        if (scenesData.scenes[i].userAsset) continue; // locked to a per-scene upload — never overwrite
 
                         const currentUrl = scenesData.scenes[i].imageUrl;
                         if (isVideo(currentUrl)) {

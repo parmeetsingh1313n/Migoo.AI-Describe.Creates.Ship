@@ -2301,8 +2301,11 @@ export const generateMotionGraphic = inngest.createFunction(
                     )
                     .limit(1);
 
+                // Exclude per-scene-locked assets (sceneIndex set) — those are bound to a
+                // specific scene via the scene-asset upload flow and must NOT be re-placed
+                // by legacy category guessing below.
                 const uploadedAssets: { url: string; name: string; description: string; category?: string }[] =
-                    (assetsMsg?.metadata as any)?.assets || [];
+                    ((assetsMsg?.metadata as any)?.assets || []).filter((a: any) => a.sceneIndex == null);
 
                 if (uploadedAssets.length > 0) {
                     console.log(`🖼️ Found ${uploadedAssets.length} uploaded asset(s) — injecting by Groq category`);
@@ -2330,6 +2333,7 @@ export const generateMotionGraphic = inngest.createFunction(
                         for (let i = 0; i < scenes.length; i++) {
                             if (!targets.has(scenes[i].type)) continue;
                             if (uploadedSceneUrls[i]) continue; // already claimed by another asset
+                            if (scenes[i].userAsset) continue; // locked to a per-scene upload — never overwrite
 
                             const currentUrl = scenes[i].imageUrl || '';
                             // Only treat as a preserved video if it's a REMOTE http URL ending in .mp4/.webm
@@ -2354,6 +2358,7 @@ export const generateMotionGraphic = inngest.createFunction(
                             for (let i = 0; i < scenes.length; i++) {
                                 if (!ALL_VISUAL.has(scenes[i].type)) continue;
                                 if (uploadedSceneUrls[i]) continue;
+                                if (scenes[i].userAsset) continue; // locked to a per-scene upload — never overwrite
 
                                 const currentUrl = scenes[i].imageUrl || '';
                                 const isRemoteVideo = (currentUrl.startsWith('http://') || currentUrl.startsWith('https://'))
@@ -2437,6 +2442,12 @@ export const generateMotionGraphic = inngest.createFunction(
 
             for (let i = 0; i < scenes.length; i++) {
                 const scene = scenes[i];
+
+                // ── User-uploaded asset: locked verbatim, never regenerated ──────
+                if (scene.userAsset) {
+                    console.log(`📎 Scene ${i + 1} (${scene.type}): user-uploaded ${scene.assetType || 'asset'} — skip image generation`);
+                    continue;
+                }
 
                 // ── ANIMATION-ON-DEMAND: skip Nano Banana ONLY if scene already has a valid image
                 // If no image exists, Nano Banana runs so Kling has something to animate.
@@ -2541,6 +2552,14 @@ export const generateMotionGraphic = inngest.createFunction(
             
             for (let i = 0; i < scenes.length; i++) {
                 const scene = scenes[i];
+
+                // ── User-uploaded asset: LOCKED — never sent to Wan/Kling, shown verbatim.
+                // This overrides even animation-on-demand requests, since the whole point
+                // of a per-scene upload is that the exact asset appears unmodified.
+                if (scene.userAsset) {
+                    console.log(`📎 Scene ${i + 1} (${scene.type}): user-uploaded ${scene.assetType || 'asset'} — skipping Kling/Wan (locked verbatim)`);
+                    continue;
+                }
 
                 const imgIdx       = imageData.sceneIndices.indexOf(i);
                 const generatedUrl = imgIdx >= 0 ? imageData.imageUrls[imgIdx] : null;
@@ -2839,7 +2858,12 @@ export const generateMotionGraphic = inngest.createFunction(
                 // Stale local paths (tmp/assets_mg_...) from old DB state are invalid and must be ignored.
                 const sceneImageFallback = (scene.imageUrl?.startsWith('http://') || scene.imageUrl?.startsWith('https://'))
                     ? scene.imageUrl : '';
-                const rawUrl = klingVideoUrl || uploadedImageUrl || generatedImageUrl || sceneImageFallback || '';
+                // User-uploaded per-scene asset: LOCKED verbatim — never Kling, never regenerated,
+                // never any other source. This scene was already excluded from Kling/image-gen above;
+                // this is the final guarantee at the point the render props are assembled.
+                const rawUrl = scene.userAsset
+                    ? (scene.imageUrl || '')
+                    : (klingVideoUrl || uploadedImageUrl || generatedImageUrl || sceneImageFallback || '');
                 const cleanUrl = sanitizeImageUrl(rawUrl);
                 if (rawUrl && !cleanUrl) {
                     console.log(`🧹 Scene ${i + 1} (${scene.type}): imageUrl sanitized from hallucinated value`);

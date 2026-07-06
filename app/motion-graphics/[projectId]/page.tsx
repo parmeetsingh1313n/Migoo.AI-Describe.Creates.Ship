@@ -99,6 +99,10 @@ export default function MotionGraphicProjectPage() {
     //   number → next message edits that scene index (0-based)
     const [sceneTarget, setSceneTarget] = useState<'add' | number>('add')
     const [enhancing, setEnhancing] = useState(false)
+    // Per-scene asset attach (storyboard): which scene index is currently uploading
+    const [assetUploadingIndex, setAssetUploadingIndex] = useState<number | null>(null)
+    const sceneAssetInputRef = useRef<HTMLInputElement>(null)
+    const sceneAssetTargetIndex = useRef<number | null>(null)
 
     // Auto-resize textarea
     useEffect(() => {
@@ -259,6 +263,73 @@ export default function MotionGraphicProjectPage() {
         } finally {
             setUploading(false)
             if (imageInputRef.current) imageInputRef.current.value = ''
+        }
+    }
+
+    /** Read a video file's real duration in the browser (used to size the scene). */
+    const readVideoDuration = (file: File): Promise<number> =>
+        new Promise((resolve) => {
+            const video = document.createElement('video')
+            video.preload = 'metadata'
+            video.onloadedmetadata = () => {
+                URL.revokeObjectURL(video.src)
+                resolve(video.duration || 5)
+            }
+            video.onerror = () => resolve(5)
+            video.src = URL.createObjectURL(file)
+        })
+
+    const openSceneAssetPicker = (sceneIndex: number) => {
+        sceneAssetTargetIndex.current = sceneIndex
+        sceneAssetInputRef.current?.click()
+    }
+
+    const handleSceneAssetUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0]
+        const sceneIndex = sceneAssetTargetIndex.current
+        if (!file || sceneIndex == null) return
+
+        setAssetUploadingIndex(sceneIndex)
+        try {
+            const formData = new FormData()
+            formData.append('file', file)
+            formData.append('sceneIndex', String(sceneIndex))
+            if (file.type.startsWith('video/')) {
+                const duration = await readVideoDuration(file)
+                formData.append('durationSec', String(Math.round(duration)))
+            }
+            const res = await fetch(`/api/motion-graphics/${projectId}/scene-asset`, { method: 'POST', body: formData })
+            const data = await res.json()
+            if (data.success) {
+                toast.success(`Scene ${sceneIndex + 1}: ${data.assetType} attached`)
+                await fetchProject()
+            } else {
+                toast.error(data.error || 'Attach failed')
+            }
+        } catch {
+            toast.error('Attach failed')
+        } finally {
+            setAssetUploadingIndex(null)
+            sceneAssetTargetIndex.current = null
+            if (sceneAssetInputRef.current) sceneAssetInputRef.current.value = ''
+        }
+    }
+
+    const handleRemoveSceneAsset = async (sceneIndex: number) => {
+        setAssetUploadingIndex(sceneIndex)
+        try {
+            const res = await fetch(`/api/motion-graphics/${projectId}/scene-asset?sceneIndex=${sceneIndex}`, { method: 'DELETE' })
+            const data = await res.json()
+            if (data.success) {
+                toast.success('Asset removed')
+                await fetchProject()
+            } else {
+                toast.error(data.error || 'Remove failed')
+            }
+        } catch {
+            toast.error('Remove failed')
+        } finally {
+            setAssetUploadingIndex(null)
         }
     }
 
@@ -852,6 +923,7 @@ export default function MotionGraphicProjectPage() {
                             </div>
 
                             {/* Scene Cards */}
+                            <input ref={sceneAssetInputRef} type="file" accept="image/*,video/*" className="hidden" onChange={handleSceneAssetUpload} />
                             <div className="space-y-3 mb-6 max-h-[380px] overflow-y-auto pr-1">
                                 {(project.sceneData as any[]).map((scene: any, i: number) => (
                                     <div key={i} className="flex gap-3 p-4 rounded-2xl bg-white border border-border/50 shadow-sm hover:shadow-md transition-shadow">
@@ -866,10 +938,10 @@ export default function MotionGraphicProjectPage() {
                                                 <span className="text-[10px] text-muted-foreground">{scene.durationSec || 5}s</span>
                                             </div>
                                             <p className="text-sm font-semibold text-foreground leading-snug truncate capitalize">
-                                                {scene.headline || scene.title || scene.content || scene.text || 
-                                                 (scene.stat?.value ? `${scene.stat.prefix || ''}${scene.stat.value}${scene.stat.suffix || ''} ${scene.stat.label || ''}` : null) || 
-                                                 (scene.type === 'search_reveal' ? 'Search Animation' : null) || 
-                                                 (scene.type === 'feature_list' ? 'Feature List' : null) || 
+                                                {scene.headline || scene.title || scene.content || scene.text ||
+                                                 (scene.stat?.value ? `${scene.stat.prefix || ''}${scene.stat.value}${scene.stat.suffix || ''} ${scene.stat.label || ''}` : null) ||
+                                                 (scene.type === 'search_reveal' ? 'Search Animation' : null) ||
+                                                 (scene.type === 'feature_list' ? 'Feature List' : null) ||
                                                  scene.type.replace(/_/g, ' ')}
                                             </p>
                                             {(scene.subtext || scene.description || (scene.items && scene.items.length > 0)) && (
@@ -882,6 +954,36 @@ export default function MotionGraphicProjectPage() {
                                                     <Mic className="w-3 h-3" /> {scene.voiceoverLine.substring(0, 60)}...
                                                 </p>
                                             )}
+                                            {/* Per-scene asset attach */}
+                                            <div className="mt-2">
+                                                {scene.userAsset ? (
+                                                    <div className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-primary/10 border border-primary/20">
+                                                        {scene.assetType === 'video'
+                                                            ? <Play className="w-3 h-3 text-primary" />
+                                                            : <ImagePlus className="w-3 h-3 text-primary" />}
+                                                        <span className="text-[10px] font-semibold text-primary">
+                                                            {scene.assetType === 'video' ? 'Video attached' : 'Image attached'}
+                                                        </span>
+                                                        <button
+                                                            onClick={() => handleRemoveSceneAsset(i)}
+                                                            disabled={assetUploadingIndex === i}
+                                                            className="ml-1 text-primary/60 hover:text-destructive transition-colors cursor-pointer disabled:opacity-50"
+                                                            title="Remove attached asset"
+                                                        >
+                                                            {assetUploadingIndex === i ? <Loader2 className="w-3 h-3 animate-spin" /> : <X className="w-3 h-3" />}
+                                                        </button>
+                                                    </div>
+                                                ) : (
+                                                    <button
+                                                        onClick={() => openSceneAssetPicker(i)}
+                                                        disabled={assetUploadingIndex === i}
+                                                        className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg border border-border/50 text-[10px] font-semibold text-muted-foreground hover:text-primary hover:border-primary/30 hover:bg-primary/5 transition-colors cursor-pointer disabled:opacity-50"
+                                                    >
+                                                        {assetUploadingIndex === i ? <Loader2 className="w-3 h-3 animate-spin" /> : <ImagePlus className="w-3 h-3" />}
+                                                        Attach image/video
+                                                    </button>
+                                                )}
+                                            </div>
                                         </div>
                                     </div>
                                 ))}
