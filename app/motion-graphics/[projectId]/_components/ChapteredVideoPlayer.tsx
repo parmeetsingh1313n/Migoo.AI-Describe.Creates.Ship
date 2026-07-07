@@ -16,7 +16,7 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Play, Pause, SkipBack, SkipForward, Volume2, VolumeX, Maximize, Minimize } from 'lucide-react'
+import { Play, Pause, SkipBack, SkipForward, Volume2, VolumeX, Maximize, Minimize, Loader2 } from 'lucide-react'
 
 function formatTime(totalSeconds: number): string {
     if (isNaN(totalSeconds) || !isFinite(totalSeconds)) return '0:00'
@@ -57,6 +57,9 @@ export default function ChapteredVideoPlayer({ src, scenes, aspectRatio }: Chapt
     const [hoverTime, setHoverTime] = useState<number | null>(null)
     const [hoverX, setHoverX] = useState(0)
     const [hoverLabel, setHoverLabel] = useState<string | null>(null)
+    // True while the browser has stalled playback waiting for more data — e.g.
+    // right after seeking far ahead to an unbuffered part of the video.
+    const [isBuffering, setIsBuffering] = useState(false)
 
     // ── Chapter boundaries — pure proportions of scene durationSec, scale-invariant ──
     const chapters = useMemo<Chapter[]>(() => {
@@ -89,6 +92,16 @@ export default function ChapteredVideoPlayer({ src, scenes, aspectRatio }: Chapt
         const onPause = () => setIsPlaying(false)
         const onEnded = () => setIsPlaying(false)
         const onVolumeChange = () => { setVolume(video.volume); setIsMuted(video.muted) }
+        // Seeking far ahead (e.g. dragging the scrub bar to an unbuffered spot)
+        // stalls playback until enough data arrives — show a loading state
+        // instead of the play/pause icon during that window. `waiting` fires
+        // whenever the browser has to pause for more data (including right
+        // after a seek, even while paused, since it must decode the target
+        // frame); `playing`/`canplay` fire once it's ready again.
+        const onWaiting = () => setIsBuffering(true)
+        const onStalled = () => setIsBuffering(true)
+        const onPlaying = () => setIsBuffering(false)
+        const onCanPlay = () => setIsBuffering(false)
 
         video.addEventListener('loadedmetadata', onLoadedMetadata)
         video.addEventListener('timeupdate', onTimeUpdate)
@@ -96,6 +109,10 @@ export default function ChapteredVideoPlayer({ src, scenes, aspectRatio }: Chapt
         video.addEventListener('pause', onPause)
         video.addEventListener('ended', onEnded)
         video.addEventListener('volumechange', onVolumeChange)
+        video.addEventListener('waiting', onWaiting)
+        video.addEventListener('stalled', onStalled)
+        video.addEventListener('playing', onPlaying)
+        video.addEventListener('canplay', onCanPlay)
         if (video.duration) setDuration(video.duration)
 
         return () => {
@@ -105,6 +122,10 @@ export default function ChapteredVideoPlayer({ src, scenes, aspectRatio }: Chapt
             video.removeEventListener('pause', onPause)
             video.removeEventListener('ended', onEnded)
             video.removeEventListener('volumechange', onVolumeChange)
+            video.removeEventListener('waiting', onWaiting)
+            video.removeEventListener('stalled', onStalled)
+            video.removeEventListener('playing', onPlaying)
+            video.removeEventListener('canplay', onCanPlay)
         }
     }, [src])
 
@@ -336,8 +357,15 @@ export default function ChapteredVideoPlayer({ src, scenes, aspectRatio }: Chapt
                         <button onClick={() => skip(-5)} title="Back 5s" style={btnStyle}>
                             <SkipBack size={16} fill="white" />
                         </button>
-                        <button onClick={togglePlay} title={isPlaying ? 'Pause' : 'Play'} style={{ ...btnStyle, background: 'rgba(255,255,255,0.1)' }}>
-                            {isPlaying ? <Pause size={18} fill="white" /> : <Play size={18} fill="white" style={{ marginLeft: 1 }} />}
+                        <button
+                            onClick={togglePlay}
+                            title={isBuffering ? 'Loading…' : isPlaying ? 'Pause' : 'Play'}
+                            disabled={isBuffering}
+                            style={{ ...btnStyle, background: 'rgba(255,255,255,0.1)', cursor: isBuffering ? 'default' : 'pointer' }}
+                        >
+                            {isBuffering
+                                ? <Loader2 size={18} className="animate-spin" />
+                                : isPlaying ? <Pause size={18} fill="white" /> : <Play size={18} fill="white" style={{ marginLeft: 1 }} />}
                         </button>
                         <button onClick={() => skip(5)} title="Forward 5s" style={btnStyle}>
                             <SkipForward size={16} fill="white" />
