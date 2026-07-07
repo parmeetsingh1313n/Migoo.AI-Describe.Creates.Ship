@@ -26,6 +26,7 @@ import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
+import ChapteredVideoPlayer from './_components/ChapteredVideoPlayer'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -856,21 +857,12 @@ export default function MotionGraphicProjectPage() {
                                         const playbackUrl = isChunked ? `/api/motion-graphics/${project.projectId}/stream` : project.videoUrl
                                         return (
                                     <>
-                                    {/* Real video player */}
-                                    <div className="rounded-2xl overflow-hidden bg-black border border-border shadow-xl mb-4"
-                                        style={{
-                                            aspectRatio: project.aspectRatio === '9:16' ? '9/16' : project.aspectRatio === '1:1' ? '1/1' : '16/9',
-                                            maxHeight: '500px',
-                                        }}
-                                    >
-                                        <video
-                                            src={playbackUrl}
-                                            controls
-                                            autoPlay
-                                            loop
-                                            className="w-full h-full object-contain"
-                                        />
-                                    </div>
+                                    {/* Real video player — custom controls with scene chapter markers */}
+                                    <ChapteredVideoPlayer
+                                        src={playbackUrl}
+                                        scenes={(project.sceneData as any[]) || []}
+                                        aspectRatio={project.aspectRatio}
+                                    />
                                     <div className="flex items-center justify-center gap-3">
                                         <a
                                             href={playbackUrl}
