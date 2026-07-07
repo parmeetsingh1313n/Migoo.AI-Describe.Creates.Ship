@@ -333,7 +333,7 @@ const SearchRevealScene: React.FC<{ scene: MotionGraphicScene; palette: typeof P
                         {scene.subtext || scene.headline || 'Result'}
                     </div>
                     {scene.imageUrl && (
-                        <div style={{ width: '100%', borderRadius: 32, overflow: 'hidden', boxShadow: `0 40px 80px ${colors.accent}50`, border: `3px solid ${colors.accent}40`, maxHeight: 420 }}>
+                        <div style={{ width: '100%', height: 420, borderRadius: 32, overflow: 'hidden', boxShadow: `0 40px 80px ${colors.accent}50`, border: `3px solid ${colors.accent}40` }}>
                             <Img src={scene.imageUrl} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                         </div>
                     )}
