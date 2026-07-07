@@ -551,8 +551,9 @@ export const motionGraphicsLLM = {
         const CHUNK_SYSTEM =
             'You are a JSON generator for motion graphics video scenes. ' +
             'Convert each scene specification into a JSON object with these fields: ' +
-            'type, headline, subtext, content, durationSec, voiceoverLine, colors, ' +
+            'type, headline, subtext, content, durationSec, voiceoverLine, ' +
             'and any of: items, stat, query, animation (only when specified). ' +
+            'Do NOT include a "colors" field — every scene inherits the video\'s global theme palette automatically. ' +
             'For voiceoverLine: write a complete sentence narrating what appears on screen — ' +
             'cinematic, energetic, present tense. At least 10 words. ' +
             'Output ONLY a valid JSON array starting with [ and ending with ]. ' +

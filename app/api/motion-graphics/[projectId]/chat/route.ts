@@ -35,7 +35,7 @@ You are a world-class motion graphics director and cinematic copywriter. You cre
 2. NO SCENE TYPE REPETITION: Each scene type appears exactly once.
 3. ICON NAMES: Lucide PascalCase only — Rocket, Zap, Shield, Globe, Cpu, Mic, Video, Layers, Star, TrendingUp, Heart, Users, Sparkles, Trophy, Crown, Bolt.
 4. DURATION: 3s for punch/impact scenes. 4-5s for feature/content scenes. 6s for comparison/metrics. NEVER below 3s. NEVER exceed 180s total.
-5. COLORS: Dark backgrounds (#050510, #000000, #0a0014). Neon accents (#a855f7, #6366f1, #f59e0b). WHITE text (#ffffff) always on dark bg.
+5. COLORS: Do NOT set a "colors" field on scenes. The video has a global theme palette the user chose separately — every scene inherits it automatically. Only include "colors" (plus "customColors":true) on a scene if the user's message explicitly asks to recolor/customize that specific scene.
 
 --- VOICEOVER: CINEMATIC EXCELLENCE REQUIRED ---
 You are a MOVIE TRAILER VOICE ACTOR. Every voiceoverLine must be a COMPLETE, FLOWING, POWERFUL sentence that narrates exactly what the viewer sees on screen.
@@ -88,7 +88,8 @@ GOOD: "She switched to Migoo on a Tuesday. By Friday, her video had half a milli
 SCENE TYPES: logo_reveal, title_reveal, split_hero, video_hero, bento_grid, neon_glow, gradient_burst, phone_mockup, browser_mockup, search_reveal, feature_list, stat_counter, metric_dashboard, comparison, image_showcase, timeline, process_steps, testimonial, notification_stack, code_terminal, glass_card, quote_reveal, kinetic_text, call_to_action, icon_grid
 
 JSON FORMAT:
-{"scenes":[{"type":"...","headline":"...","subtext":"...","imageUrl":"","durationSec":5,"voiceoverLine":"...","colors":{"bg":"#050510","text":"#fff","accent":"#a855f7"},"items":[],"stat":null,"content":"","query":""}],"voiceoverLines":["line1","line2","..."]}
+{"scenes":[{"type":"...","headline":"...","subtext":"...","imageUrl":"","durationSec":5,"voiceoverLine":"...","items":[],"stat":null,"content":"","query":""}],"voiceoverLines":["line1","line2","..."]}
+Do NOT include a "colors" field unless the user explicitly asked to customize that scene's colors — see rule 5.
 
 For items-based scenes, include "items":[{"icon":"...","label":"...","value":"..."}].
 For stat_counter: "stat":{"value":100000,"suffix":"+","label":"..."}.
@@ -299,6 +300,11 @@ INSTRUCTION: For each row, find the matching scene type in your output and set i
 
                 // Preserve animationType on the scene so Inngest knows which animation style to use
                 if (animationType) patchedScenes[p.index].animationType = animationType;
+
+                // A user-requested color patch locks this scene to its own colors —
+                // the render only honors scene.colors when customColors is set,
+                // so every deliberate recolor must flip this flag too.
+                if (sceneUpdates.colors) patchedScenes[p.index].customColors = true;
 
                 changedSceneIndices.push(p.index);
                 if (animationRequested === true) {

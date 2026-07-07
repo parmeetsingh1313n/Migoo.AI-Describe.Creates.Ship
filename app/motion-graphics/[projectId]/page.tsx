@@ -27,6 +27,9 @@ import { useParams } from 'next/navigation'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import ChapteredVideoPlayer from './_components/ChapteredVideoPlayer'
+import PalettePicker from './_components/PalettePicker'
+import ThemeGateScreen from './_components/ThemeGateScreen'
+import type { MotionGraphicTheme } from '@/lib/theme-palette'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -47,7 +50,8 @@ interface Project {
     voice: string
     language: string
     music: string
-    theme: any
+    theme: MotionGraphicTheme | null
+    themeConfirmed?: number
     sceneData: any[]
     voiceoverScript: string | null
     audioUrl: string | null
@@ -56,17 +60,6 @@ interface Project {
     status: string
     createdAt: string
 }
-
-// ─── Theme Palettes ──────────────────────────────────────────────────────────
-
-const THEME_PALETTES = [
-    { id: 'midnight', name: 'Midnight',  colors: ['#0a0a0f', '#6366f1', '#818cf8'] },
-    { id: 'sunset',   name: 'Sunset',    colors: ['#1a0a0a', '#f97316', '#fb923c'] },
-    { id: 'ocean',    name: 'Ocean',     colors: ['#0a1628', '#06b6d4', '#22d3ee'] },
-    { id: 'emerald',  name: 'Emerald',   colors: ['#0a1a0a', '#10b981', '#34d399'] },
-    { id: 'rose',     name: 'Rose',      colors: ['#1a0a14', '#f43f5e', '#fb7185'] },
-    { id: 'neon',     name: 'Neon',      colors: ['#000000', '#a855f7', '#c084fc'] },
-]
 
 // ─── Status Steps ────────────────────────────────────────────────────────────
 
@@ -104,6 +97,9 @@ export default function MotionGraphicProjectPage() {
     const [assetUploadingIndex, setAssetUploadingIndex] = useState<number | null>(null)
     const sceneAssetInputRef = useRef<HTMLInputElement>(null)
     const sceneAssetTargetIndex = useRef<number | null>(null)
+    // Per-scene color override (storyboard): which scene's palette popover is open / saving
+    const [colorPickerIndex, setColorPickerIndex] = useState<number | null>(null)
+    const [colorSavingIndex, setColorSavingIndex] = useState<number | null>(null)
 
     // Auto-resize textarea
     useEffect(() => {
@@ -152,6 +148,7 @@ export default function MotionGraphicProjectPage() {
             !loading &&
             project &&
             project.prompt &&
+            !!project.themeConfirmed &&
             !hasUserMessages &&
             !autoSentRef.current &&
             !sending
@@ -334,6 +331,46 @@ export default function MotionGraphicProjectPage() {
         }
     }
 
+    const handleSceneColorChange = async (sceneIndex: number, theme: MotionGraphicTheme) => {
+        setColorSavingIndex(sceneIndex)
+        try {
+            const res = await fetch(`/api/motion-graphics/${projectId}/scene-color`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ sceneIndex, colors: theme.resolved }),
+            })
+            const data = await res.json()
+            if (data.success) {
+                await fetchProject()
+            } else {
+                toast.error(data.error || 'Failed to update scene colors')
+            }
+        } catch {
+            toast.error('Failed to update scene colors')
+        } finally {
+            setColorSavingIndex(null)
+        }
+    }
+
+    const handleResetSceneColor = async (sceneIndex: number) => {
+        setColorSavingIndex(sceneIndex)
+        try {
+            const res = await fetch(`/api/motion-graphics/${projectId}/scene-color?sceneIndex=${sceneIndex}`, { method: 'DELETE' })
+            const data = await res.json()
+            if (data.success) {
+                toast.success('Reset to theme')
+                setColorPickerIndex(null)
+                await fetchProject()
+            } else {
+                toast.error(data.error || 'Reset failed')
+            }
+        } catch {
+            toast.error('Reset failed')
+        } finally {
+            setColorSavingIndex(null)
+        }
+    }
+
     const handleSendWithImages = async () => {
         const userText = chatInput.trim()
         if (!userText && uploadedImages.length === 0) return
@@ -422,17 +459,17 @@ export default function MotionGraphicProjectPage() {
         }
     }
 
-    const handleThemeChange = async (palette: string) => {
+    const handleThemeChange = async (theme: MotionGraphicTheme) => {
         try {
             const res = await fetch(`/api/motion-graphics/${projectId}`, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ theme: { ...project?.theme, palette } }),
+                body: JSON.stringify({ theme }),
             })
             const data = await res.json()
             if (data.success) {
                 setProject(data.project)
-                toast.success(`Theme set to ${palette}`)
+                toast.success('Theme updated')
             }
         } catch {
             toast.error('Failed to update theme')
@@ -491,6 +528,28 @@ export default function MotionGraphicProjectPage() {
                 <p className="text-muted-foreground">Project not found</p>
                 <Link href="/motion-graphics" className="text-primary hover:underline text-sm font-medium">← Back to projects</Link>
             </div>
+        )
+    }
+
+    // Fresh project, no theme confirmed yet: show the full-screen theme picker
+    // before anything else. The extra sceneData/videoUrl check means adding
+    // this column doesn't re-show the gate for any project that already has
+    // content (existing rows get themeConfirmed=0 backfilled by default).
+    if (!project.themeConfirmed && !project.sceneData?.length && !project.videoUrl) {
+        return (
+            <ThemeGateScreen
+                prompt={project.prompt}
+                onConfirm={async (theme) => {
+                    const res = await fetch(`/api/motion-graphics/${projectId}`, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ theme, themeConfirmed: true }),
+                    })
+                    const data = await res.json()
+                    if (data.success) setProject(data.project)
+                    else toast.error(data.error || 'Failed to save theme')
+                }}
+            />
         )
     }
 
@@ -752,30 +811,7 @@ export default function MotionGraphicProjectPage() {
                         <div className="flex-1 overflow-y-auto p-4 space-y-6">
                             <div>
                                 <h3 className="text-sm font-bold text-foreground mb-3">Color Palette</h3>
-                                <div className="grid grid-cols-2 gap-3">
-                                    {THEME_PALETTES.map((palette) => {
-                                        const isActive = project.theme?.palette === palette.id
-                                        return (
-                                            <button
-                                                key={palette.id}
-                                                onClick={() => handleThemeChange(palette.id)}
-                                                className={`p-3 rounded-xl border transition-all cursor-pointer text-left
-                                                    ${isActive
-                                                        ? 'border-primary/40 bg-primary/5 shadow-sm'
-                                                        : 'border-border/50 bg-white/60 hover:bg-muted/30 hover:border-border'
-                                                    }
-                                                `}
-                                            >
-                                                <div className="flex gap-1.5 mb-2">
-                                                    {palette.colors.map((c, i) => (
-                                                        <div key={i} className="w-6 h-6 rounded-full border border-border/30 shadow-sm" style={{ background: c }} />
-                                                    ))}
-                                                </div>
-                                                <span className={`text-xs font-semibold ${isActive ? 'text-primary' : 'text-foreground'}`}>{palette.name}</span>
-                                            </button>
-                                        )
-                                    })}
-                                </div>
+                                <PalettePicker value={project.theme} onChange={handleThemeChange} compact />
                             </div>
 
                             {hasScenes && (
@@ -974,6 +1010,51 @@ export default function MotionGraphicProjectPage() {
                                                         {assetUploadingIndex === i ? <Loader2 className="w-3 h-3 animate-spin" /> : <ImagePlus className="w-3 h-3" />}
                                                         Attach image/video
                                                     </button>
+                                                )}
+                                            </div>
+                                            {/* Per-scene color override */}
+                                            <div className="mt-2 relative">
+                                                {scene.customColors ? (
+                                                    <div className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-primary/10 border border-primary/20">
+                                                        <div className="flex gap-0.5">
+                                                            {[scene.colors?.bg, scene.colors?.accent, scene.colors?.secondary].filter(Boolean).map((c: string, ci: number) => (
+                                                                <div key={ci} className="w-3 h-3 rounded-full border border-white/40" style={{ background: c }} />
+                                                            ))}
+                                                        </div>
+                                                        <span className="text-[10px] font-semibold text-primary">Custom colors</span>
+                                                        <button
+                                                            onClick={() => handleResetSceneColor(i)}
+                                                            disabled={colorSavingIndex === i}
+                                                            className="ml-1 text-primary/60 hover:text-destructive transition-colors cursor-pointer disabled:opacity-50"
+                                                            title="Reset to theme"
+                                                        >
+                                                            {colorSavingIndex === i ? <Loader2 className="w-3 h-3 animate-spin" /> : <X className="w-3 h-3" />}
+                                                        </button>
+                                                    </div>
+                                                ) : (
+                                                    <button
+                                                        onClick={() => setColorPickerIndex(colorPickerIndex === i ? null : i)}
+                                                        disabled={colorSavingIndex === i}
+                                                        className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg border border-border/50 text-[10px] font-semibold text-muted-foreground hover:text-primary hover:border-primary/30 hover:bg-primary/5 transition-colors cursor-pointer disabled:opacity-50"
+                                                    >
+                                                        {colorSavingIndex === i ? <Loader2 className="w-3 h-3 animate-spin" /> : <Palette className="w-3 h-3" />}
+                                                        Customize colors
+                                                    </button>
+                                                )}
+                                                {colorPickerIndex === i && (
+                                                    <div className="absolute z-20 top-full left-0 mt-2 p-4 rounded-xl bg-white border border-border shadow-xl w-80">
+                                                        <PalettePicker
+                                                            value={null}
+                                                            onChange={(theme) => handleSceneColorChange(i, theme)}
+                                                            compact
+                                                        />
+                                                        <button
+                                                            onClick={() => setColorPickerIndex(null)}
+                                                            className="mt-3 w-full py-1.5 rounded-lg border border-border text-xs font-semibold text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors cursor-pointer"
+                                                        >
+                                                            Done
+                                                        </button>
+                                                    </div>
                                                 )}
                                             </div>
                                         </div>

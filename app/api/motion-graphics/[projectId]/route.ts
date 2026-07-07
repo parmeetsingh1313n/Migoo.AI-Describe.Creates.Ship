@@ -121,6 +121,7 @@ export async function PATCH(
         // Only allow updating safe fields
         const allowedFields: Record<string, any> = {};
         if (body.theme !== undefined) allowedFields.theme = body.theme;
+        if (body.themeConfirmed !== undefined) allowedFields.themeConfirmed = body.themeConfirmed ? 1 : 0;
         if (body.music !== undefined) allowedFields.music = body.music;
         if (body.voiceoverEnabled !== undefined) allowedFields.voiceoverEnabled = body.voiceoverEnabled ? 1 : 0;
         if (body.voice !== undefined) allowedFields.voice = body.voice;

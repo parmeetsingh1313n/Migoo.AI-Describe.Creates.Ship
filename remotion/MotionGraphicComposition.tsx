@@ -152,13 +152,22 @@ export interface MotionGraphicScene {
     animation?: string;
     durationSec?: number;
     colors?: { bg?: string; text?: string; accent?: string; secondary?: string };
+    // When true, `colors` above overrides the global theme palette for THIS
+    // scene only. When false/absent, the scene follows theme.resolved like
+    // every other non-customized scene.
+    customColors?: boolean;
     voiceoverLine?: string;
 }
 
 export interface MotionGraphicTheme {
-    palette: string;
-    font: string;
-    animationStyle: string;
+    mode?: 'preset' | 'custom';
+    palette?: string;
+    customColors?: string[];
+    // Single source of truth every scene's palette resolves from — see the
+    // `palette` const in MotionGraphicComposition below.
+    resolved?: { bg: string; text: string; accent: string; secondary: string; gradient: string };
+    font?: string;
+    animationStyle?: string;
 }
 
 export interface MotionGraphicCompositionProps {
@@ -232,7 +241,9 @@ const PALETTES: Record<string, { bg: string; text: string; accent: string; secon
 const TitleRevealScene: React.FC<{ scene: MotionGraphicScene; palette: typeof PALETTES.midnight }> = ({ scene, palette }) => {
     const frame = useCurrentFrame();
     const { fps } = useVideoConfig();
-    const colors = { ...palette, ...scene.colors };
+    // Per-scene colors only apply when explicitly customized (scene.customColors)
+    // — otherwise every scene follows the project's global theme palette.
+    const colors = scene.customColors ? { ...palette, ...scene.colors } : palette;
     const subtextAnim = getEntrance(frame, fps, 'slide-up', 0.7);
     const lineWidth = interpolate(frame, [fps * 0.4, fps * 1.5], [0, 320], { extrapolateRight: 'clamp' });
     // Per-character kinetic reveal of the headline (falls back gracefully for long strings).
@@ -274,7 +285,9 @@ const KineticTextScene: React.FC<{ scene: MotionGraphicScene; palette: typeof PA
 }) => {
     const frame = useCurrentFrame();
     const { fps } = useVideoConfig();
-    const colors = { ...palette, ...scene.colors };
+    // Per-scene colors only apply when explicitly customized (scene.customColors)
+    // — otherwise every scene follows the project's global theme palette.
+    const colors = scene.customColors ? { ...palette, ...scene.colors } : palette;
     const words = (scene.headline || scene.content || '').split(' ');
 
     return (
@@ -303,7 +316,9 @@ const KineticTextScene: React.FC<{ scene: MotionGraphicScene; palette: typeof PA
 const SearchRevealScene: React.FC<{ scene: MotionGraphicScene; palette: typeof PALETTES.midnight }> = ({ scene, palette }) => {
     const frame = useCurrentFrame();
     const { fps } = useVideoConfig();
-    const colors = { ...palette, ...scene.colors };
+    // Per-scene colors only apply when explicitly customized (scene.customColors)
+    // — otherwise every scene follows the project's global theme palette.
+    const colors = scene.customColors ? { ...palette, ...scene.colors } : palette;
     const query = scene.query || scene.headline || 'AI Video Generation';
     const typingDuration = fps * 1.8;
     const charsToShow = Math.floor(interpolate(frame, [10, 10 + typingDuration], [0, query.length], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' }));
@@ -348,7 +363,9 @@ const FeatureListScene: React.FC<{ scene: MotionGraphicScene; palette: typeof PA
 }) => {
     const frame = useCurrentFrame();
     const { fps } = useVideoConfig();
-    const colors = { ...palette, ...scene.colors };
+    // Per-scene colors only apply when explicitly customized (scene.customColors)
+    // — otherwise every scene follows the project's global theme palette.
+    const colors = scene.customColors ? { ...palette, ...scene.colors } : palette;
     const items = scene.items && scene.items.length > 0 ? scene.items : (
         scene.headline ? [
             { icon: '✦', label: scene.headline },
@@ -426,7 +443,9 @@ const FeatureListScene: React.FC<{ scene: MotionGraphicScene; palette: typeof PA
 const StatCounterScene: React.FC<{ scene: MotionGraphicScene; palette: typeof PALETTES.midnight }> = ({ scene, palette }) => {
     const frame = useCurrentFrame();
     const { fps } = useVideoConfig();
-    const colors = { ...palette, ...scene.colors };
+    // Per-scene colors only apply when explicitly customized (scene.customColors)
+    // — otherwise every scene follows the project's global theme palette.
+    const colors = scene.customColors ? { ...palette, ...scene.colors } : palette;
     const stat: any = scene.stat || scene.items?.[0] || { value: 0, suffix: '', prefix: '', label: '' };
     
     // Robustly parse the stat value from any format (100, "10K", "1,000+", etc.)
@@ -552,7 +571,9 @@ const IconGridScene: React.FC<{ scene: MotionGraphicScene; palette: typeof PALET
 }) => {
     const frame = useCurrentFrame();
     const { fps } = useVideoConfig();
-    const colors = { ...palette, ...scene.colors };
+    // Per-scene colors only apply when explicitly customized (scene.customColors)
+    // — otherwise every scene follows the project's global theme palette.
+    const colors = scene.customColors ? { ...palette, ...scene.colors } : palette;
     const items = scene.items || [];
     const titleAnim = getEntrance(frame, fps, 'fade', 0.1);
 
@@ -589,7 +610,9 @@ const ComparisonScene: React.FC<{ scene: MotionGraphicScene; palette: typeof PAL
 }) => {
     const frame = useCurrentFrame();
     const { fps } = useVideoConfig();
-    const colors = { ...palette, ...scene.colors };
+    // Per-scene colors only apply when explicitly customized (scene.customColors)
+    // — otherwise every scene follows the project's global theme palette.
+    const colors = scene.customColors ? { ...palette, ...scene.colors } : palette;
     const items = scene.items || [{ label: 'Before', value: 'The old way' }, { label: 'After', value: 'The new way' }];
 
     const titleAnim = getEntrance(frame, fps, 'slide-up', 0.1);
@@ -701,7 +724,9 @@ const ImageShowcaseScene: React.FC<{ scene: MotionGraphicScene; palette: typeof 
 }) => {
     const frame = useCurrentFrame();
     const { fps } = useVideoConfig();
-    const colors = { ...palette, ...scene.colors };
+    // Per-scene colors only apply when explicitly customized (scene.customColors)
+    // — otherwise every scene follows the project's global theme palette.
+    const colors = scene.customColors ? { ...palette, ...scene.colors } : palette;
     const imgAnim = getEntrance(frame, fps, 'scale', 0.1);
     const textAnim = getEntrance(frame, fps, 'slide-up', 0.5);
 
@@ -740,7 +765,9 @@ const CallToActionScene: React.FC<{ scene: MotionGraphicScene; palette: typeof P
 }) => {
     const frame = useCurrentFrame();
     const { fps } = useVideoConfig();
-    const colors = { ...palette, ...scene.colors };
+    // Per-scene colors only apply when explicitly customized (scene.customColors)
+    // — otherwise every scene follows the project's global theme palette.
+    const colors = scene.customColors ? { ...palette, ...scene.colors } : palette;
     const headlineAnim = getEntrance(frame, fps, 'scale', 0.2);
     const btnAnim = getEntrance(frame, fps, 'bounce', 0.6);
 
@@ -773,7 +800,9 @@ const LogoRevealScene: React.FC<{ scene: MotionGraphicScene; palette: typeof PAL
 }) => {
     const frame = useCurrentFrame();
     const { fps, width, height } = useVideoConfig();
-    const colors = { ...palette, ...scene.colors };
+    // Per-scene colors only apply when explicitly customized (scene.customColors)
+    // — otherwise every scene follows the project's global theme palette.
+    const colors = scene.customColors ? { ...palette, ...scene.colors } : palette;
     const accent = colors.accent || '#a855f7';
 
     // ── Core timing ──────────────────────────────────────────────────────────
@@ -871,7 +900,9 @@ const LogoRevealScene: React.FC<{ scene: MotionGraphicScene; palette: typeof PAL
 const SplitHeroScene: React.FC<{ scene: MotionGraphicScene; palette: typeof PALETTES.midnight }> = ({ scene, palette }) => {
     const frame = useCurrentFrame();
     const { fps } = useVideoConfig();
-    const colors = { ...palette, ...scene.colors };
+    // Per-scene colors only apply when explicitly customized (scene.customColors)
+    // — otherwise every scene follows the project's global theme palette.
+    const colors = scene.customColors ? { ...palette, ...scene.colors } : palette;
     const leftAnim = { opacity: interpolate(frame, [0, fps * 0.6], [0, 1], { extrapolateRight: 'clamp' }), transform: `translateX(${interpolate(frame, [0, fps * 0.6], [-80, 0], { extrapolateRight: 'clamp' })}px)` };
     const rightAnim = { opacity: interpolate(frame, [fps * 0.3, fps * 0.9], [0, 1], { extrapolateRight: 'clamp' }), transform: `translateX(${interpolate(frame, [fps * 0.3, fps * 0.9], [80, 0], { extrapolateRight: 'clamp' })}px)` };
     const lineH = interpolate(frame, [fps * 0.5, fps * 1.5], [0, 100], { extrapolateRight: 'clamp' });
@@ -905,7 +936,9 @@ const SplitHeroScene: React.FC<{ scene: MotionGraphicScene; palette: typeof PALE
 const NeonGlowScene: React.FC<{ scene: MotionGraphicScene; palette: typeof PALETTES.midnight }> = ({ scene, palette }) => {
     const frame = useCurrentFrame();
     const { fps } = useVideoConfig();
-    const colors = { ...palette, ...scene.colors };
+    // Per-scene colors only apply when explicitly customized (scene.customColors)
+    // — otherwise every scene follows the project's global theme palette.
+    const colors = scene.customColors ? { ...palette, ...scene.colors } : palette;
     const flicker = 0.85 + Math.sin(frame * 0.7) * 0.08 + Math.sin(frame * 1.3) * 0.07;
     const headlineAnim = getEntrance(frame, fps, 'scale', 0.2);
     const subtextAnim = getEntrance(frame, fps, 'slide-up', 0.8);
@@ -928,7 +961,9 @@ const NeonGlowScene: React.FC<{ scene: MotionGraphicScene; palette: typeof PALET
 const GradientBurstScene: React.FC<{ scene: MotionGraphicScene; palette: typeof PALETTES.midnight }> = ({ scene, palette }) => {
     const frame = useCurrentFrame();
     const { fps } = useVideoConfig();
-    const colors = { ...palette, ...scene.colors };
+    // Per-scene colors only apply when explicitly customized (scene.customColors)
+    // — otherwise every scene follows the project's global theme palette.
+    const colors = scene.customColors ? { ...palette, ...scene.colors } : palette;
     const burst = spring({ frame, fps, config: { damping: 15, stiffness: 50 } });
     const headlineAnim = getEntrance(frame, fps, 'scale', 0.3);
     return (
@@ -947,7 +982,9 @@ const GradientBurstScene: React.FC<{ scene: MotionGraphicScene; palette: typeof 
 const BentoGridScene: React.FC<{ scene: MotionGraphicScene; palette: typeof PALETTES.midnight }> = ({ scene, palette }) => {
     const frame = useCurrentFrame();
     const { fps } = useVideoConfig();
-    const colors = { ...palette, ...scene.colors };
+    // Per-scene colors only apply when explicitly customized (scene.customColors)
+    // — otherwise every scene follows the project's global theme palette.
+    const colors = scene.customColors ? { ...palette, ...scene.colors } : palette;
     const items = scene.items && scene.items.length >= 3 ? scene.items : [
         { label: 'Cinematic', value: '100%' },
         { label: 'Quality', value: '8K' },
@@ -991,7 +1028,9 @@ const BentoGridScene: React.FC<{ scene: MotionGraphicScene; palette: typeof PALE
 const VideoHeroScene: React.FC<{ scene: MotionGraphicScene; palette: typeof PALETTES.midnight }> = ({ scene, palette }) => {
     const frame = useCurrentFrame();
     const { fps } = useVideoConfig();
-    const colors = { ...palette, ...scene.colors };
+    // Per-scene colors only apply when explicitly customized (scene.customColors)
+    // — otherwise every scene follows the project's global theme palette.
+    const colors = scene.customColors ? { ...palette, ...scene.colors } : palette;
     return (
         <AbsoluteFill style={{ background: '#000', overflow: 'hidden' }}>
             <div style={{ position: 'absolute', inset: 0 }}>
@@ -1656,7 +1695,10 @@ export const MotionGraphicComposition: React.FC<MotionGraphicCompositionProps> =
     const { scenes, theme, durationInFrames, musicUrl, audioUrl, voiceoverEnabled } = props;
     const { fps } = useVideoConfig();
 
-    const palette = PALETTES[theme?.palette] || PALETTES.midnight;
+    // `theme.resolved` is the single source of truth (set for both preset and
+    // custom themes when the user confirms one) — fall back to the legacy
+    // PALETTES[theme.palette] lookup for old rows saved before this existed.
+    const palette = theme?.resolved || PALETTES[theme?.palette || ''] || PALETTES.midnight;
 
     // Calculate frame distribution per scene
     const sceneTimings = useMemo(() => {

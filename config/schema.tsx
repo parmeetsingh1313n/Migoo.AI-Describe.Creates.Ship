@@ -167,7 +167,14 @@ export const motionGraphicProjects = pgTable("motion_graphic_projects", {
     music: varchar({ length: 100 }).default("cinematic"),
 
     // Theme
-    theme: json(),  // { palette: string, font: string, animationStyle: string }
+    // { mode: 'preset' | 'custom', palette?: string, customColors?: string[],
+    //   resolved: { bg, text, accent, secondary, gradient } }
+    theme: json(),
+    // 0 = user hasn't confirmed a theme yet (pre-chat gate shows), 1 = confirmed.
+    // Gate also checks sceneData/videoUrl so pre-existing rows (backfilled to 0
+    // when this column was added) don't re-show the gate for projects that
+    // already have content.
+    themeConfirmed: integer("theme_confirmed").default(0),
 
     // Generated data
     sceneData: json("scene_data"),          // AI-generated scene breakdown (array of scenes)
