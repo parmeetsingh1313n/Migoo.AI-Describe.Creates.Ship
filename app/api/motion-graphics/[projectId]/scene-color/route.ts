@@ -54,9 +54,24 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
             customColors: true,
         };
 
+        // Mirror the same override into remotionProps.scenes (if a render has
+        // already happened) instead of nuking remotionProps/videoUrl — this
+        // keeps the last rendered MP4 valid and lets a cheap render-only
+        // re-export (retry-render) pick up the new color without re-running
+        // asset/voice generation. The live preview reads this directly too.
+        const existingProps = project.remotionProps as any;
+        const updatedRemotionProps = existingProps
+            ? {
+                ...existingProps,
+                scenes: (existingProps.scenes || []).map((s: any, i: number) =>
+                    i === sceneIndex ? { ...s, colors: scenes[sceneIndex].colors, customColors: true } : s
+                ),
+            }
+            : null;
+
         await db
             .update(motionGraphicProjects)
-            .set({ sceneData: scenes, status: "draft", videoUrl: null, remotionProps: null, updatedAt: new Date() })
+            .set({ sceneData: scenes, remotionProps: updatedRemotionProps, updatedAt: new Date() })
             .where(eq(motionGraphicProjects.projectId, projectId));
 
         return NextResponse.json({ success: true, sceneIndex, scene: scenes[sceneIndex] });
@@ -87,9 +102,25 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ p
         delete scene.customColors;
         scenes[sceneIndex] = scene;
 
+        // See POST handler above: mirror into remotionProps in place instead
+        // of nuking the last rendered video.
+        const existingProps = project.remotionProps as any;
+        const updatedRemotionProps = existingProps
+            ? {
+                ...existingProps,
+                scenes: (existingProps.scenes || []).map((s: any, i: number) => {
+                    if (i !== sceneIndex) return s;
+                    const cleaned = { ...s };
+                    delete cleaned.colors;
+                    delete cleaned.customColors;
+                    return cleaned;
+                }),
+            }
+            : null;
+
         await db
             .update(motionGraphicProjects)
-            .set({ sceneData: scenes, status: "draft", videoUrl: null, remotionProps: null, updatedAt: new Date() })
+            .set({ sceneData: scenes, remotionProps: updatedRemotionProps, updatedAt: new Date() })
             .where(eq(motionGraphicProjects.projectId, projectId));
 
         return NextResponse.json({ success: true, sceneIndex });

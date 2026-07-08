@@ -21,15 +21,26 @@ import {
     User,
     ImagePlus,
     X,
+    Rocket,
 } from 'lucide-react'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import ChapteredVideoPlayer from './_components/ChapteredVideoPlayer'
+import LiveMotionGraphicPlayer from './_components/LiveMotionGraphicPlayer'
 import PalettePicker from './_components/PalettePicker'
 import ThemeGateScreen from './_components/ThemeGateScreen'
 import type { MotionGraphicTheme } from '@/lib/theme-palette'
+
+// Fingerprint of the theme + per-scene color overrides currently in effect —
+// compared against a snapshot taken whenever a fresh render lands, to know
+// whether the last exported MP4 still matches what's live-previewed.
+function colorFingerprint(p: Pick<Project, 'theme' | 'sceneData'> | null): string {
+    if (!p) return ''
+    const sceneColors = ((p.sceneData as any[]) || []).map((s: any) => (s?.customColors ? JSON.stringify(s.colors) : ''))
+    return JSON.stringify({ theme: p.theme, sceneColors })
+}
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -100,6 +111,11 @@ export default function MotionGraphicProjectPage() {
     // Per-scene color override (storyboard): which scene's palette popover is open / saving
     const [colorPickerIndex, setColorPickerIndex] = useState<number | null>(null)
     const [colorSavingIndex, setColorSavingIndex] = useState<number | null>(null)
+    // Live-preview export tracking: fingerprint of theme/colors baked into the
+    // most recently completed render, so we know if the live preview has
+    // diverged (unsaved changes) since that render.
+    const [exportedFingerprint, setExportedFingerprint] = useState<string | null>(null)
+    const [isExporting, setIsExporting] = useState(false)
 
     // Auto-resize textarea
     useEffect(() => {
@@ -139,6 +155,15 @@ export default function MotionGraphicProjectPage() {
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
     }, [messages])
+
+    // Whenever a (new) rendered video lands, snapshot the theme/colors it was
+    // rendered with — this is what the live preview's "unsaved changes"
+    // indicator compares against.
+    useEffect(() => {
+        if (project?.videoUrl) {
+            setExportedFingerprint(colorFingerprint(project))
+        }
+    }, [project?.videoUrl])
 
     // Auto-send the project prompt as the first chat message
     useEffect(() => {
@@ -459,6 +484,28 @@ export default function MotionGraphicProjectPage() {
         }
     }
 
+    // Renders the CURRENT remotionProps (theme + per-scene colors, live-edited
+    // for free in the browser preview) into a real MP4 — skips scene/asset/
+    // voiceover generation entirely since none of that changed.
+    const handleExport = async () => {
+        if (isExporting || project?.status === 'generating:video') return
+        setIsExporting(true)
+        try {
+            const res = await fetch(`/api/motion-graphics/${projectId}/retry-render`, { method: 'POST' })
+            const data = await res.json()
+            if (res.ok && data.success) {
+                toast.success('Rendering your video with the latest colors...')
+                fetchProject()
+            } else {
+                toast.error(data.error || 'Failed to start export')
+            }
+        } catch {
+            toast.error('Failed to start export')
+        } finally {
+            setIsExporting(false)
+        }
+    }
+
     const handleThemeChange = async (theme: MotionGraphicTheme) => {
         try {
             const res = await fetch(`/api/motion-graphics/${projectId}`, {
@@ -554,6 +601,16 @@ export default function MotionGraphicProjectPage() {
     }
 
     const isGenerating = project.status?.startsWith('generating')
+    // remotionProps is saved as soon as scenes/assets/voiceover finish — well
+    // before the actual MP4 render completes. From that point on we can show
+    // a live in-browser preview instead of blocking on the render.
+    const hasRemotionProps = !!project.remotionProps
+    const isFirstTimeGenerating = isGenerating && !hasRemotionProps
+    const isRenderInProgress = project.status === 'generating:video'
+    const isDirty = exportedFingerprint !== null && colorFingerprint(project) !== exportedFingerprint
+    // Show the real exported MP4 only once it exists, nothing has changed
+    // since it was rendered, and no new render is currently in flight.
+    const showFinalPlayer = hasRemotionProps && !!project.videoUrl && !isDirty && !isRenderInProgress
     const isCompleted = project.status === 'completed' && project.remotionProps
     const hasScenes = project.sceneData && (project.sceneData as any[]).length > 0
 
@@ -842,7 +899,7 @@ export default function MotionGraphicProjectPage() {
 
                 {/* Right Panel: Preview */}
                 <div className="flex-1 flex flex-col items-center justify-center p-6 min-h-0">
-                    {isGenerating ? (
+                    {isFirstTimeGenerating ? (
                         <div className="text-center max-w-sm">
                             <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-primary to-accent flex items-center justify-center mb-6 mx-auto shadow-lg shadow-primary/20 animate-pulse">
                                 <Wand2 className="w-8 h-8 text-white" />
@@ -881,33 +938,65 @@ export default function MotionGraphicProjectPage() {
                                 Cancel & Go Back
                             </button>
                         </div>
-                    ) : isCompleted ? (
+                    ) : hasRemotionProps ? (
                         <div className="w-full max-w-2xl mx-auto">
-                            {project.videoUrl ? (
+                            {/* Large renders (≥44 MB) are chunked into Appwrite and stored as JSON
+                                metadata, not a playable URL — stream those through the reassembly
+                                endpoint. Direct single-file URLs play as-is. */}
+                            {(() => {
+                                const isChunked = !!project.videoUrl && (project.videoUrl.trim().startsWith('{') || project.videoUrl.includes('"chunked"'))
+                                const playbackUrl = project.videoUrl
+                                    ? (isChunked ? `/api/motion-graphics/${project.projectId}/stream` : project.videoUrl)
+                                    : null
+                                return (
                                 <>
-                                    {/* Large renders (≥44 MB) are chunked into Appwrite and stored as JSON
-                                        metadata, not a playable URL — stream those through the reassembly
-                                        endpoint. Direct single-file URLs play as-is. */}
-                                    {(() => {
-                                        const isChunked = project.videoUrl.trim().startsWith('{') || project.videoUrl.includes('"chunked"')
-                                        const playbackUrl = isChunked ? `/api/motion-graphics/${project.projectId}/stream` : project.videoUrl
-                                        return (
-                                    <>
-                                    {/* Real video player — custom controls with scene chapter markers */}
-                                    <ChapteredVideoPlayer
-                                        src={playbackUrl}
-                                        scenes={(project.sceneData as any[]) || []}
-                                        aspectRatio={project.aspectRatio}
-                                    />
-                                    <div className="flex items-center justify-center gap-3">
-                                        <a
-                                            href={playbackUrl}
-                                            download={`motion-graphic-${project.projectId}.mp4`}
-                                            className="group relative px-6 py-2.5 rounded-xl bg-gradient-to-r from-primary to-accent text-white text-sm font-bold transition-all hover:shadow-lg hover:shadow-primary/20 flex items-center gap-2 overflow-hidden"
+                                    {showFinalPlayer && playbackUrl ? (
+                                        /* Nothing has changed since the last render — show the real
+                                           delivered MP4 (lighter weight than a live composition). */
+                                        <ChapteredVideoPlayer
+                                            src={playbackUrl}
+                                            scenes={(project.sceneData as any[]) || []}
+                                            aspectRatio={project.aspectRatio}
+                                        />
+                                    ) : (
+                                        <>
+                                            {/* Live in-browser preview — reflects theme/color edits
+                                                instantly, no re-render needed to see them. */}
+                                            <LiveMotionGraphicPlayer
+                                                remotionProps={project.remotionProps}
+                                                aspectRatio={project.aspectRatio}
+                                            />
+                                            {isRenderInProgress && (
+                                                <div className="flex items-center justify-center gap-2 mb-3 -mt-1 text-xs font-semibold text-primary">
+                                                    <Loader2 className="w-3.5 h-3.5 animate-spin" /> Rendering final video in the background — keep previewing, it'll swap in automatically
+                                                </div>
+                                            )}
+                                            {!isRenderInProgress && isDirty && (
+                                                <p className="text-center text-[11px] text-amber-600 font-medium mb-3 -mt-1">
+                                                    Unsaved color changes — export to bake them into the downloadable video
+                                                </p>
+                                            )}
+                                        </>
+                                    )}
+                                    <div className="flex items-center justify-center gap-3 flex-wrap">
+                                        {playbackUrl && (
+                                            <a
+                                                href={playbackUrl}
+                                                download={`motion-graphic-${project.projectId}.mp4`}
+                                                className="group relative px-6 py-2.5 rounded-xl bg-gradient-to-r from-primary to-accent text-white text-sm font-bold transition-all hover:shadow-lg hover:shadow-primary/20 flex items-center gap-2 overflow-hidden"
+                                            >
+                                                <div className="absolute inset-0 bg-white/20 translate-y-[-100%] group-hover:translate-y-[100%] transition-transform duration-700 pointer-events-none" />
+                                                <Download className="w-4 h-4" /> Download Video
+                                            </a>
+                                        )}
+                                        <button
+                                            onClick={handleExport}
+                                            disabled={isExporting || isRenderInProgress}
+                                            className="px-4 py-2.5 rounded-xl border border-primary/40 text-sm text-primary hover:bg-primary/10 transition-colors cursor-pointer flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                                         >
-                                            <div className="absolute inset-0 bg-white/20 translate-y-[-100%] group-hover:translate-y-[100%] transition-transform duration-700 pointer-events-none" />
-                                            <Download className="w-4 h-4" /> Download Video
-                                        </a>
+                                            {isExporting || isRenderInProgress ? <Loader2 className="w-4 h-4 animate-spin" /> : <Rocket className="w-4 h-4" />}
+                                            {playbackUrl ? 'Export Video' : 'Render Video'}
+                                        </button>
                                         <button
                                             onClick={() => setProject(prev => prev ? { ...prev, status: 'draft', remotionProps: null, videoUrl: null } : prev)}
                                             className="px-4 py-2.5 rounded-xl border border-border text-sm text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors cursor-pointer flex items-center gap-2"
@@ -921,20 +1010,9 @@ export default function MotionGraphicProjectPage() {
                                             <RotateCcw className="w-4 h-4" /> Start from Scratch
                                         </button>
                                     </div>
-                                    </>
-                                        )
-                                    })()}
                                 </>
-                            ) : (
-                                /* remotionProps saved but video still being finalized */
-                                <div className="text-center py-12">
-                                    <div className="w-14 h-14 rounded-2xl bg-emerald-50 border border-emerald-200 flex items-center justify-center mx-auto mb-4">
-                                        <CheckCircle2 className="w-7 h-7 text-emerald-500" />
-                                    </div>
-                                    <h3 className="text-lg font-bold text-foreground mb-1">Video Ready!</h3>
-                                    <p className="text-sm text-muted-foreground">Your motion graphic has been generated.</p>
-                                </div>
-                            )}
+                                )
+                            })()}
                         </div>
                     ) : hasScenes ? (
                         <div className="w-full max-w-lg mx-auto">

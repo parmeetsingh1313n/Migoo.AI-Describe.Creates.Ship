@@ -120,7 +120,20 @@ export async function PATCH(
 
         // Only allow updating safe fields
         const allowedFields: Record<string, any> = {};
-        if (body.theme !== undefined) allowedFields.theme = body.theme;
+        if (body.theme !== undefined) {
+            allowedFields.theme = body.theme;
+            // Keep remotionProps.theme in sync so a live preview (which reads
+            // remotionProps) and a cheap render-only re-export (retry-render,
+            // which renders from whatever is currently saved in remotionProps)
+            // both pick up the new theme without a full pipeline re-run.
+            const [row] = await db
+                .select({ remotionProps: motionGraphicProjects.remotionProps })
+                .from(motionGraphicProjects)
+                .where(eq(motionGraphicProjects.projectId, projectId));
+            if (row?.remotionProps) {
+                allowedFields.remotionProps = { ...(row.remotionProps as any), theme: body.theme };
+            }
+        }
         if (body.themeConfirmed !== undefined) allowedFields.themeConfirmed = body.themeConfirmed ? 1 : 0;
         if (body.music !== undefined) allowedFields.music = body.music;
         if (body.voiceoverEnabled !== undefined) allowedFields.voiceoverEnabled = body.voiceoverEnabled ? 1 : 0;
