@@ -387,80 +387,116 @@ export interface ApifyImageResult {
 }
 
 /**
+ * Generate a single scene's image with token rotation + primary/fallback model
+ * retry, then WaveSpeed as the ultimate fallback. Extracted so it can run
+ * behind a concurrency limiter (see generateApifyImagesParallel) instead of
+ * every scene hammering the same small pool of tokens simultaneously.
+ */
+async function generateSceneWithFallback(
+  scene: ApifySceneConfig,
+  tokens: string[]
+): Promise<ApifyImageResult> {
+  const ar = scene.aspectRatio ?? "9:16";
+  const startIdx = (scene.index * PRIME_OFFSET) % tokens.length;
+
+  let lastErr = "";
+  for (let ki = 0; ki < tokens.length; ki++) {
+    const tokenIdx = (startIdx + ki) % tokens.length;
+    const token = tokens[tokenIdx];
+    const keyLabel = `token_${tokenIdx + 1}`;
+
+    for (const model of [PRIMARY_MODEL, FALLBACK_MODEL]) {
+      try {
+        console.log(
+          `🎨 [apify-image] Scene ${scene.index + 1} | ${model} [${keyLabel}] | ${ar}`
+        );
+        const result = await runApifyImageActor(token, model, scene.prompt, ar);
+        console.log(`✅ [apify-image] Scene ${scene.index + 1} done`);
+        return {
+          index: scene.index,
+          success: true,
+          imageUrl: result.imageUrl,
+          signedUrl: result.signedUrl,
+        };
+      } catch (err: any) {
+        if (err.message?.startsWith("QUOTA_EXCEEDED")) {
+          console.warn(`⚠️ [apify-image] Scene ${scene.index + 1} [${keyLabel}] quota exceeded — rotating key`);
+          lastErr = err.message;
+          break; // next key
+        }
+        // Log the FULL error (not truncated) — this is the only signal we get
+        // for why the primary model failed before falling back, so truncating
+        // it hides the actual root cause (bad model id, actor error, etc.)
+        console.warn(
+          `⚠️ [apify-image] Scene ${scene.index + 1} [${keyLabel}] ${model} failed: ${err.message}`
+        );
+        lastErr = err.message;
+      }
+    }
+  }
+
+  // ── All Apify tokens exhausted for this scene — try WaveSpeed GPT Image 2 ──
+  console.warn(
+    `⚠️ [apify-image] Scene ${scene.index + 1}: All Apify tokens exhausted. Trying WaveSpeed GPT Image 2 fallback...`
+  );
+  try {
+    const wsUrl = await generateWaveSpeedImage(scene.prompt, ar);
+    console.log(`✅ [wavespeed] Scene ${scene.index + 1} done via WaveSpeed GPT Image 2`);
+    return {
+      index: scene.index,
+      success: true,
+      imageUrl: wsUrl,
+      signedUrl: wsUrl,
+    };
+  } catch (wsErr: any) {
+    console.error(
+      `❌ [wavespeed] Scene ${scene.index + 1} fallback failed: ${wsErr.message}`
+    );
+  }
+
+  console.error(`❌ [apify-image] Scene ${scene.index + 1} failed (Apify + WaveSpeed): ${lastErr}`);
+  return { index: scene.index, success: false, error: lastErr };
+}
+
+/**
  * Generate images for ALL scenes in parallel.
  * Each scene gets a different Apify token (prime-offset rotation).
  * On failure, the scene result has success=false (caller should handle gracefully).
+ *
+ * Runs behind a concurrency limiter (default 4) instead of firing every scene
+ * at once — with only ~10 tokens and often 20-35+ scenes, unbounded
+ * concurrency means multiple scenes hit the SAME token's actor run
+ * simultaneously. Apify rejects/errors overlapping runs on one token, which
+ * looks identical to the primary model "failing" and falling back to the
+ * secondary model on every scene, when the real cause is token contention.
  */
 export async function generateApifyImagesParallel(
-  scenes: ApifySceneConfig[]
+  scenes: ApifySceneConfig[],
+  concurrency = 4
 ): Promise<ApifyImageResult[]> {
   const tokens = getApifyTokens();
+  const effectiveConcurrency = Math.max(1, Math.min(concurrency, tokens.length, scenes.length));
   console.log(
-    `🚀 [apify-image] Parallel generation: ${scenes.length} scenes across ${tokens.length} tokens`
+    `🚀 [apify-image] Parallel generation: ${scenes.length} scenes across ${tokens.length} tokens (max ${effectiveConcurrency} concurrent)`
   );
 
-  const tasks = scenes.map(async (scene): Promise<ApifyImageResult> => {
-    const ar = scene.aspectRatio ?? "9:16";
-    const startIdx = (scene.index * PRIME_OFFSET) % tokens.length;
+  const results: ApifyImageResult[] = new Array(scenes.length);
+  let nextIndex = 0;
 
-    let lastErr = "";
-    for (let ki = 0; ki < tokens.length; ki++) {
-      const tokenIdx = (startIdx + ki) % tokens.length;
-      const token = tokens[tokenIdx];
-      const keyLabel = `token_${tokenIdx + 1}`;
-
-      for (const model of [PRIMARY_MODEL, FALLBACK_MODEL]) {
-        try {
-          console.log(
-            `🎨 [apify-image] Scene ${scene.index + 1} | ${model} [${keyLabel}] | ${ar}`
-          );
-          const result = await runApifyImageActor(token, model, scene.prompt, ar);
-          console.log(`✅ [apify-image] Scene ${scene.index + 1} done`);
-          return {
-            index: scene.index,
-            success: true,
-            imageUrl: result.imageUrl,
-            signedUrl: result.signedUrl,
-          };
-        } catch (err: any) {
-          if (err.message?.startsWith("QUOTA_EXCEEDED")) {
-            lastErr = err.message;
-            break; // next key
-          }
-          lastErr = err.message;
-        }
+  async function worker() {
+    while (true) {
+      const myIndex = nextIndex++;
+      if (myIndex >= scenes.length) return;
+      try {
+        results[myIndex] = await generateSceneWithFallback(scenes[myIndex], tokens);
+      } catch (err: any) {
+        results[myIndex] = { index: scenes[myIndex].index, success: false, error: String(err?.message ?? err) };
       }
     }
+  }
 
-    // ── All Apify tokens exhausted for this scene — try WaveSpeed GPT Image 2 ──
-    console.warn(
-      `⚠️ [apify-image] Scene ${scene.index + 1}: All Apify tokens exhausted. Trying WaveSpeed GPT Image 2 fallback...`
-    );
-    try {
-      const wsUrl = await generateWaveSpeedImage(scene.prompt, ar);
-      console.log(`✅ [wavespeed] Scene ${scene.index + 1} done via WaveSpeed GPT Image 2`);
-      return {
-        index: scene.index,
-        success: true,
-        imageUrl: wsUrl,
-        signedUrl: wsUrl,
-      };
-    } catch (wsErr: any) {
-      console.error(
-        `❌ [wavespeed] Scene ${scene.index + 1} fallback failed: ${wsErr.message?.slice(0, 120)}`
-      );
-    }
-
-    console.error(`❌ [apify-image] Scene ${scene.index + 1} failed (Apify + WaveSpeed): ${lastErr.slice(0, 80)}`);
-    return { index: scene.index, success: false, error: lastErr };
-  });
-
-  const results = await Promise.allSettled(tasks);
-  return results.map((r, i) =>
-    r.status === "fulfilled"
-      ? r.value
-      : { index: scenes[i].index, success: false, error: String((r as any).reason) }
-  );
+  await Promise.all(Array.from({ length: effectiveConcurrency }, () => worker()));
+  return results;
 }
 
 // ─── Convenience Wrappers ──────────────────────────────────────────────────────
@@ -536,7 +572,7 @@ export async function generateNanoBananaImagesParallel(
     styleUUID?: string;
   }>,
   _cancelSignal?: any,
-  _concurrency?: number
+  concurrency?: number
 ): Promise<ApifyImageResult[]> {
   return generateApifyImagesParallel(
     scenes.map((s) => {
@@ -546,7 +582,8 @@ export async function generateNanoBananaImagesParallel(
         else if (s.width === s.height) ar = "1:1";
       }
       return { index: s.index, prompt: s.prompt, aspectRatio: ar };
-    })
+    }),
+    concurrency
   );
 }
 
