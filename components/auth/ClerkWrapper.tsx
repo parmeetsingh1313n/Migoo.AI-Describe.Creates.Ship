@@ -251,15 +251,15 @@ export function CustomSignIn() {
 
     return (
         <div className="w-full">
-            <div className="flex flex-col items-center mb-8">
+            <div className="flex flex-col items-center mb-5">
                 <div className="relative">
-                    <Image src={'/logo-transparent.png'} alt='logo' width={80} height={80} />
+                    <Image src={'/logo-transparent.png'} alt='logo' width={64} height={64} />
                 </div>
 
-                <h1 className="text-2xl font-semibold text-center text-white mb-2 font-['Outfit']">
+                <h1 className="text-xl font-semibold text-center text-white mb-1 font-['Outfit']">
                     Welcome Back
                 </h1>
-                <p className="text-sm text-white/50 text-center mb-6 font-['Outfit']">
+                <p className="text-sm text-white/50 text-center mb-4 font-['Outfit']">
                     Sign in to your account
                 </p>
             </div>
@@ -323,8 +323,8 @@ export function CustomSignUp() {
     return (
         <div className="w-full">
             <div className="flex flex-col items-center mb-3">
-                <div className="relative mb-3">
-                    <Image src={'/logo-transparent.png'} alt='logo' width={70} height={70} />
+                <div className="relative mb-2">
+                    <Image src={'/logo-transparent.png'} alt='logo' width={60} height={60} />
                 </div>
 
                 <h1 className="text-lg font-semibold text-center text-white mb-1 font-['Outfit']">
