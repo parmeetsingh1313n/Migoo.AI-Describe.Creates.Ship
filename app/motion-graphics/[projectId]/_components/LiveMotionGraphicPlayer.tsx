@@ -47,6 +47,12 @@ export default function LiveMotionGraphicPlayer({ remotionProps, aspectRatio }: 
     const containerRef = useRef<HTMLDivElement | null>(null)
     const progressBarRef = useRef<HTMLDivElement>(null)
     const isDraggingRef = useRef(false)
+    // Playback position/state kept in refs so a theme/color edit (which hands
+    // <Player> a fresh inputProps object and makes Remotion jump back to frame
+    // 0) can be corrected — we re-seek to where the user was and resume if they
+    // were playing, so the preview updates its colors without restarting.
+    const lastFrameRef = useRef(0)
+    const wasPlayingRef = useRef(false)
 
     const [isPlaying, setIsPlaying] = useState(false)
     const [currentFrame, setCurrentFrame] = useState(0)
@@ -89,9 +95,9 @@ export default function LiveMotionGraphicPlayer({ remotionProps, aspectRatio }: 
     useEffect(() => {
         const player = playerRef.current
         if (!player) return
-        const onPlay = () => setIsPlaying(true)
-        const onPause = () => setIsPlaying(false)
-        const onFrameUpdate = (e: any) => setCurrentFrame(e.detail.frame)
+        const onPlay = () => { setIsPlaying(true); wasPlayingRef.current = true }
+        const onPause = () => { setIsPlaying(false); wasPlayingRef.current = false }
+        const onFrameUpdate = (e: any) => { setCurrentFrame(e.detail.frame); lastFrameRef.current = e.detail.frame }
         const onEnded = () => setIsPlaying(false)
 
         player.addEventListener('play', onPlay)
@@ -109,6 +115,29 @@ export default function LiveMotionGraphicPlayer({ remotionProps, aspectRatio }: 
             player.removeEventListener('ended', onEnded)
         }
     }, [])
+
+    // Preserve playback position across theme/color edits. A new `remotionProps`
+    // object makes Remotion's <Player> reset to frame 0; restore the frame the
+    // user was on (and resume if they were playing) so switching themes updates
+    // the colors seamlessly instead of jumping back to the start. Skipped on the
+    // very first render (nothing to preserve yet).
+    const didMountRef = useRef(false)
+    useEffect(() => {
+        if (!didMountRef.current) { didMountRef.current = true; return }
+        const player = playerRef.current
+        if (!player) return
+        const target = Math.max(0, Math.min(durationInFrames - 1, lastFrameRef.current))
+        const resume = wasPlayingRef.current
+        // Defer to the next frame so the seek lands after Remotion has applied
+        // the new inputProps and performed its own reset-to-0.
+        const raf = requestAnimationFrame(() => {
+            const p = playerRef.current
+            if (!p) return
+            p.seekTo(target)
+            if (resume) p.play()
+        })
+        return () => cancelAnimationFrame(raf)
+    }, [remotionProps, durationInFrames])
 
     // Fullscreen listeners (cross-browser)
     useEffect(() => {
