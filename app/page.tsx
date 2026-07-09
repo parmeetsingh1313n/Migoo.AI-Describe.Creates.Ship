@@ -10,7 +10,7 @@ import SelectedWorks from "@/components/sections/SelectedWorks";
 import Journal from "@/components/sections/Journal";
 import Stats from "@/components/sections/Stats";
 import ContactFooter from "@/components/sections/ContactFooter";
-
+import DrawOutlineButton from "@/components/ui/DrawOutlineButton";
 
 const VIDEO_1 =
   "https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260328_083109_283f3553-e28f-428b-a723-d639c617eb2b.mp4";
@@ -205,12 +205,14 @@ export default function LandingPage() {
                 </span>
               </Link>
             ))}
-            <Link
+            <DrawOutlineButton
               href={ctaHref}
-              className="ml-2 inline-flex items-center justify-center rounded-lg bg-[#3363AD] px-6 py-3 text-sm font-semibold text-white transition-all duration-200 hover:bg-[#2b568f] hover:scale-[1.02] active:scale-95"
+              fullWidth={false}
+              accentColor="#3363AD"
+              className="ml-2 text-sm font-semibold border border-[#3363AD]/60"
             >
               Get Started
-            </Link>
+            </DrawOutlineButton>
           </div>
 
           {/* Right: auth area */}
@@ -289,12 +291,13 @@ export default function LandingPage() {
               <Link href="/sign-in" className="flex items-center gap-2 text-sm font-medium text-[#6F6F6F]">
                 <LogIn className="w-4 h-4" /> Sign In
               </Link>
-              <Link
+              <DrawOutlineButton
                 href={ctaHref}
-                className="mt-2 inline-flex items-center justify-center rounded-lg bg-[#3363AD] px-6 py-3 text-sm font-semibold text-white transition-all duration-200 hover:bg-[#2b568f] active:scale-95"
+                accentColor="#3363AD"
+                className="mt-2 text-sm font-semibold border border-[#3363AD]/60"
               >
                 Get Started
-              </Link>
+              </DrawOutlineButton>
             </div>
           </div>
         </div>
@@ -317,12 +320,14 @@ export default function LandingPage() {
             Migoo transforms your ideas into studio-quality AI video courses,
             cinematic shorts, and motion graphics — no editing skills required.
           </p>
-          <Link
+          <DrawOutlineButton
             href={ctaHref}
-            className="gsap-hero-cta opacity-0 mt-12 inline-flex items-center justify-center rounded-lg bg-[#3363AD] px-8 py-4 text-base font-semibold text-white transition-all duration-200 hover:bg-[#2b568f] hover:scale-[1.02] active:scale-95"
+            fullWidth={false}
+            accentColor="#3363AD"
+            className="gsap-hero-cta opacity-0 mt-12 text-base font-semibold px-8 py-4 border border-[#3363AD]/60"
           >
             Start Creating Free
-          </Link>
+          </DrawOutlineButton>
         </section>
 
         {/* Bottom-left tag removed */}
