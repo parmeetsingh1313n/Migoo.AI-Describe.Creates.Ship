@@ -209,7 +209,7 @@ export default function LandingPage() {
               href={ctaHref}
               fullWidth={false}
               accentColor="#3363AD"
-              className="ml-2 text-sm font-semibold border border-[#3363AD]/60"
+              className="self-stretch -my-1 -mr-1 flex items-center text-sm font-semibold border border-[#3363AD]/60 !rounded-l-none !rounded-r-full"
             >
               Get Started
             </DrawOutlineButton>
