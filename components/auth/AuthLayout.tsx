@@ -73,7 +73,7 @@ export default function AuthLayout({ children }: AuthLayoutProps) {
                     {/* Auth form — centered when it fits, scrollable when taller
                         than the viewport (e.g. the sign-up form at 100% zoom) so
                         the submit button is never clipped off the bottom. */}
-                    <div className="relative z-20 flex-1 flex flex-col items-center overflow-y-auto min-h-0 px-4 lg:px-8">
+                    <div className="auth-scroll relative z-20 flex-1 flex flex-col items-center overflow-y-auto min-h-0 px-4 lg:px-8">
                         <div className="w-full max-w-md mx-auto my-auto py-4">
                             {children}
                         </div>
