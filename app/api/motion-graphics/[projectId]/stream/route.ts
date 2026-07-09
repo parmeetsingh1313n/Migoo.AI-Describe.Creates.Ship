@@ -87,16 +87,26 @@ export async function GET(
     return new Response('Missing projectId', { status: 400 });
   }
 
+  // Optional: address a specific historical render (from renderHistory) by
+  // fingerprint, instead of the project's current (latest) videoUrl — used
+  // when the user switches back to a theme that was rendered previously but
+  // isn't the most recent render.
+  const fingerprint = req.nextUrl.searchParams.get('fingerprint');
+
   try {
     const [row] = await db
-      .select({ videoUrl: motionGraphicProjects.videoUrl })
+      .select({ videoUrl: motionGraphicProjects.videoUrl, renderHistory: motionGraphicProjects.renderHistory })
       .from(motionGraphicProjects)
       .where(eq(motionGraphicProjects.projectId, projectId))
       .limit(1);
 
     if (!row) return new Response('Project not found', { status: 404 });
 
-    const videoUrlStr = row.videoUrl;
+    const historicalMatch = fingerprint
+      ? ((row.renderHistory as any[]) || []).find((h) => h?.fingerprint === fingerprint)
+      : null;
+
+    const videoUrlStr = historicalMatch?.videoUrl || row.videoUrl;
     if (!videoUrlStr) return new Response('Video not rendered yet', { status: 404 });
 
     const rangeHeader = req.headers.get('range');

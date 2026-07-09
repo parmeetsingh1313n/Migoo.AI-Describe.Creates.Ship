@@ -186,6 +186,11 @@ export const motionGraphicProjects = pgTable("motion_graphic_projects", {
     // Output
     videoUrl: text("video_url"),
     thumbnailUrl: text("thumbnail_url"),
+    // Per-theme render cache: Array<{ fingerprint: string; videoUrl: string; renderedAt: string }>.
+    // Appended to on every completed render (not just the latest one) so
+    // switching back to a previously-rendered theme can offer a direct
+    // download instead of forcing a wasteful re-render.
+    renderHistory: json("render_history"),
 
     // Status
     status: varchar({ length: 50 }).default("draft"),

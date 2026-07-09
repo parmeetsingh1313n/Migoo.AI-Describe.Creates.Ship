@@ -7,6 +7,8 @@ name: Render Motion Graphic
 #   projectId   - motion graphic project ID (e.g. "mg_abc123")
 #   propsUrl    - Full URL to GET Remotion props from (e.g. https://app.vercel.app/api/motion-graphics/{projectId}/props)
 #   webhookUrl  - Full URL to PATCH results back to (e.g. https://app.vercel.app/api/motion-graphics/{projectId}/webhook)
+#   fingerprint - Hash of the theme/colors being rendered — relayed back to the
+#                 webhook so it can be recorded in renderHistory
 
 on:
   repository_dispatch:
@@ -82,6 +84,7 @@ jobs:
           PROJECT_ID:          ${{ github.event.client_payload.projectId }}
           WEBHOOK_URL:         ${{ github.event.client_payload.webhookUrl }}
           WEBHOOK_SECRET:      ${{ secrets.WEBHOOK_SECRET }}
+          FINGERPRINT:         ${{ github.event.client_payload.fingerprint }}
         run: node scripts/upload-motion-graphic.js
 
       # ── 7. Failure notification ───────────────────────────────────────────────

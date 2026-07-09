@@ -1569,17 +1569,23 @@ export async function triggerMotionGraphicRender(projectId: string, props: Recor
     const repoOwner = process.env.GH_OWNER || "keshav-agrawal595";
     const repoName = process.env.GH_REPO || "Migoo";
 
+    // Fingerprint of the theme/colors being rendered — tagged onto the
+    // completed render so switching back to this exact theme later can be
+    // recognized and downloaded directly instead of re-rendered.
+    const { computeThemeFingerprint } = await import("@/lib/theme-palette");
+    const fingerprint = computeThemeFingerprint(props.theme, props.scenes);
+
     // Detect if cloud rendering can be used
     const isCloud = !!(githubToken && process.env.GH_OWNER && process.env.GH_REPO && appUrl);
 
     if (!isCloud) {
         console.log(`🎬 Starting LOCAL motion graphic render for: ${projectId}`);
-        
+
         await db.update(motionGraphicProjects)
             .set({ status: 'generating:video', updatedAt: new Date() })
             .where(eq(motionGraphicProjects.projectId, projectId));
 
-        renderMotionGraphicLocally(projectId, props).catch((err) => {
+        renderMotionGraphicLocally(projectId, props, fingerprint).catch((err) => {
             console.error(`❌ Local motion graphic render failed for ${projectId}:`, err);
         });
 
@@ -1604,6 +1610,7 @@ export async function triggerMotionGraphicRender(projectId: string, props: Recor
                 projectId,
                 webhookUrl,
                 propsUrl: `${appUrl}/api/motion-graphics/${projectId}/props`,
+                fingerprint,
             },
         }),
     });
@@ -1620,7 +1627,7 @@ export async function triggerMotionGraphicRender(projectId: string, props: Recor
     return { success: true, mode: 'cloud' };
 }
 
-async function renderMotionGraphicLocally(projectId: string, props: Record<string, any>) {
+async function renderMotionGraphicLocally(projectId: string, props: Record<string, any>, fingerprint: string) {
     const cwd = process.cwd();
     const tmpDir = path.join(cwd, 'public', 'tmp');
     const rendersDir = path.join(cwd, 'public', 'renders');
@@ -1794,12 +1801,25 @@ async function renderMotionGraphicLocally(projectId: string, props: Record<strin
         try { fs.rmSync(assetsDirAbs, { recursive: true, force: true }); } catch {}
 
         const localUrl = `/renders/mg_${projectId}.mp4`;
-        
-        // Finalize DB
+
+        // Finalize DB — append this render to the theme's history so switching
+        // back to it later can offer a direct download instead of re-rendering.
+        const { appendRenderHistory } = await import("@/lib/theme-palette");
+        const [existingRow] = await db
+            .select({ renderHistory: motionGraphicProjects.renderHistory })
+            .from(motionGraphicProjects)
+            .where(eq(motionGraphicProjects.projectId, projectId));
+        const renderHistory = appendRenderHistory(existingRow?.renderHistory as any, {
+            fingerprint,
+            videoUrl: localUrl,
+            renderedAt: new Date().toISOString(),
+        });
+
         await db.update(motionGraphicProjects)
             .set({
                 videoUrl: localUrl,
                 status: 'completed',
+                renderHistory,
                 updatedAt: new Date(),
             })
             .where(eq(motionGraphicProjects.projectId, projectId));

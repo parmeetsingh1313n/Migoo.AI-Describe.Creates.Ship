@@ -12,6 +12,8 @@
  *   PROJECT_ID                – Motion graphic project ID
  *   WEBHOOK_URL               – Full URL to PATCH (e.g. .../api/motion-graphics/{projectId}/webhook)
  *   WEBHOOK_SECRET            – Shared secret for Authorization: Bearer header
+ *   FINGERPRINT               – Hash of the theme/colors rendered, relayed back to
+ *                               the webhook so it can be recorded in renderHistory
  */
 
 const sdk  = require('node-appwrite');
@@ -24,6 +26,7 @@ async function upload() {
     const filePath   = path.join(process.cwd(), 'out/video.mp4');
     const projectId  = process.env.PROJECT_ID;
     const webhookUrl = process.env.WEBHOOK_URL;
+    const fingerprint = process.env.FINGERPRINT;
 
     const endpoint     = (process.env.APPWRITE_VIDEO_ENDPOINT || process.env.APPWRITE_ENDPOINT || '').replace(/\/$/, '');
     const appProjectId = process.env.APPWRITE_VIDEO_PROJECT_ID || process.env.APPWRITE_PROJECT_ID;
@@ -120,7 +123,7 @@ async function upload() {
                 });
 
                 console.log('✅ Chunked upload complete.');
-                if (webhookUrl) await notifyWebhook(webhookUrl, videoUrl, 'completed');
+                if (webhookUrl) await notifyWebhook(webhookUrl, videoUrl, 'completed', fingerprint);
 
                 try { fs.rmSync(chunksDir, { recursive: true, force: true }); } catch {}
                 console.log('🎉 Done!');
@@ -148,7 +151,7 @@ async function upload() {
             const videoUrl = `${endpoint}/storage/buckets/${bucketId}/files/${result.$id}/view?project=${appProjectId}`;
             console.log('✅ Video uploaded:', videoUrl);
 
-            if (webhookUrl) await notifyWebhook(webhookUrl, videoUrl, 'completed');
+            if (webhookUrl) await notifyWebhook(webhookUrl, videoUrl, 'completed', fingerprint);
             console.log('🎉 Done!');
             process.exit(0);
         }
@@ -160,7 +163,7 @@ async function upload() {
     }
 }
 
-async function notifyWebhook(webhookUrl, videoUrl, status) {
+async function notifyWebhook(webhookUrl, videoUrl, status, fingerprint) {
     try {
         console.log(`📡 Calling webhook: ${webhookUrl} (status: ${status})`);
         const secret  = process.env.WEBHOOK_SECRET;
@@ -169,6 +172,7 @@ async function notifyWebhook(webhookUrl, videoUrl, status) {
 
         const body = { status };
         if (videoUrl) body.videoUrl = videoUrl;
+        if (fingerprint) body.fingerprint = fingerprint;
 
         const response = await fetch(webhookUrl, {
             method:  'PATCH',

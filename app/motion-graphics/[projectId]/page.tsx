@@ -32,16 +32,7 @@ import LiveMotionGraphicPlayer from './_components/LiveMotionGraphicPlayer'
 import PalettePicker from './_components/PalettePicker'
 import ThemeGateScreen from './_components/ThemeGateScreen'
 import DrawOutlineButton from '@/components/ui/DrawOutlineButton'
-import type { MotionGraphicTheme } from '@/lib/theme-palette'
-
-// Fingerprint of the theme + per-scene color overrides currently in effect —
-// compared against a snapshot taken whenever a fresh render lands, to know
-// whether the last exported MP4 still matches what's live-previewed.
-function colorFingerprint(p: Pick<Project, 'theme' | 'sceneData'> | null): string {
-    if (!p) return ''
-    const sceneColors = ((p.sceneData as any[]) || []).map((s: any) => (s?.customColors ? JSON.stringify(s.colors) : ''))
-    return JSON.stringify({ theme: p.theme, sceneColors })
-}
+import { computeThemeFingerprint, type MotionGraphicTheme } from '@/lib/theme-palette'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -69,6 +60,7 @@ interface Project {
     audioUrl: string | null
     remotionProps: any
     videoUrl: string | null
+    renderHistory?: Array<{ fingerprint: string; videoUrl: string; renderedAt: string }> | null
     status: string
     createdAt: string
 }
@@ -112,10 +104,6 @@ export default function MotionGraphicProjectPage() {
     // Per-scene color override (storyboard): which scene's palette popover is open / saving
     const [colorPickerIndex, setColorPickerIndex] = useState<number | null>(null)
     const [colorSavingIndex, setColorSavingIndex] = useState<number | null>(null)
-    // Live-preview export tracking: fingerprint of theme/colors baked into the
-    // most recently completed render, so we know if the live preview has
-    // diverged (unsaved changes) since that render.
-    const [exportedFingerprint, setExportedFingerprint] = useState<string | null>(null)
     const [isExporting, setIsExporting] = useState(false)
 
     // Auto-resize textarea
@@ -156,15 +144,6 @@ export default function MotionGraphicProjectPage() {
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
     }, [messages])
-
-    // Whenever a (new) rendered video lands, snapshot the theme/colors it was
-    // rendered with — this is what the live preview's "unsaved changes"
-    // indicator compares against.
-    useEffect(() => {
-        if (project?.videoUrl) {
-            setExportedFingerprint(colorFingerprint(project))
-        }
-    }, [project?.videoUrl])
 
     // Auto-send the project prompt as the first chat message
     useEffect(() => {
@@ -608,10 +587,15 @@ export default function MotionGraphicProjectPage() {
     const hasRemotionProps = !!project.remotionProps
     const isFirstTimeGenerating = isGenerating && !hasRemotionProps
     const isRenderInProgress = project.status === 'generating:video'
-    const isDirty = exportedFingerprint !== null && colorFingerprint(project) !== exportedFingerprint
-    // Show the real exported MP4 only once it exists, nothing has changed
-    // since it was rendered, and no new render is currently in flight.
-    const showFinalPlayer = hasRemotionProps && !!project.videoUrl && !isDirty && !isRenderInProgress
+    // Has the CURRENT theme/colors already been rendered at some point (not
+    // necessarily the most recent render — the user may have switched back
+    // to an earlier theme)? renderHistory persists across reloads, so this
+    // recognition survives a refresh, unlike a client-only comparison would.
+    const currentFingerprint = computeThemeFingerprint(project.theme, project.sceneData)
+    const historicalMatch = (project.renderHistory || []).find(h => h.fingerprint === currentFingerprint)
+    // Show the real rendered MP4 only when the current theme has a matching
+    // history entry and no new render is currently in flight.
+    const showFinalPlayer = hasRemotionProps && !!historicalMatch && !isRenderInProgress
     const isCompleted = project.status === 'completed' && project.remotionProps
     const hasScenes = project.sceneData && (project.sceneData as any[]).length > 0
 
@@ -945,14 +929,20 @@ export default function MotionGraphicProjectPage() {
                                 metadata, not a playable URL — stream those through the reassembly
                                 endpoint. Direct single-file URLs play as-is. */}
                             {(() => {
-                                const isChunked = !!project.videoUrl && (project.videoUrl.trim().startsWith('{') || project.videoUrl.includes('"chunked"'))
-                                const playbackUrl = project.videoUrl
-                                    ? (isChunked ? `/api/motion-graphics/${project.projectId}/stream` : project.videoUrl)
+                                const isChunked = (url: string) => url.trim().startsWith('{') || url.includes('"chunked"')
+                                // Resolve the playback/download URL from whichever render matches
+                                // the CURRENT theme — not necessarily project.videoUrl, which only
+                                // reflects the most recent render (the user may have switched back
+                                // to an earlier, already-rendered theme).
+                                const playbackUrl = historicalMatch
+                                    ? (isChunked(historicalMatch.videoUrl)
+                                        ? `/api/motion-graphics/${project.projectId}/stream?fingerprint=${encodeURIComponent(historicalMatch.fingerprint)}`
+                                        : historicalMatch.videoUrl)
                                     : null
                                 return (
                                 <>
                                     {showFinalPlayer && playbackUrl ? (
-                                        /* Nothing has changed since the last render — show the real
+                                        /* This theme has already been rendered — show the real
                                            delivered MP4 (lighter weight than a live composition). */
                                         <ChapteredVideoPlayer
                                             src={playbackUrl}
@@ -972,15 +962,15 @@ export default function MotionGraphicProjectPage() {
                                                     <Loader2 className="w-3.5 h-3.5 animate-spin" /> Rendering final video in the background — keep previewing, it'll swap in automatically
                                                 </div>
                                             )}
-                                            {!isRenderInProgress && isDirty && (
+                                            {!isRenderInProgress && !historicalMatch && (
                                                 <p className="text-center text-[11px] text-amber-600 font-medium mb-3 -mt-1">
-                                                    Unsaved color changes — export to bake them into the downloadable video
+                                                    This theme hasn't been rendered yet — export to bake it into a downloadable video
                                                 </p>
                                             )}
                                         </>
                                     )}
                                     <div className="flex items-center justify-center gap-3 flex-wrap">
-                                        {playbackUrl && (
+                                        {historicalMatch && playbackUrl && !isRenderInProgress ? (
                                             <DrawOutlineButton
                                                 href={playbackUrl}
                                                 download={`motion-graphic-${project.projectId}.mp4`}
@@ -989,16 +979,17 @@ export default function MotionGraphicProjectPage() {
                                             >
                                                 <Download className="w-4 h-4" /> Download Video
                                             </DrawOutlineButton>
+                                        ) : (
+                                            <DrawOutlineButton
+                                                onClick={handleExport}
+                                                disabled={isExporting || isRenderInProgress}
+                                                fullWidth={false}
+                                                className="text-sm border border-primary/30"
+                                            >
+                                                {isExporting || isRenderInProgress ? <Loader2 className="w-4 h-4 animate-spin" /> : <Rocket className="w-4 h-4" />}
+                                                {isRenderInProgress ? 'Rendering…' : 'Export Video'}
+                                            </DrawOutlineButton>
                                         )}
-                                        <DrawOutlineButton
-                                            onClick={handleExport}
-                                            disabled={isExporting || isRenderInProgress}
-                                            fullWidth={false}
-                                            className="text-sm border border-primary/30"
-                                        >
-                                            {isExporting || isRenderInProgress ? <Loader2 className="w-4 h-4 animate-spin" /> : <Rocket className="w-4 h-4" />}
-                                            {playbackUrl ? 'Export Video' : 'Render Video'}
-                                        </DrawOutlineButton>
                                         <button
                                             onClick={() => setProject(prev => prev ? { ...prev, status: 'draft', remotionProps: null, videoUrl: null } : prev)}
                                             className="px-4 py-2.5 rounded-xl border border-border text-sm text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors cursor-pointer flex items-center gap-2"

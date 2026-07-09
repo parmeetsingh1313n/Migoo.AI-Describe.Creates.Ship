@@ -146,3 +146,37 @@ export function themeFromPreset(presetId: string): MotionGraphicTheme {
 export function themeFromCustomSwatches(swatches: string[]): MotionGraphicTheme {
     return { mode: 'custom', customColors: swatches, resolved: deriveRolesFromSwatches(swatches) };
 }
+
+/**
+ * Fingerprint of "what colors this video would render with" — the global
+ * theme plus any per-scene color overrides. Used both client-side (to decide
+ * whether the current theme has already been rendered) and server-side (to
+ * tag each completed render in `renderHistory`) — computed identically in
+ * both places so a lookup always matches correctly.
+ */
+export function computeThemeFingerprint(theme: any, scenes: any[] | undefined | null): string {
+    const sceneColors = (scenes || []).map((s: any) => (s?.customColors ? JSON.stringify(s.colors) : ''));
+    return JSON.stringify({ theme, sceneColors });
+}
+
+export interface RenderHistoryEntry {
+    fingerprint: string;
+    videoUrl: string;
+    renderedAt: string;
+}
+
+/**
+ * Append a completed render to a project's render history — replacing any
+ * existing entry for the same fingerprint (re-rendering an identical theme
+ * updates in place rather than duplicating) and capping the list so it can't
+ * grow unbounded across many theme experiments.
+ */
+export function appendRenderHistory(
+    existing: RenderHistoryEntry[] | null | undefined,
+    entry: RenderHistoryEntry,
+    maxEntries = 20
+): RenderHistoryEntry[] {
+    const filtered = (existing || []).filter(h => h.fingerprint !== entry.fingerprint);
+    filtered.push(entry);
+    return filtered.slice(-maxEntries);
+}
