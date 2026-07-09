@@ -132,6 +132,103 @@ function isAuthError(code: number | undefined): boolean {
  *                  (access is ignored; all files inherit bucket-level permissions).
  * @returns         `{ url, pathname }` — url is the public view URL.
  */
+/**
+ * One full pass: try every config once (with per-config retries for
+ * transient/auth errors as before). Returns the result on success, or throws
+ * the last error with an extra `allServerErrors` flag if every config that
+ * was tried failed with a 5xx — that pattern means the whole Appwrite region
+ * is degraded (confirmed: reads still succeed, only writes 500 — see
+ * lib/blob.ts module docblock), not that any one project/config is broken,
+ * so rotating configs again won't help but waiting briefly might.
+ */
+async function attemptAllConfigsOnce(
+    endpoint: string,
+    filename: string,
+    buffer: Buffer,
+    pathname: string,
+    startIndex: number
+): Promise<PutBlobResult> {
+    const configs = getAppwriteConfigs();
+    const totalConfigs = configs.length;
+    const MAX_PER_CONFIG_RETRIES = 3;
+
+    let lastError: any = null;
+    let serverErrorCount = 0;
+
+    for (let rotation = 0; rotation < totalConfigs; rotation++) {
+        const configIndex = (startIndex + rotation) % totalConfigs;
+        const config = configs[configIndex];
+
+        const client  = createAppwriteClient(config);
+        const storage = new Storage(client);
+
+        console.log(
+            `☁️  Appwrite upload → config #${configIndex + 1}/${totalConfigs} | projectId=${config.projectId.substring(0, 8)} | bucket=${config.bucketId.substring(0, 8)} | file=${filename} | ${buffer.length} bytes`
+        );
+
+        let baseDelay = 2000; // 2s → 4s → 8s for transient retries
+        let configFailedWithServerError = false;
+
+        for (let attempt = 1; attempt <= MAX_PER_CONFIG_RETRIES; attempt++) {
+            try {
+                const fileId = ID.unique(); // fresh ID every attempt
+
+                const result = await storage.createFile({
+                    bucketId: config.bucketId,
+                    fileId,
+                    file: InputFile.fromBuffer(buffer, filename),
+                });
+
+                const url = `${endpoint}/storage/buckets/${config.bucketId}/files/${result.$id}/view?project=${config.projectId}`;
+                console.log(`✅ Appwrite upload success (config #${configIndex + 1}, attempt ${attempt}): ${url}`);
+                return { url, pathname };
+
+            } catch (err: any) {
+                lastError = err;
+                const code: number | undefined = err?.code;
+
+                console.error(
+                    `❌ Appwrite upload failed (config #${configIndex + 1}, attempt ${attempt}/${MAX_PER_CONFIG_RETRIES}): ` +
+                    `code=${code ?? 'network'} type=${err?.type ?? err?.name ?? 'Error'} — ${err?.message} | response=${err?.response}`
+                );
+
+                if (code !== undefined && code >= 500) configFailedWithServerError = true;
+
+                // Auth error — this config's key is bad, immediately rotate to next config
+                if (isAuthError(code)) {
+                    console.warn(`🔑 Auth error on config #${configIndex + 1}, rotating to next config...`);
+                    break; // exit per-config retry loop → try next config
+                }
+
+                // Transient error — wait and retry same config
+                if (isTransient(code) && attempt < MAX_PER_CONFIG_RETRIES) {
+                    console.warn(`⏳ Transient ${code} error, retrying in ${baseDelay}ms...`);
+                    await new Promise(r => setTimeout(r, baseDelay));
+                    baseDelay *= 2; // exponential backoff: 2s → 4s → 8s
+                    continue;
+                }
+
+                // Non-transient, non-auth error — rotate to next config
+                if (!isTransient(code)) {
+                    console.warn(`⚠️ Non-transient error (${code}), rotating to next config...`);
+                    break;
+                }
+
+                // Exhausted retries for transient error — rotate to next config
+                console.warn(`⚠️ Exhausted ${MAX_PER_CONFIG_RETRIES} retries on config #${configIndex + 1}, rotating...`);
+                break;
+            }
+        }
+
+        if (configFailedWithServerError) serverErrorCount++;
+    }
+
+    // All configs exhausted this pass
+    const err = lastError ?? new Error(`Appwrite upload failed for ${pathname}`);
+    (err as any).allServerErrors = serverErrorCount === totalConfigs;
+    throw err;
+}
+
 export async function putWithRotation(
     pathname: string,
     body: Buffer | string,
@@ -160,76 +257,28 @@ export async function putWithRotation(
     const startIndex = currentConfigIndex % totalConfigs;
     currentConfigIndex++;
 
-    // Try each config in order, with per-config retries for transient errors
-    const MAX_PER_CONFIG_RETRIES = 3;
-    const MAX_CONFIG_ROTATIONS   = totalConfigs; // try every config once
+    try {
+        return await attemptAllConfigsOnce(endpoint, filename, buffer, pathname, startIndex);
+    } catch (err: any) {
+        if (!err.allServerErrors) {
+            console.error(`❌ All ${totalConfigs} Appwrite config(s) failed for: ${pathname}`);
+            throw err;
+        }
 
-    let lastError: any = null;
+        // Every config failed with a 5xx — this is Appwrite's shared regional
+        // infra having an issue (confirmed live: reads succeed, writes 500
+        // across every project on the same endpoint), not any one config
+        // being broken. These blips have historically self-resolved within
+        // seconds to minutes, so one delayed full retry is worth it before
+        // giving up for good.
+        console.warn(`⚠️ All ${totalConfigs} configs hit 5xx — likely a regional Appwrite outage, not a config issue. Waiting 8s for one retry pass...`);
+        await new Promise(r => setTimeout(r, 8000));
 
-    for (let rotation = 0; rotation < MAX_CONFIG_ROTATIONS; rotation++) {
-        const configIndex = (startIndex + rotation) % totalConfigs;
-        const config = configs[configIndex];
-
-        const client  = createAppwriteClient(config);
-        const storage = new Storage(client);
-
-        console.log(
-            `☁️  Appwrite upload → config #${configIndex + 1}/${totalConfigs} | projectId=${config.projectId.substring(0, 8)} | bucket=${config.bucketId.substring(0, 8)} | file=${filename} | ${buffer.length} bytes`
-        );
-
-        let baseDelay = 2000; // 2s → 4s → 8s for transient retries
-
-        for (let attempt = 1; attempt <= MAX_PER_CONFIG_RETRIES; attempt++) {
-            try {
-                const fileId = ID.unique(); // fresh ID every attempt
-
-                const result = await storage.createFile({
-                    bucketId: config.bucketId,
-                    fileId,
-                    file: InputFile.fromBuffer(buffer, filename),
-                });
-
-                const url = `${endpoint}/storage/buckets/${config.bucketId}/files/${result.$id}/view?project=${config.projectId}`;
-                console.log(`✅ Appwrite upload success (config #${configIndex + 1}, attempt ${attempt}): ${url}`);
-                return { url, pathname };
-
-            } catch (err: any) {
-                lastError = err;
-                const code: number | undefined = err?.code;
-
-                console.error(
-                    `❌ Appwrite upload failed (config #${configIndex + 1}, attempt ${attempt}/${MAX_PER_CONFIG_RETRIES}): ` +
-                    `code=${code ?? 'network'} type=${err?.name ?? 'Error'} — ${err?.message?.substring(0, 200)}`
-                );
-
-                // Auth error — this config's key is bad, immediately rotate to next config
-                if (isAuthError(code)) {
-                    console.warn(`🔑 Auth error on config #${configIndex + 1}, rotating to next config...`);
-                    break; // exit per-config retry loop → try next config
-                }
-
-                // Transient error — wait and retry same config
-                if (isTransient(code) && attempt < MAX_PER_CONFIG_RETRIES) {
-                    console.warn(`⏳ Transient ${code} error, retrying in ${baseDelay}ms...`);
-                    await new Promise(r => setTimeout(r, baseDelay));
-                    baseDelay *= 2; // exponential backoff: 2s → 4s → 8s
-                    continue;
-                }
-
-                // Non-transient, non-auth error — rotate to next config
-                if (!isTransient(code)) {
-                    console.warn(`⚠️ Non-transient error (${code}), rotating to next config...`);
-                    break;
-                }
-
-                // Exhausted retries for transient error — rotate to next config
-                console.warn(`⚠️ Exhausted ${MAX_PER_CONFIG_RETRIES} retries on config #${configIndex + 1}, rotating...`);
-                break;
-            }
+        try {
+            return await attemptAllConfigsOnce(endpoint, filename, buffer, pathname, startIndex);
+        } catch (retryErr: any) {
+            console.error(`❌ All ${totalConfigs} Appwrite config(s) failed again after retry pass for: ${pathname}`);
+            throw retryErr;
         }
     }
-
-    // All configs exhausted
-    console.error(`❌ All ${totalConfigs} Appwrite config(s) failed for: ${pathname}`);
-    throw lastError ?? new Error(`Appwrite upload failed for ${pathname}`);
 }
