@@ -205,14 +205,12 @@ export default function LandingPage() {
                 </span>
               </Link>
             ))}
-            <DrawOutlineButton
+            <Link
               href={ctaHref}
-              fullWidth={false}
-              accentColor="#3363AD"
-              className="self-stretch -my-1 -mr-1 flex items-center text-sm font-semibold border border-[#3363AD]/60 !rounded-l-none !rounded-r-full"
+              className="self-stretch -my-1 -mr-1 flex items-center px-7 text-sm font-semibold text-white bg-[#3363AD] rounded-l-none rounded-r-full transition-colors duration-200 hover:bg-[#2b568f]"
             >
               Get Started
-            </DrawOutlineButton>
+            </Link>
           </div>
 
           {/* Right: auth area */}
