@@ -36,6 +36,7 @@ import { MUSIC_URLS } from '@/lib/music-urls'
 import RotatingText from './_components/RotatingText'
 import EmptyMotionState from './_components/EmptyMotionState'
 import CoreFeatures from './_components/CoreFeatures'
+import DrawOutlineButton from '@/components/ui/DrawOutlineButton'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -623,26 +624,19 @@ export default function MotionGraphicsPage() {
                             </div>
                         </div>
 
-                        {/* Create Button */}
-                        <button
+                        {/* Create Button — testing DrawOutlineButton style here only */}
+                        <DrawOutlineButton
                             id="create-project-btn"
                             onClick={handleCreate}
                             disabled={isCreating || !prompt.trim()}
-                            className={`group relative w-full py-3.5 rounded-2xl text-base font-bold transition-all cursor-pointer flex items-center justify-center gap-2.5 overflow-hidden
-                                ${!prompt.trim() || isCreating
-                                    ? 'bg-muted text-muted-foreground cursor-not-allowed'
-                                    : 'bg-gradient-to-r from-primary to-accent text-white hover:shadow-xl hover:shadow-primary/20 hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.99]'
-                                }
-                            `}
+                            className="text-base font-bold border border-border"
                         >
-                            {/* Shine effect */}
-                            <div className="absolute inset-0 bg-white/20 translate-y-[-100%] group-hover:translate-y-[100%] transition-transform duration-700 ease-in-out pointer-events-none" />
                             {isCreating ? (
                                 <><Loader2 className="w-5 h-5 animate-spin" /> Creating project...</>
                             ) : (
                                 <><Zap className="w-5 h-5" /> Create Motion Graphic</>
                             )}
-                        </button>
+                        </DrawOutlineButton>
                     </div>
                 </div>
 

@@ -8,6 +8,8 @@ interface DrawOutlineButtonProps {
     className?: string;
     fullWidth?: boolean;
     type?: "button" | "submit" | "reset";
+    disabled?: boolean;
+    id?: string;
 }
 
 const DrawOutlineButton = ({
@@ -15,16 +17,20 @@ const DrawOutlineButton = ({
     onClick,
     className = "",
     fullWidth = true,
-    type = "button"
+    type = "button",
+    disabled = false,
+    id
 }: DrawOutlineButtonProps) => {
     return (
         <button
+            id={id}
             type={type}
             onClick={onClick}
-            className={`group relative px-6 py-3 font-medium text-slate-900 transition-colors duration-[400ms] hover:text-indigo-600 bg-transparent rounded-lg ${fullWidth ? 'w-full' : ''
+            disabled={disabled}
+            className={`group relative px-6 py-3 font-medium text-slate-900 transition-colors duration-[400ms] hover:text-indigo-600 bg-transparent rounded-lg disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:text-slate-900 ${fullWidth ? 'w-full' : ''
                 } ${className}`}
         >
-            <span className="relative z-10">{children}</span>
+            <span className="relative z-10 inline-flex items-center justify-center gap-2">{children}</span>
             {/* TOP */}
             <span className="absolute left-0 top-0 h-[2px] w-0 bg-indigo-600 transition-all duration-100 group-hover:w-full" />
             {/* RIGHT */}
