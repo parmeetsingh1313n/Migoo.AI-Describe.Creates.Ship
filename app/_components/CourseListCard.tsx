@@ -1,9 +1,8 @@
-import { Button } from '@/components/ui/button'
+import DrawOutlineButton from '@/components/ui/DrawOutlineButton'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Course } from '@/type/CourseType'
 import { Calendar, Dot, Layers, Play } from 'lucide-react'
 import moment from 'moment'
-import Link from 'next/link'
 
 type Props = {
   courseItem: Course
@@ -52,9 +51,9 @@ function CourseListCard({ courseItem }: Props) {
       <CardContent>
         <div className='flex gap-2 items-center justify-between'>
           <p>Keep Learning...</p>
-          <Link href={`/course/${courseItem.courseId}`}>
-            <Button>Watch Now <Play /> </Button>
-          </Link>
+          <DrawOutlineButton href={`/course/${courseItem.courseId}`} fullWidth={false} className="border border-primary/30">
+            Watch Now <Play className="w-4 h-4" />
+          </DrawOutlineButton>
         </div>
       </CardContent>
     </Card>

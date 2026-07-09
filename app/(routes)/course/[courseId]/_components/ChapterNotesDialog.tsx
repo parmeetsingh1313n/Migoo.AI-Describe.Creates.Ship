@@ -6,6 +6,7 @@ import jsPDF from 'jspdf'
 import { toPng } from 'html-to-image'
 import axios from 'axios'
 import { toast } from 'sonner'
+import DrawOutlineButton from '@/components/ui/DrawOutlineButton'
 
 type DesignKey = 'abstractPastel' | 'geoPebbles' | 'botanical' | 'elegantLeaf'
 const DESIGNS: Record<DesignKey, { label: string; img: string; pageBg: string; accent: string; accentLight: string; accentBorder: string; text: string; muted: string; headerGrad: string }> = {
@@ -729,15 +730,15 @@ export function ChapterNotesDialog({ open, onClose, chapterTitle, slides, course
             <div style={{ marginTop: 'auto', display: 'flex', gap: 10, flexShrink: 0 }}>
               <button onClick={onClose} style={{ flex: 1, padding: '10px 16px', borderRadius: 12, border: '1px solid rgba(255,255,255,0.08)', background: 'none', color: '#94a3b8', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>Cancel</button>
               {!notesData ? (
-                <button onClick={handleGenerate} disabled={generating} style={{ flex: 2, padding: '10px 18px', borderRadius: 12, border: 'none', cursor: generating ? 'wait' : 'pointer', background: 'linear-gradient(135deg,#f59e0b,#d97706)', color: '#fff', fontSize: 12, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, opacity: generating ? 0.7 : 1 }}>
+                <DrawOutlineButton onClick={handleGenerate} disabled={generating} variant="dark" accentColor="#f59e0b" className="flex-2 text-xs">
                   {generating ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
                   {generating ? 'Generating…' : 'Generate Notes'}
-                </button>
+                </DrawOutlineButton>
               ) : (
-                <button onClick={handleExport} disabled={exporting || !bgDataUrl} style={{ flex: 2, padding: '10px 18px', borderRadius: 12, border: 'none', cursor: exporting ? 'wait' : 'pointer', background: 'linear-gradient(135deg,#f59e0b,#ec4899)', color: '#fff', fontSize: 12, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, opacity: (exporting || !bgDataUrl) ? 0.7 : 1 }}>
+                <DrawOutlineButton onClick={handleExport} disabled={exporting || !bgDataUrl} variant="dark" accentColor="#ec4899" className="flex-2 text-xs">
                   {exporting ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
                   {exporting ? 'Exporting…' : !bgDataUrl ? 'Loading…' : 'Download PDF'}
-                </button>
+                </DrawOutlineButton>
               )}
             </div>
 

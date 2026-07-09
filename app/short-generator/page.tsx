@@ -26,6 +26,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import MorphingText from './_components/MorphingText'
 import EmptyShortsState from './_components/EmptyShortsState'
+import DrawOutlineButton from '@/components/ui/DrawOutlineButton'
 
 interface ShortSeries {
     id: number
@@ -270,13 +271,14 @@ function ShortGeneratorPage() {
                 </div>
 
                 {/* Create New Button */}
-                <Link
+                <DrawOutlineButton
                     href="/short-generator/create"
-                    className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold bg-gradient-to-r from-primary to-accent text-white shadow-lg shadow-primary/20 hover:shadow-xl hover:shadow-primary/30 hover:scale-[1.02] transition-all duration-200"
+                    fullWidth={false}
+                    className="text-sm font-semibold border border-primary/30"
                 >
                     <Plus className="w-4 h-4" />
                     Create New
-                </Link>
+                </DrawOutlineButton>
             </motion.div>
 
             {/* Content — New Series Tab */}

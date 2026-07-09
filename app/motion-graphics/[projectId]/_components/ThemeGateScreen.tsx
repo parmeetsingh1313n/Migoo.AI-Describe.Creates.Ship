@@ -13,6 +13,7 @@
 import { useState } from 'react'
 import { Loader2, Sparkles } from 'lucide-react'
 import PalettePicker from './PalettePicker'
+import DrawOutlineButton from '@/components/ui/DrawOutlineButton'
 import { themeFromPreset, type MotionGraphicTheme } from '@/lib/theme-palette'
 
 interface ThemeGateScreenProps {
@@ -51,15 +52,14 @@ export default function ThemeGateScreen({ prompt, onConfirm }: ThemeGateScreenPr
 
                 <PalettePicker value={theme} onChange={setTheme} />
 
-                <button
+                <DrawOutlineButton
                     onClick={handleStart}
                     disabled={starting}
-                    className="group relative w-full mt-6 py-3.5 rounded-2xl text-sm font-bold bg-gradient-to-r from-primary to-accent text-white hover:shadow-xl hover:shadow-primary/20 transition-all cursor-pointer flex items-center justify-center gap-2 overflow-hidden disabled:opacity-70"
+                    className="mt-6 text-sm font-bold border border-primary/30"
                 >
-                    <div className="absolute inset-0 bg-white/20 translate-y-[-100%] group-hover:translate-y-[100%] transition-transform duration-700 pointer-events-none" />
                     {starting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
                     Start Creating
-                </button>
+                </DrawOutlineButton>
             </div>
         </div>
     )

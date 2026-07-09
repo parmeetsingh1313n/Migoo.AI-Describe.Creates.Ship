@@ -1,5 +1,5 @@
 "use client"
-import { Button } from '@/components/ui/button';
+import DrawOutlineButton from '@/components/ui/DrawOutlineButton';
 import { UserButton, useUser } from '@clerk/nextjs';
 import Image from 'next/image';
 import Link from 'next/link';
@@ -63,11 +63,9 @@ function Header() {
 
             {/* Right: Auth Button */}
             <div className='flex items-center'>
-                <Link href="/sign-in">
-                    <Button className="px-6 py-2 bg-primary hover:bg-primary/90">
-                        Get Started
-                    </Button>
-                </Link>
+                <DrawOutlineButton href="/sign-in" fullWidth={false} className="border border-primary/30">
+                    Get Started
+                </DrawOutlineButton>
             </div>
         </div>
     )

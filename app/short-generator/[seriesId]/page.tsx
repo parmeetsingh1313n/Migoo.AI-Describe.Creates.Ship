@@ -30,6 +30,7 @@ import { MainComposition } from '@/remotion/Composition'
 import { getMusicUrl } from '@/lib/music-urls'
 import { X } from 'lucide-react'
 import * as Dialog from '@radix-ui/react-dialog'
+import DrawOutlineButton from '@/components/ui/DrawOutlineButton'
 
 // ─── Types ───────────────────────────────────────────────────────────
 interface SeriesData {
@@ -343,10 +344,11 @@ function SeriesVideosPageContent() {
                         {videos.length} video{videos.length !== 1 ? 's' : ''} generated
                     </div>
 
-                    <button
+                    <DrawOutlineButton
                         onClick={() => setShowTopicDialog(true)}
                         disabled={generating || triggeringGeneration}
-                        className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold bg-linear-to-r from-primary to-accent text-white shadow-lg shadow-primary/20 hover:shadow-xl hover:shadow-primary/30 hover:scale-[1.02] transition-all duration-200 disabled:opacity-70 disabled:cursor-not-allowed disabled:hover:scale-100 cursor-pointer"
+                        fullWidth={false}
+                        className="text-sm font-semibold border border-primary/30"
                     >
                         {triggeringGeneration ? (
                             <>
@@ -364,7 +366,7 @@ function SeriesVideosPageContent() {
                                 Generate More
                             </>
                         )}
-                    </button>
+                    </DrawOutlineButton>
                 </div>
             </motion.div>
 
@@ -382,14 +384,15 @@ function SeriesVideosPageContent() {
                     <p className="text-muted-foreground text-sm mb-6 max-w-sm mx-auto">
                         Click &ldquo;Generate More&rdquo; to create your first AI-generated short video for this series
                     </p>
-                    <button
+                    <DrawOutlineButton
                         onClick={() => setShowTopicDialog(true)}
                         disabled={triggeringGeneration}
-                        className="inline-flex items-center gap-2 px-6 py-3 rounded-xl text-sm font-semibold bg-linear-to-r from-primary to-accent text-white shadow-lg shadow-primary/20 hover:shadow-xl hover:scale-[1.02] transition-all cursor-pointer disabled:opacity-70"
+                        fullWidth={false}
+                        className="text-sm font-semibold border border-primary/30"
                     >
                         <Sparkles className="w-4 h-4" />
                         Generate First Video
-                    </button>
+                    </DrawOutlineButton>
                 </motion.div>
             )}
 
@@ -815,18 +818,19 @@ function GenerateTopicDialog({
                                         >
                                             ← Back
                                         </button>
-                                        <button
+                                        <DrawOutlineButton
                                             onClick={() => {
                                                 if (customTopic.trim()) {
                                                     onGenerate(customTopic.trim())
                                                 }
                                             }}
                                             disabled={disabled || !customTopic.trim()}
-                                            className="flex-1 h-11 rounded-xl bg-linear-to-r from-primary to-accent text-white text-sm font-semibold shadow-lg shadow-primary/20 hover:shadow-xl hover:scale-[1.02] transition-all disabled:opacity-60 disabled:hover:scale-100 cursor-pointer flex items-center justify-center gap-2"
+                                            fullWidth={false}
+                                            className="flex-1 text-sm font-semibold border border-primary/30"
                                         >
                                             <Sparkles className="w-4 h-4" />
                                             Generate
-                                        </button>
+                                        </DrawOutlineButton>
                                     </div>
                                 </motion.div>
                             )}
@@ -1021,12 +1025,11 @@ function VideoPlayerDialog({ video, series, onClose }: { video: VideoAsset | nul
                     {/* Actions */}
                     <div className="mt-4 flex gap-3">
                         {videoUrl && hasStartedPlaying ? (
-                            <motion.button
-                                initial={{ opacity: 0, scale: 0.9 }}
-                                animate={{ opacity: 1, scale: 1 }}
+                            <DrawOutlineButton
                                 onClick={handleDownload}
                                 disabled={isDownloading}
-                                className="flex-1 h-12 rounded-2xl bg-white text-black font-bold flex items-center justify-center gap-2 hover:bg-white/90 transition-all cursor-pointer shadow-lg disabled:opacity-60 disabled:cursor-not-allowed"
+                                variant="dark"
+                                className="flex-1 font-bold border border-white/20"
                             >
                                 {isDownloading ? (
                                     <>
@@ -1039,7 +1042,7 @@ function VideoPlayerDialog({ video, series, onClose }: { video: VideoAsset | nul
                                         Download MP4
                                     </>
                                 )}
-                            </motion.button>
+                            </DrawOutlineButton>
                         ) : isRendering ? (
                             <div className="flex-1 h-12 rounded-2xl bg-white/10 text-white/50 font-medium flex items-center justify-center gap-2 border border-white/5">
                                 <Loader2 className="w-4 h-4 animate-spin" />

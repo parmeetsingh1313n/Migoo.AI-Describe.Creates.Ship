@@ -25,6 +25,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import EmptyNotesState from './_components/EmptyNotesState'
 import RollingText from './_components/RollingText'
+import DrawOutlineButton from '@/components/ui/DrawOutlineButton'
 import {
     Dialog,
     DialogContent,
@@ -599,23 +600,17 @@ export default function NotesPage() {
                         </Dialog>
 
                         {/* Create Button */}
-                        <button
+                        <DrawOutlineButton
                             onClick={handleCreate}
                             disabled={isCreating || !title.trim()}
-                            className={`group relative w-full py-3.5 rounded-2xl text-base font-bold transition-all cursor-pointer flex items-center justify-center gap-2.5 overflow-hidden
-                                ${!title.trim() || isCreating
-                                    ? 'bg-muted text-muted-foreground cursor-not-allowed'
-                                    : 'bg-gradient-to-r from-primary to-accent text-white hover:shadow-xl hover:shadow-primary/20 hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.99]'
-                                }
-                            `}
+                            className="text-base font-bold border border-border"
                         >
-                            <div className="absolute inset-0 bg-white/20 translate-y-[-100%] group-hover:translate-y-[100%] transition-transform duration-700 ease-in-out pointer-events-none" />
                             {isCreating ? (
                                 <><Loader2 className="w-5 h-5 animate-spin" /> Generating notes...</>
                             ) : (
                                 <><Sparkles className="w-5 h-5" /> Generate Notes</>
                             )}
-                        </button>
+                        </DrawOutlineButton>
                     </div>
                 </div>
 

@@ -7,6 +7,7 @@ import Image from 'next/image'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Suspense, useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
+import DrawOutlineButton from '@/components/ui/DrawOutlineButton'
 
 // Lazy-load step components for faster initial page load
 const SelectNiche = dynamic(() => import('../_components/SelectNiche'), { loading: () => <StepLoader /> })
@@ -332,33 +333,21 @@ function ShortGeneratorCreateForm() {
                 </button>
 
                 {currentStep < steps.length - 1 ? (
-                    <button
+                    <DrawOutlineButton
                         onClick={handleNext}
                         disabled={!canProceed()}
-                        className={`
-                            flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-semibold
-                            transition-all duration-200
-                            ${canProceed()
-                                ? 'bg-gradient-to-r from-primary to-accent text-white shadow-lg shadow-primary/25 hover:shadow-xl hover:shadow-primary/30 hover:scale-[1.02] cursor-pointer'
-                                : 'bg-muted text-muted-foreground cursor-not-allowed'
-                            }
-                        `}
+                        fullWidth={false}
+                        className={`text-sm font-semibold ${canProceed() ? 'border border-primary/30' : ''}`}
                     >
                         Next Step
                         <ArrowRight className="w-4 h-4" />
-                    </button>
+                    </DrawOutlineButton>
                 ) : (
-                    <button
+                    <DrawOutlineButton
                         onClick={handleSave}
                         disabled={!canProceed() || isGenerating}
-                        className={`
-                            flex items-center gap-2 px-6 py-3 rounded-xl text-sm font-semibold
-                            transition-all duration-200
-                            ${canProceed() && !isGenerating
-                                ? 'bg-gradient-to-r from-primary/80 to-accent/80 text-white shadow-lg shadow-primary/20 hover:shadow-xl hover:shadow-primary/30 hover:scale-[1.02] cursor-pointer'
-                                : 'bg-muted text-muted-foreground cursor-not-allowed'
-                            }
-                        `}
+                        fullWidth={false}
+                        className={`text-sm font-semibold ${canProceed() && !isGenerating ? 'border border-primary/30' : ''}`}
                     >
                         {isGenerating ? (
                             <>
@@ -371,7 +360,7 @@ function ShortGeneratorCreateForm() {
                                 {isEditMode ? 'Save Changes' : 'Generate Series'}
                             </>
                         )}
-                    </button>
+                    </DrawOutlineButton>
                 )}
             </div>
         </div>

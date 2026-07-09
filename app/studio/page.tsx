@@ -5,6 +5,7 @@ import { ArrowRight, BookOpen, Brain, Clapperboard, Film, Layers, Mic2, Music, S
 import Link from 'next/link'
 import SplittingText from './_components/SplittingText'
 import StudioFeatureCard from './_components/StudioFeatureCard'
+import DrawOutlineButton from '@/components/ui/DrawOutlineButton'
 const features = [
     { icon: BookOpen,    label: "Document Source",       desc: "Upload PDFs, ZIPs, or Images",    color: "from-amber-400 to-orange-400" },
     { icon: Film,        label: "Scene Asset Manager",   desc: "Inject your photos & clips",     color: "from-pink-400 to-rose-400"   },
@@ -155,17 +156,15 @@ export default function StudioPage() {
                     className="text-center mt-16 relative"
                 >
                     <div className="absolute inset-0 -z-10 bg-primary/10 blur-[100px] rounded-full w-[300px] h-[100px] mx-auto top-1/2 -translate-y-1/2 pointer-events-none" />
-                    <Link
+                    <DrawOutlineButton
                         href="/studio/create"
-                        className="group relative inline-flex items-center gap-3 px-8 py-4 rounded-2xl bg-gradient-to-r from-primary to-accent text-white font-bold text-base hover:shadow-xl hover:shadow-primary/30 transition-all duration-300 hover:-translate-y-0.5 active:translate-y-0 active:scale-95 overflow-hidden"
+                        fullWidth={false}
+                        className="text-base font-bold border border-primary/30"
                     >
-                        <div className="absolute inset-0 bg-white/20 translate-y-[-100%] group-hover:translate-y-[100%] transition-transform duration-700 ease-in-out pointer-events-none" />
-                        <Wand2 className="w-5 h-5 group-hover:rotate-12 transition-transform duration-300" />
+                        <Wand2 className="w-5 h-5" />
                         <span>Enter Migoo Studio</span>
-                        <div className="bg-white/20 p-1.5 rounded-lg group-hover:bg-white/30 transition-colors">
-                            <ArrowRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
-                        </div>
-                    </Link>
+                        <ArrowRight className="w-4 h-4" />
+                    </DrawOutlineButton>
                     <p className="text-sm font-medium text-muted-foreground mt-5 opacity-80">
                         No credit card required <span className="mx-2 text-border">•</span> Uses your existing series
                     </p>

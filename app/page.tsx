@@ -10,6 +10,7 @@ import SelectedWorks from "@/components/sections/SelectedWorks";
 import Journal from "@/components/sections/Journal";
 import Stats from "@/components/sections/Stats";
 import ContactFooter from "@/components/sections/ContactFooter";
+import DrawOutlineButton from "@/components/ui/DrawOutlineButton";
 
 const VIDEO_1 =
   "https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260328_083109_283f3553-e28f-428b-a723-d639c617eb2b.mp4";
@@ -204,11 +205,14 @@ export default function LandingPage() {
                 </span>
               </Link>
             ))}
-            <Link href={ctaHref}>
-              <button className="ml-2 landing-nav-cta cursor-pointer">
-                Get Started
-              </button>
-            </Link>
+            <DrawOutlineButton
+              href={ctaHref}
+              fullWidth={false}
+              accentColor="#3363AD"
+              className="ml-2 text-sm font-semibold border border-[#3363AD]/30"
+            >
+              Get Started
+            </DrawOutlineButton>
           </div>
 
           {/* Right: auth area */}
@@ -287,11 +291,13 @@ export default function LandingPage() {
               <Link href="/sign-in" className="flex items-center gap-2 text-sm font-medium text-[#6F6F6F]">
                 <LogIn className="w-4 h-4" /> Sign In
               </Link>
-              <Link href={ctaHref}>
-                <button className="mt-2 landing-nav-cta w-full">
-                  Get Started
-                </button>
-              </Link>
+              <DrawOutlineButton
+                href={ctaHref}
+                accentColor="#3363AD"
+                className="mt-2 text-sm font-semibold border border-[#3363AD]/30"
+              >
+                Get Started
+              </DrawOutlineButton>
             </div>
           </div>
         </div>
@@ -314,11 +320,14 @@ export default function LandingPage() {
             Migoo transforms your ideas into studio-quality AI video courses,
             cinematic shorts, and motion graphics — no editing skills required.
           </p>
-          <Link href={ctaHref}>
-            <button className="landing-hero-cta gsap-hero-cta opacity-0 cursor-pointer">
-              Start Creating Free
-            </button>
-          </Link>
+          <DrawOutlineButton
+            href={ctaHref}
+            fullWidth={false}
+            accentColor="#3363AD"
+            className="gsap-hero-cta opacity-0 mt-12 text-base font-semibold px-8 py-4 border border-[#3363AD]/30"
+          >
+            Start Creating Free
+          </DrawOutlineButton>
         </section>
 
         {/* Bottom-left tag removed */}

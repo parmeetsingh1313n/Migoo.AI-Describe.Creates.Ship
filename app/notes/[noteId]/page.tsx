@@ -21,6 +21,7 @@ import jsPDF from 'jspdf'
 import { toPng } from 'html-to-image'
 import { UserButton } from '@clerk/nextjs'
 import { NoteDesignBg, getDesignConfig, getDesignPageBg, type NoteDesignKey, type DesignConfig } from './NoteDesigns'
+import DrawOutlineButton from '@/components/ui/DrawOutlineButton'
 
 // ─── FA6 Icon Imports & Mapping ──────────────────────────────
 import {
@@ -835,10 +836,15 @@ export default function NoteViewerPage() {
                                 : 'Click "Generate" to create your notes'
                             }
                         </p>
-                        <button onClick={handleRegenerate} disabled={regenerating}
-                            className="px-6 py-2.5 rounded-xl bg-violet-600 text-white font-bold text-sm hover:bg-violet-700 transition-colors cursor-pointer disabled:opacity-50 flex items-center gap-2 mx-auto">
+                        <DrawOutlineButton
+                            onClick={handleRegenerate}
+                            disabled={regenerating}
+                            fullWidth={false}
+                            accentColor={designConfig.hex.accent}
+                            className="font-bold text-sm border border-violet-600/30 mx-auto"
+                        >
                             {regenerating ? <><Loader2 className="w-4 h-4 animate-spin" /> Generating...</> : <><Sparkles className="w-4 h-4" /> Generate Notes</>}
-                        </button>
+                        </DrawOutlineButton>
                     </div>
                 </div>
             )
@@ -1868,14 +1874,15 @@ export default function NoteViewerPage() {
                             {regenerating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
                             Regenerate
                         </button>
-                        <button
+                        <DrawOutlineButton
                             onClick={handleExportPDF}
                             disabled={exporting || !data}
-                            className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold bg-primary text-white hover:bg-primary/90 transition-all cursor-pointer disabled:opacity-50"
+                            fullWidth={false}
+                            className="text-xs font-bold border border-primary/30"
                         >
                             {exporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
                             Export PDF
-                        </button>
+                        </DrawOutlineButton>
                         <div className="ml-1">
                             <UserButton afterSignOutUrl="/" />
                         </div>

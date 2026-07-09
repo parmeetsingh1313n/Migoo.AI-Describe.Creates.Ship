@@ -11,6 +11,7 @@ import {
     SelectTrigger, SelectValue
 } from '@/components/ui/select'
 import WaveformCanvas, { extractPeaks, getWavDuration, mergeWavBase64ToBlob } from './WaveformCanvas'
+import DrawOutlineButton from '@/components/ui/DrawOutlineButton'
 
 /* ── Types ─────────────────────────────────────────────────────────────── */
 
@@ -424,13 +425,12 @@ export default function StudioStageVoice({
                 </div>
 
                 {/* Generate All — right side */}
-                <motion.button
+                <DrawOutlineButton
                     onClick={generateAll}
                     disabled={generatingAll || scenes.length === 0}
-                    whileHover={generatingAll ? {} : { scale: 1.02 }}
-                    whileTap={generatingAll ? {} : { scale: 0.98 }}
-                    className="shrink-0 flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-sm text-white transition-all cursor-pointer shadow-lg disabled:opacity-60"
-                    style={{ background: GRADIENT_STYLE, boxShadow: '0 8px 24px rgba(100, 108, 209, 0.3)' }}
+                    fullWidth={false}
+                    accentColor="#646CD1"
+                    className="shrink-0 text-sm font-bold border border-[#646CD1]/30"
                 >
                     {generatingAll ? (
                         <><Loader2 className="w-4 h-4 animate-spin" /> Scene {genProgress + 1}/{scenes.length}</>
@@ -441,7 +441,7 @@ export default function StudioStageVoice({
                     ) : (
                         <><Sparkles className="w-4 h-4" /> Generate All</>
                     )}
-                </motion.button>
+                </DrawOutlineButton>
             </div>
 
             {/* ── Progress bar ────────────────────────────────────────────── */}

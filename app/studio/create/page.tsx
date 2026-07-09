@@ -14,6 +14,7 @@ import StudioStageSource from '../_components/StudioStageSource'
 import StudioStageStyle from '../_components/StudioStageStyle'
 import StudioStageVoice, { SceneAudioData } from '../_components/StudioStageVoice'
 import StudioStepper from '../_components/StudioStepper'
+import DrawOutlineButton from '@/components/ui/DrawOutlineButton'
 
 
 
@@ -309,19 +310,17 @@ function StudioCreateWizard() {
                             Back
                         </button>
 
-                        <button
+                        <DrawOutlineButton
                             onClick={handleNext}
                             disabled={!canNext}
-                            className={`flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 cursor-pointer ${canNext
-                                    ? 'bg-gradient-to-r from-primary to-accent text-white shadow-lg shadow-primary/20 hover:shadow-primary/30 hover:scale-[1.02]'
-                                    : 'bg-muted text-muted-foreground cursor-not-allowed'
-                                }`}
+                            fullWidth={false}
+                            className={`text-sm font-semibold ${canNext ? 'border border-primary/30' : ''}`}
                         >
                             {isGenerating ? (
                                 <><Loader2 className="w-4 h-4 animate-spin" /> Generating Script…</>
                             ) : stage === 4 ? 'Review & Launch' : 'Continue'}
                             {!isGenerating && <ArrowRight className="w-4 h-4" />}
-                        </button>
+                        </DrawOutlineButton>
                     </div>
                 )}
             </div>

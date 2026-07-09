@@ -31,6 +31,7 @@ import ChapteredVideoPlayer from './_components/ChapteredVideoPlayer'
 import LiveMotionGraphicPlayer from './_components/LiveMotionGraphicPlayer'
 import PalettePicker from './_components/PalettePicker'
 import ThemeGateScreen from './_components/ThemeGateScreen'
+import DrawOutlineButton from '@/components/ui/DrawOutlineButton'
 import type { MotionGraphicTheme } from '@/lib/theme-palette'
 
 // Fingerprint of the theme + per-scene color overrides currently in effect —
@@ -980,23 +981,24 @@ export default function MotionGraphicProjectPage() {
                                     )}
                                     <div className="flex items-center justify-center gap-3 flex-wrap">
                                         {playbackUrl && (
-                                            <a
+                                            <DrawOutlineButton
                                                 href={playbackUrl}
                                                 download={`motion-graphic-${project.projectId}.mp4`}
-                                                className="group relative px-6 py-2.5 rounded-xl bg-gradient-to-r from-primary to-accent text-white text-sm font-bold transition-all hover:shadow-lg hover:shadow-primary/20 flex items-center gap-2 overflow-hidden"
+                                                fullWidth={false}
+                                                className="text-sm border border-primary/30"
                                             >
-                                                <div className="absolute inset-0 bg-white/20 translate-y-[-100%] group-hover:translate-y-[100%] transition-transform duration-700 pointer-events-none" />
                                                 <Download className="w-4 h-4" /> Download Video
-                                            </a>
+                                            </DrawOutlineButton>
                                         )}
-                                        <button
+                                        <DrawOutlineButton
                                             onClick={handleExport}
                                             disabled={isExporting || isRenderInProgress}
-                                            className="px-4 py-2.5 rounded-xl border border-primary/40 text-sm text-primary hover:bg-primary/10 transition-colors cursor-pointer flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                                            fullWidth={false}
+                                            className="text-sm border border-primary/30"
                                         >
                                             {isExporting || isRenderInProgress ? <Loader2 className="w-4 h-4 animate-spin" /> : <Rocket className="w-4 h-4" />}
                                             {playbackUrl ? 'Export Video' : 'Render Video'}
-                                        </button>
+                                        </DrawOutlineButton>
                                         <button
                                             onClick={() => setProject(prev => prev ? { ...prev, status: 'draft', remotionProps: null, videoUrl: null } : prev)}
                                             className="px-4 py-2.5 rounded-xl border border-border text-sm text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors cursor-pointer flex items-center gap-2"
@@ -1140,15 +1142,14 @@ export default function MotionGraphicProjectPage() {
                                 ))}
                             </div>
 
-                            <button
+                            <DrawOutlineButton
                                 onClick={handleGenerate}
                                 disabled={generating}
-                                className="group relative w-full py-3.5 rounded-2xl text-sm font-bold bg-gradient-to-r from-primary to-accent text-white hover:shadow-xl hover:shadow-primary/20 transition-all cursor-pointer flex items-center justify-center gap-2 overflow-hidden"
+                                className="text-sm font-bold border border-primary/30"
                             >
-                                <div className="absolute inset-0 bg-white/20 translate-y-[-100%] group-hover:translate-y-[100%] transition-transform duration-700 pointer-events-none" />
                                 {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
                                 Generate Video
-                            </button>
+                            </DrawOutlineButton>
                             <button
                                 onClick={handleStartFromScratch}
                                 className="w-full py-2.5 rounded-2xl border border-border text-sm text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors cursor-pointer flex items-center justify-center gap-2 mt-2"

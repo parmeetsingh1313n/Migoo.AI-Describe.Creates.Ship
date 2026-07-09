@@ -4,6 +4,7 @@ import { AlertCircle, CheckCircle2, ChevronDown, FileText, Globe, Loader2, Uploa
 import { useCallback, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import Image from 'next/image'
+import DrawOutlineButton from '@/components/ui/DrawOutlineButton'
 
 const SUPPORTED_LANGUAGES = [
     { code: "en-IN", name: "English",   native: "English"    },
@@ -365,15 +366,13 @@ export default function DocumentUploadZone({ onResult }: Props) {
 
             {/* Process document button */}
             {state === "idle" && docFile && (
-                <motion.button
-                    initial={{ opacity: 0, y: 4 }}
-                    animate={{ opacity: 1, y: 0 }}
+                <DrawOutlineButton
                     onClick={processDocument}
-                    className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-primary text-white font-semibold hover:bg-primary/90 hover:shadow-md transition-all duration-200 cursor-pointer"
+                    className="font-semibold border border-primary/30"
                 >
                     <Zap className="w-4 h-4" />
                     Extract Document Data
-                </motion.button>
+                </DrawOutlineButton>
             )}
         </div>
     )

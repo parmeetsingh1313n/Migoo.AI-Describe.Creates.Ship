@@ -6,6 +6,7 @@ import { Player, PlayerRef } from '@remotion/player';
 import { CourseComposition } from './ChapterVideo';
 import { CustomPlayerControls } from './CustomPlayerControls';
 import { ChapterNotesDialog } from './ChapterNotesDialog';
+import DrawOutlineButton from '@/components/ui/DrawOutlineButton';
 import axios from 'axios';
 import { toast } from 'sonner';
 
@@ -678,13 +679,15 @@ function CourseChapters({ course, onRefresh }: Props) {
                             </div>
                         </div>
 
-                        <button
+                        <DrawOutlineButton
                             onClick={() => handleGenerateChapter(chapter, index)}
-                            className="z-10 cursor-pointer flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white rounded-xl text-xs font-bold shadow-[0_4px_20px_rgba(147,51,234,0.35)] transition-all hover:scale-105 active:scale-95 duration-200"
+                            fullWidth={false}
+                            accentColor="#7c3aed"
+                            className="text-xs border border-purple-600/30"
                         >
                             <Play className="h-3 w-3 fill-current" />
                             Generate Video Content
-                        </button>
+                        </DrawOutlineButton>
                     </div>
                 );
         }
