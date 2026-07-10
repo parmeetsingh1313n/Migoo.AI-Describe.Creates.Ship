@@ -42,12 +42,13 @@ export async function POST(req: NextRequest) {
             return apiError('Invalid request input', 400, 'VALIDATION_ERROR', validation.errors);
         }
 
-        const { userInput, courseId, type } = validation.data;
+        const { userInput, courseId, type, voice } = validation.data;
 
         console.log('📥 Request Body:', {
             userInputLength: userInput.length,
             courseId,
             type,
+            voice,
         });
 
         // ═══════════════════════════════════════════════════════════════════
@@ -141,6 +142,7 @@ export async function POST(req: NextRequest) {
             courseName: result.courseName,
             userInput: userInput,
             type: type,
+            voice: voice,
             courseLayout: result,
             userId: user?.primaryEmailAddress?.emailAddress
         }).returning();

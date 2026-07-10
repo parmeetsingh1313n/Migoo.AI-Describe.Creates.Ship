@@ -203,7 +203,7 @@ let activeSarvamKeyIndex = 0;
  * - Uses output_audio_codec: "mp3" — ~57x smaller than WAV.
  * - Features a 30s abort timeout to prevent connections from hanging indefinitely.
  */
-async function generateTTSAudio(text: string, lang = "en-IN"): Promise<Buffer> {
+async function generateTTSAudio(text: string, lang = "en-IN", speaker = "kabir"): Promise<Buffer> {
     const keys = getSarvamKeys();
     if (keys.length === 0) throw new Error("No SARVAM_API_KEY found in environment variables");
 
@@ -231,7 +231,7 @@ async function generateTTSAudio(text: string, lang = "en-IN"): Promise<Buffer> {
                     body: JSON.stringify({
                         text: chunk,
                         target_language_code: lang,
-                        speaker: "kabir",
+                        speaker: speaker,
                         pace: 1.05,
                         speech_sample_rate: 22050,
                         enable_preprocessing: true,
@@ -784,6 +784,14 @@ export const generateCourseVideoContentFn = inngest.createFunction(
         // Slides are processed sequentially to avoid concurrent rate-limiting
         // and race conditions on the Sarvam API keys.
         // Captions are generated instantly from narration text (no slow Sarvam STT job).
+
+        // Narrator voice chosen at course creation (falls back to the default speaker).
+        const courseVoice = await step.run("load-course-voice", async () => {
+            const [row] = await db.select({ voice: coursesTable.voice })
+                .from(coursesTable).where(eq(coursesTable.courseId, courseId));
+            return row?.voice || "kabir";
+        });
+
         const insertedSlides: any[] = [];
         let audioCompleteCount = Math.min(existingAudioCount, totalSlides);
 
@@ -813,7 +821,7 @@ export const generateCourseVideoContentFn = inngest.createFunction(
                 console.log(`🎤 ${TAG} Slide ${i + 1}/${slidesData.length}: TTS for ${narration.length} chars`);
 
                 // TTS → MP3 buffer
-                const audioBuffer = await generateTTSAudio(narration, "en-IN");
+                const audioBuffer = await generateTTSAudio(narration, "en-IN", courseVoice);
                 const audioDuration = getMp3Duration(audioBuffer);
                 console.log(`✅ ${TAG} Slide ${i + 1} TTS: ${audioBuffer.length} bytes, ${audioDuration.toFixed(2)}s`);
 

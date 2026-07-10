@@ -57,6 +57,7 @@ export const generateCourseLayoutSchema = z.object({
   type: z.enum(["video", "article", "tutorial", "course"], {
     message: "Type must be one of: video, article, tutorial, course",
   }),
+  voice: safeString(100).optional(),
 });
 
 /** TypeScript type inferred from generateCourseLayoutSchema */

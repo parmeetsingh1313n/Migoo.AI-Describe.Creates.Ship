@@ -14,6 +14,7 @@ export const coursesTable = pgTable("courses", {
     courseName: varchar({ length: 255 }).notNull(),
     userInput: varchar({ length: 255 }).notNull(),
     type: varchar({ length: 255 }).notNull(),
+    voice: varchar({ length: 100 }).default("kabir"),   // Sarvam voice ID for course narration
     courseLayout: json().notNull(),
     createdAt: timestamp("created_at").defaultNow(),
     courseThumbnail: text(),
