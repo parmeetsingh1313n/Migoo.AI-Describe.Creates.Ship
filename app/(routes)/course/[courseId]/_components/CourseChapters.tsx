@@ -682,6 +682,7 @@ function CourseChapters({ course, onRefresh }: Props) {
                         <DrawOutlineButton
                             onClick={() => handleGenerateChapter(chapter, index)}
                             fullWidth={false}
+                            variant="dark"
                             accentColor="#7c3aed"
                             className="text-xs border border-purple-600/30"
                         >
