@@ -40,7 +40,7 @@ const DrawOutlineButton = ({
     const idleTextClass = variant === "dark" ? "text-white" : "text-slate-900";
 
     const sharedClassName = `group relative px-6 py-3 font-medium ${idleTextClass} transition-colors duration-[400ms] bg-transparent rounded-lg ${fullWidth ? 'w-full' : ''
-        } ${disabled ? 'opacity-50 cursor-not-allowed' : ''} ${className}`;
+        } ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'} ${className}`;
 
     const sharedStyle = { ['--draw-outline-accent' as string]: accentColor } as React.CSSProperties;
 

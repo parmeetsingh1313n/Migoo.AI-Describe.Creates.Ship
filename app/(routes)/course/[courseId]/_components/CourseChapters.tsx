@@ -663,7 +663,7 @@ function CourseChapters({ course, onRefresh }: Props) {
                             </div>
                             <button
                                 onClick={() => handleGenerateChapter(chapter, index)}
-                                className="mt-1 flex items-center gap-1.5 px-4 py-1.5 bg-rose-950/80 hover:bg-rose-900 border border-rose-800/80 hover:border-rose-700 rounded-full text-xs text-rose-200 font-semibold transition-all hover:scale-105 active:scale-95 hover:shadow-[0_0_12px_rgba(244,63,94,0.3)] duration-200"
+                                className="mt-1 cursor-pointer flex items-center gap-1.5 px-4 py-1.5 bg-rose-950/80 hover:bg-rose-900 border border-rose-800/80 hover:border-rose-700 rounded-full text-xs text-rose-200 font-semibold transition-all hover:scale-105 active:scale-95 hover:shadow-[0_0_12px_rgba(244,63,94,0.3)] duration-200"
                             >
                                 <RefreshCw className="h-3.5 w-3.5" />
                                 Retry Generation

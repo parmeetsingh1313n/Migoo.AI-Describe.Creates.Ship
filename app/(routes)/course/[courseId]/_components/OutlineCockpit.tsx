@@ -19,7 +19,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import {
     ArrowRight, Check, Film, Loader2, Minus, Pencil, Plus, Sparkles, Undo2, X,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { toast } from "sonner";
 import axios from "axios";
@@ -46,6 +46,83 @@ interface Props {
 interface Row { id: string; text: string; }
 let _rid = 0;
 const makeRow = (text: string): Row => ({ id: `row-${_rid++}`, text });
+
+/* ── Morphing cloud node ─────────────────────────────────────────────────
+ * Several cloud silhouettes that share an identical path structure
+ * (M + 6 cubic segments + Z) so framer-motion can interpolate `d` smoothly
+ * from one design to the next. Each node cycles through the set on a loop,
+ * offset per-index so neighbouring nodes never morph in lock-step.
+ */
+const CLOUD_SHAPES = [
+    // classic puffy
+    "M7,21 C3,21 2,16 6,14 C4,9 10,6 14,9 C16,3 25,3 27,9 C32,6 38,10 34,14 C38,15 37,21 32,21 C24,21 15,21 7,21 Z",
+    // wide & flat
+    "M6,21 C2,21 1,17 5,15 C5,12 9,10 13,12 C14,7 26,7 28,12 C33,10 38,13 35,15 C39,16 38,21 33,21 C24,21 14,21 6,21 Z",
+    // tall central peak
+    "M8,21 C3,21 3,15 7,14 C5,8 11,5 15,9 C17,1 24,1 26,9 C30,5 37,9 33,14 C37,15 36,21 31,21 C23,21 16,21 8,21 Z",
+    // twin hump
+    "M7,21 C2,21 2,16 6,15 C3,11 9,8 13,11 C15,6 21,6 22,11 C24,6 31,7 32,12 C37,11 38,21 32,21 C23,21 15,21 7,21 Z",
+];
+
+function MorphingCloud({ index, active }: { index: number; active: boolean }) {
+    const rawId = useId();
+    const gradId = `cloud-${rawId.replace(/:/g, "")}`;
+
+    // Rotate the shape order per node, then loop back to the first for a seamless cycle.
+    const seq = useMemo(() => {
+        const rot = index % CLOUD_SHAPES.length;
+        const arr = [...CLOUD_SHAPES.slice(rot), ...CLOUD_SHAPES.slice(0, rot)];
+        return [...arr, arr[0]];
+    }, [index]);
+
+    return (
+        <svg viewBox="0 0 40 26" className="h-full w-full overflow-visible" aria-hidden>
+            <defs>
+                <linearGradient id={gradId} x1="0" y1="0" x2="1" y2="1">
+                    <stop offset="0%" stopColor="#3EA5D6" />
+                    <stop offset="50%" stopColor="#3363AD" />
+                    <stop offset="100%" stopColor="#6D5BD3" />
+                </linearGradient>
+            </defs>
+            <motion.path
+                initial={false}
+                animate={{ d: seq }}
+                transition={{
+                    duration: 9,
+                    ease: "easeInOut",
+                    repeat: Infinity,
+                    delay: index * 0.6,
+                }}
+                fill={active ? `url(#${gradId})` : "var(--muted)"}
+                stroke={active ? "none" : "var(--border)"}
+                strokeWidth={active ? 0 : 1}
+            />
+        </svg>
+    );
+}
+
+/** A node on the storyboard spine: a morphing cloud with the slide number on top. */
+function CloudNode({ index, active }: { index: number; active: boolean }) {
+    return (
+        <motion.div
+            whileHover={{ scale: 1.12, rotate: -2 }}
+            transition={{ type: "spring", stiffness: 300, damping: 18 }}
+            className="relative flex h-8 w-9 items-center justify-center"
+        >
+            {/* Background mask so the spine line doesn't show through concave bits */}
+            <span className="absolute left-1/2 top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full bg-background" />
+            <MorphingCloud index={index} active={active} />
+            <span
+                className={`absolute inset-0 flex items-center justify-center text-[11px] font-bold ${
+                    active ? "text-white" : "text-muted-foreground"
+                }`}
+                style={active ? { textShadow: "0 1px 2px rgba(0,0,0,0.25)" } : undefined}
+            >
+                {index + 1}
+            </span>
+        </motion.div>
+    );
+}
 
 export default function OutlineCockpit({
     open, onClose, courseId, chapterId, chapterTitle, chapterIndex,
@@ -306,7 +383,7 @@ export default function OutlineCockpit({
                                 <button
                                     onClick={handleSaveAndGenerate}
                                     disabled={saving}
-                                    className="group relative flex h-12 w-full items-center justify-center gap-2 overflow-hidden rounded-2xl text-[14px] font-bold text-white shadow-lg transition-transform active:scale-[0.98] disabled:opacity-60"
+                                    className="group relative flex h-12 w-full cursor-pointer items-center justify-center gap-2 overflow-hidden rounded-2xl text-[14px] font-bold text-white shadow-lg transition-transform active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
                                     style={{ background: BRAND_GRAD }}
                                 >
                                     <span className="pointer-events-none absolute inset-0 translate-x-[-120%] bg-white/20 transition-transform duration-700 group-hover:translate-x-[120%] group-disabled:hidden" style={{ maskImage: "linear-gradient(90deg,transparent,black,transparent)" }} />
@@ -357,19 +434,9 @@ export default function OutlineCockpit({
                                                     transition={{ type: "spring", stiffness: 320, damping: 30 }}
                                                     className="group relative flex gap-3"
                                                 >
-                                                    {/* Spine node */}
-                                                    <div className="relative z-10 flex w-8 shrink-0 justify-center pt-3.5">
-                                                        <motion.span
-                                                            whileHover={{ scale: 1.12 }}
-                                                            className="flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-bold ring-4 ring-background"
-                                                            style={
-                                                                isSlide
-                                                                    ? { background: BRAND_GRAD, color: "#fff" }
-                                                                    : { background: "var(--muted)", color: "var(--muted-foreground)" }
-                                                            }
-                                                        >
-                                                            {idx + 1}
-                                                        </motion.span>
+                                                    {/* Spine node — morphing cloud */}
+                                                    <div className="relative z-10 flex w-8 shrink-0 justify-center pt-3">
+                                                        <CloudNode index={idx} active={isSlide} />
                                                     </div>
 
                                                     {/* Card */}
