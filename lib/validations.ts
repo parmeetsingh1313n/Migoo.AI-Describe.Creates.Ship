@@ -64,6 +64,36 @@ export const generateCourseLayoutSchema = z.object({
 export type GenerateCourseLayoutInput = z.infer<typeof generateCourseLayoutSchema>;
 
 /**
+ * Schema for PATCH /api/course-layout
+ * Validates an edited chapter outline (the subContent bullet points) before it
+ * is written back into coursesTable.courseLayout. One point ≈ one generated slide.
+ */
+export const updateCourseOutlineSchema = z.object({
+  courseId: idField,
+  chapterId: idField,
+  subContent: z
+    .array(safeString(300))
+    .min(1, "A chapter needs at least one point")
+    .max(12, "A chapter can have at most 12 points"),
+});
+
+/** TypeScript type inferred from updateCourseOutlineSchema */
+export type UpdateCourseOutlineInput = z.infer<typeof updateCourseOutlineSchema>;
+
+/**
+ * Schema for POST /api/enhance-point
+ * Validates a single outline bullet the LLM will polish.
+ */
+export const enhancePointSchema = z.object({
+  text: safeString(300),
+  chapterTitle: safeString(300).optional(),
+  contextPoints: z.array(safeString(300)).max(12).optional(),
+});
+
+/** TypeScript type inferred from enhancePointSchema */
+export type EnhancePointInput = z.infer<typeof enhancePointSchema>;
+
+/**
  * Schema for POST /api/generate-video-content
  * Validates video content generation request.
  */

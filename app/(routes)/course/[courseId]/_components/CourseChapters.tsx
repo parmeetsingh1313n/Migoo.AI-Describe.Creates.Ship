@@ -1,11 +1,12 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Course } from '@/type/CourseType';
-import { AlertTriangle, CheckCircle2, Download, Dot, FileText, Loader2, Play, RefreshCw, Sparkles, Trash2 } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Download, Dot, FileText, Loader2, Pencil, Play, RefreshCw, Sparkles, Trash2 } from 'lucide-react';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Player, PlayerRef } from '@remotion/player';
 import { CourseComposition } from './ChapterVideo';
 import { CustomPlayerControls } from './CustomPlayerControls';
 import { ChapterNotesDialog } from './ChapterNotesDialog';
+import OutlineCockpit from './OutlineCockpit';
 import DrawOutlineButton from '@/components/ui/DrawOutlineButton';
 import axios from 'axios';
 import { toast } from 'sonner';
@@ -46,6 +47,13 @@ function CourseChapters({ course, onRefresh }: Props) {
     // ── Notes dialog state ────────────────────────────────────────────────────
     const [notesDialog, setNotesDialog] = useState<{ chapterId: string; title: string; slides: any[] } | null>(null);
     const [resettingAudio, setResettingAudio] = useState<Record<string, boolean>>({});
+
+    // ── Outline editor cockpit state ──────────────────────────────────────────
+    // `outlineChapter` holds the chapter currently being edited (null = closed).
+    // `localOutlines` optimistically overrides a chapter's subContent after a save,
+    // so the edit reflects immediately without waiting for a full course refetch.
+    const [outlineChapter, setOutlineChapter] = useState<{ chapterId: string; title: string; index: number; points: string[] } | null>(null);
+    const [localOutlines, setLocalOutlines] = useState<Record<string, string[]>>({});
 
     const stopPoll = (chapterId: string) => {
         if (pollTimers.current[chapterId]) {
@@ -723,6 +731,13 @@ function CourseChapters({ course, onRefresh }: Props) {
                     const chapterStarted = startedChapters[chapter.chapterId] || false;
                     const chapterSeconds = totalFrames / fps;
 
+                    // Effective outline points — a local optimistic save overrides the stored layout.
+                    const effectivePoints = localOutlines[chapter.chapterId] ?? chapter.subContent ?? [];
+                    // Editable only before generation (idle/failed) — once slides exist, the points
+                    // already drove slide creation, so editing is locked until a reset.
+                    const isGenerating = chStatus?.status === 'queued' || chStatus?.status === 'generating:slides' || chStatus?.status === 'generating:audio';
+                    const canEditOutline = !isGenerated && !isGenerating;
+
                     return (
                         <Card key={index} className='mb-5'>
                             <CardHeader>
@@ -736,8 +751,7 @@ function CourseChapters({ course, onRefresh }: Props) {
 
                                      {/* ── Action buttons (only for generated chapters) ── */}
                                      {isGenerated && (
-                                         <div className='flex items-center gap-2 flex-shrink-0'>
-                                             {/* Notes PDF button */}
+                                         <div className='flex items-center gap-2 flex-shrink-0'>                                             {/* Notes PDF button */}
                                              <button
                                                  onClick={() => setNotesDialog({ chapterId: chapter.chapterId, title: chapter.chapterTitle, slides: chapterSlides })}
                                                  className='cursor-pointer flex items-center gap-1.5 px-3 py-1.5 bg-zinc-800/60 hover:bg-zinc-700/80 border border-zinc-600/50 hover:border-amber-500/50 text-zinc-300 hover:text-amber-300 rounded-xl text-xs font-semibold transition-all hover:scale-105 active:scale-95 group'
@@ -813,13 +827,30 @@ function CourseChapters({ course, onRefresh }: Props) {
                                              })()}
                                          </div>
                                      )}
+
+                                     {/* ── Customize outline (only before generation) ── */}
+                                     {canEditOutline && (
+                                         <button
+                                             onClick={() => setOutlineChapter({
+                                                 chapterId: chapter.chapterId,
+                                                 title: chapter.chapterTitle,
+                                                 index,
+                                                 points: effectivePoints,
+                                             })}
+                                             className='cursor-pointer flex items-center gap-1.5 px-3 py-1.5 flex-shrink-0 bg-primary/10 hover:bg-primary/20 border border-primary/25 hover:border-primary/50 text-primary rounded-xl text-xs font-semibold transition-all hover:scale-105 active:scale-95 group'
+                                             title="Add, remove, edit or enhance the points in this chapter"
+                                         >
+                                             <Pencil className='h-3.5 w-3.5 transition-colors' />
+                                             <span className='hidden sm:inline'>Customize</span>
+                                         </button>
+                                     )}
                                  </div>
                              </CardHeader>
 
                             <CardContent>
                                 <div className='grid grid-cols-1 md:grid-cols-2 gap-5'>
                                     <div>
-                                        {chapter.subContent.map((content, idx) => (
+                                        {effectivePoints.map((content, idx) => (
                                             <div key={idx} className='flex gap-2 items-center mt-2'>
                                                 <Dot className='h-5 w-5 text-primary' />
                                                 <h2>{content}</h2>
@@ -992,6 +1023,32 @@ function CourseChapters({ course, onRefresh }: Props) {
                     slides={notesDialog.slides}
                     courseId={course?.courseId || ''}
                     chapterId={notesDialog.chapterId}
+                />
+            )}
+
+            {outlineChapter && (
+                <OutlineCockpit
+                    open={!!outlineChapter}
+                    onClose={() => setOutlineChapter(null)}
+                    courseId={course?.courseId || ''}
+                    chapterId={outlineChapter.chapterId}
+                    chapterTitle={outlineChapter.title}
+                    chapterIndex={outlineChapter.index}
+                    initialPoints={outlineChapter.points}
+                    onSaved={(points) => {
+                        // Optimistically reflect the edit in the UI immediately.
+                        setLocalOutlines(prev => ({ ...prev, [outlineChapter.chapterId]: points }));
+                        if (onRefresh) onRefresh();
+                    }}
+                    onSaveAndGenerate={(points) => {
+                        const chapterForGen = {
+                            ...(course?.courseLayout?.chapters?.find(c => c.chapterId === outlineChapter.chapterId) || {}),
+                            chapterId: outlineChapter.chapterId,
+                            chapterTitle: outlineChapter.title,
+                            subContent: points,
+                        };
+                        handleGenerateChapter(chapterForGen, outlineChapter.index);
+                    }}
                 />
             )}
         </div>
