@@ -27,8 +27,8 @@ import axios from "axios";
 /* ── Brand gradient (matches --migoo-grad) ──────────────────────────────── */
 const BRAND_GRAD = "linear-gradient(135deg, #3EA5D6 0%, #3363AD 50%, #6D5BD3 100%)";
 const SERIF = "var(--font-instrument), Georgia, 'Times New Roman', serif";
-const MAX_SLIDES = 7;
-const MAX_POINTS = 12;
+const MAX_SLIDES = 15;
+const MAX_POINTS = 15;
 const MAX_LEN = 200;
 
 interface Props {
@@ -265,9 +265,8 @@ export default function OutlineCockpit({
 
     if (!mounted) return null;
 
-    /* ── Film-strip meter cells ──────────────────────────────────────────── */
-    const filmCells = Array.from({ length: MAX_SLIDES }, (_, i) => i < slideCount);
-    const overflow = Math.max(0, cleanPoints.length - MAX_SLIDES);
+    /* ── Film-strip meter cells — one per point (every point is a slide) ──── */
+    const filmCells = Array.from({ length: Math.max(slideCount, 1) }, () => true);
 
     return createPortal(
         <AnimatePresence>
@@ -289,10 +288,10 @@ export default function OutlineCockpit({
                         {/* Close — floats over everything */}
                         <button
                             onClick={() => !editingId && onClose()}
-                            className="absolute right-4 top-4 z-30 cursor-pointer rounded-full bg-background/70 p-2 text-muted-foreground shadow-sm backdrop-blur transition-colors hover:bg-muted hover:text-foreground"
+                            className="absolute right-4 top-4 z-30 cursor-pointer rounded-full p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                             aria-label="Close"
                         >
-                            <X className="h-4 w-4" />
+                            <X className="h-5 w-5" />
                         </button>
 
                         {/* ══ LEFT · POSTER ═══════════════════════════════════ */}
@@ -344,33 +343,33 @@ export default function OutlineCockpit({
                                     <div className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
                                         <Film className="h-3.5 w-3.5" /> Slide reel
                                     </div>
-                                    <div className="flex items-center gap-1.5">
-                                        {filmCells.map((filled, i) => (
+                                    <div className="flex flex-wrap items-center gap-1.5">
+                                        {filmCells.map((_, i) => (
                                             <motion.div
                                                 key={i}
-                                                className="relative flex h-8 flex-1 items-center justify-center overflow-hidden rounded-[5px] border"
-                                                style={
-                                                    filled
-                                                        ? { background: BRAND_GRAD, borderColor: "transparent" }
-                                                        : { borderColor: "var(--border)", background: "transparent" }
-                                                }
-                                                animate={{ opacity: filled ? 1 : 0.55 }}
+                                                initial={{ opacity: 0, scale: 0.8 }}
+                                                animate={{ opacity: 1, scale: 1 }}
+                                                transition={{ delay: Math.min(i * 0.03, 0.3) }}
+                                                className="relative flex h-7 w-7 items-center justify-center overflow-hidden rounded-[5px]"
+                                                style={{ background: BRAND_GRAD }}
                                             >
                                                 {/* sprocket holes */}
                                                 <span className="absolute left-0.5 top-0.5 h-1 w-1 rounded-[1px] bg-background/40" />
                                                 <span className="absolute right-0.5 top-0.5 h-1 w-1 rounded-[1px] bg-background/40" />
                                                 <span className="absolute bottom-0.5 left-0.5 h-1 w-1 rounded-[1px] bg-background/40" />
                                                 <span className="absolute bottom-0.5 right-0.5 h-1 w-1 rounded-[1px] bg-background/40" />
-                                                <span className={`text-[11px] font-bold ${filled ? "text-white" : "text-muted-foreground/50"}`}>
-                                                    {i + 1}
-                                                </span>
+                                                <span className="text-[11px] font-bold text-white">{i + 1}</span>
                                             </motion.div>
                                         ))}
                                     </div>
                                     <p className="mt-2.5 text-[12px] text-muted-foreground">
-                                        <span className="font-semibold text-foreground">{slideCount}</span> of {MAX_SLIDES} slides used
-                                        {overflow > 0 && (
-                                            <span className="text-amber-500"> · {overflow} extra point{overflow === 1 ? "" : "s"} won’t render</span>
+                                        Every point becomes a slide ·{" "}
+                                        <span className="font-semibold text-foreground">
+                                            {slideCount} slide{slideCount === 1 ? "" : "s"}
+                                        </span>{" "}
+                                        in this chapter
+                                        {cleanPoints.length >= MAX_POINTS && (
+                                            <span className="text-amber-500"> · {MAX_POINTS} is the max</span>
                                         )}
                                     </p>
                                 </motion.div>

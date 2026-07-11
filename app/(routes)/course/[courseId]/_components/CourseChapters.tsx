@@ -402,12 +402,15 @@ function CourseChapters({ course, onRefresh }: Props) {
 
         // 2. Queue video content generation
         try {
+            // One slide per outline point (capped at 15) — reflect that in the
+            // optimistic progress total so the bar isn't stuck at "/7".
+            const optimisticTotal = Math.min(15, Math.max(1, chapter.subContent?.length || 7));
             setStatuses(prev => ({
                 ...prev,
                 [chapter.chapterId]: {
                     status: 'queued',
                     slidesComplete: 0,
-                    slidesTotal: 7,
+                    slidesTotal: optimisticTotal,
                     audioComplete: 0,
                     errorMessage: null
                 }

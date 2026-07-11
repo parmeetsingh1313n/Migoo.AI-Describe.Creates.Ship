@@ -74,7 +74,7 @@ export const updateCourseOutlineSchema = z.object({
   subContent: z
     .array(safeString(300))
     .min(1, "A chapter needs at least one point")
-    .max(12, "A chapter can have at most 12 points"),
+    .max(15, "A chapter can have at most 15 points"),
 });
 
 /** TypeScript type inferred from updateCourseOutlineSchema */

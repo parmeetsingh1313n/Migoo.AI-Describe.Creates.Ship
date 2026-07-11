@@ -593,8 +593,10 @@ export const generateCourseVideoContentFn = inngest.createFunction(
             return await db.select().from(chapterContentSlides).where(eq(chapterContentSlides.chapterId, chapterId));
         });
 
-        const subTopics = chapter.subContent?.slice(0, 7) || [chapter.chapterTitle];
-        const totalSlides = Math.min(7, subTopics.length);
+        // Up to 15 slides — one per outline point. Every point the user keeps
+        // becomes its own slide (they explicitly curated them in the cockpit).
+        const subTopics = chapter.subContent?.slice(0, 15) || [chapter.chapterTitle];
+        const totalSlides = Math.min(15, subTopics.length);
 
         const isChapterComplete = existingSlides.length >= totalSlides && existingSlides.every(s => s.audioUrl);
         if (isChapterComplete) {
@@ -691,7 +693,7 @@ export const generateCourseVideoContentFn = inngest.createFunction(
                     previousSlidesContext: previousContext,
                     conceptsAlreadyCovered: previousContext.flatMap(p => p.keyConceptsCovered),
                     nextSlideTopic: si + 1 < totalSlides ? subTopics[si + 1] : null,
-                    designHint: `Format: ${SLIDE_FORMATS[si]}. Image shape: ${SLIDE_SHAPES[si]}. Card style: ${SLIDE_STYLES[si]}.`,
+                    designHint: `Format: ${SLIDE_FORMATS[si % SLIDE_FORMATS.length]}. Image shape: ${SLIDE_SHAPES[si % SLIDE_SHAPES.length]}. Card style: ${SLIDE_STYLES[si % SLIDE_STYLES.length]}.`,
                 });
 
                 let slideContent: any = null;
