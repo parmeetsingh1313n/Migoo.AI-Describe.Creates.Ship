@@ -54,14 +54,14 @@ const makeRow = (text: string): Row => ({ id: `row-${_rid++}`, text });
  * offset per-index so neighbouring nodes never morph in lock-step.
  */
 const CLOUD_SHAPES = [
-    // classic puffy
-    "M7,21 C3,21 2,16 6,14 C4,9 10,6 14,9 C16,3 25,3 27,9 C32,6 38,10 34,14 C38,15 37,21 32,21 C24,21 15,21 7,21 Z",
-    // wide & flat
-    "M6,21 C2,21 1,17 5,15 C5,12 9,10 13,12 C14,7 26,7 28,12 C33,10 38,13 35,15 C39,16 38,21 33,21 C24,21 14,21 6,21 Z",
+    // classic puffy — solid, filled through the centre
+    "M6,20 C1,20 1,14 6,14 C4,8 12,5 15,10 C17,3 27,3 28,10 C34,6 40,13 34,15 C39,16 37,20 31,20 C22,20 14,20 6,20 Z",
+    // wide & low bumps
+    "M7,20 C2,20 1,15 6,15 C5,10 11,8 14,12 C15,6 27,5 27,12 C32,9 38,14 34,16 C38,17 37,20 32,20 C23,20 15,20 7,20 Z",
     // tall central peak
-    "M8,21 C3,21 3,15 7,14 C5,8 11,5 15,9 C17,1 24,1 26,9 C30,5 37,9 33,14 C37,15 36,21 31,21 C23,21 16,21 8,21 Z",
-    // twin hump
-    "M7,21 C2,21 2,16 6,15 C3,11 9,8 13,11 C15,6 21,6 22,11 C24,6 31,7 32,12 C37,11 38,21 32,21 C23,21 15,21 7,21 Z",
+    "M6,20 C2,20 2,13 7,13 C4,7 13,4 15,9 C18,2 26,2 27,9 C33,5 38,12 33,14 C38,17 36,20 30,20 C22,20 14,20 6,20 Z",
+    // rolling twin hump
+    "M8,20 C3,20 2,15 6,14 C3,10 10,7 13,11 C14,5 26,5 27,11 C31,8 39,12 34,15 C38,16 37,20 32,20 C23,20 15,20 8,20 Z",
 ];
 
 function MorphingCloud({ index, active }: { index: number; active: boolean }) {
@@ -107,16 +107,14 @@ function CloudNode({ index, active }: { index: number; active: boolean }) {
         <motion.div
             whileHover={{ scale: 1.12, rotate: -2 }}
             transition={{ type: "spring", stiffness: 300, damping: 18 }}
-            className="relative flex h-8 w-9 items-center justify-center"
+            className="relative flex h-9 w-11 items-center justify-center drop-shadow-sm"
         >
-            {/* Background mask so the spine line doesn't show through concave bits */}
-            <span className="absolute left-1/2 top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full bg-background" />
             <MorphingCloud index={index} active={active} />
             <span
-                className={`absolute inset-0 flex items-center justify-center text-[11px] font-bold ${
+                className={`absolute inset-0 flex items-center justify-center text-[12px] font-extrabold ${
                     active ? "text-white" : "text-muted-foreground"
                 }`}
-                style={active ? { textShadow: "0 1px 2px rgba(0,0,0,0.25)" } : undefined}
+                style={active ? { textShadow: "0 1px 3px rgba(0,0,0,0.35)" } : undefined}
             >
                 {index + 1}
             </span>
