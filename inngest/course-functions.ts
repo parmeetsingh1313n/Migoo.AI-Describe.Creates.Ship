@@ -590,7 +590,14 @@ function makeUpsertStatus(courseId: string, chapterId: string) {
 export const generateCourseSlidesFn = inngest.createFunction(
     {
         id: "generate-course-slides",
-        triggers: [{ event: "course/slides.generate" }],
+        // Primary trigger is `course/slides.generate`. The legacy
+        // `course/video-content.generate` is kept as a second trigger so any
+        // client still emitting the old event name (or an in-flight event from
+        // before the split) is never silently dropped.
+        triggers: [
+            { event: "course/slides.generate" },
+            { event: "course/video-content.generate" },
+        ],
         // Each chapter runs as its own isolated event — no concurrency conflicts between chapters
         concurrency: [
             { limit: 2 },  // max 2 chapters generating in parallel globally
