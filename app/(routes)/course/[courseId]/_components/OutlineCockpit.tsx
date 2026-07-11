@@ -401,7 +401,8 @@ export default function OutlineCockpit({
 
                         {/* ══ RIGHT · REEL ════════════════════════════════════ */}
                         <section className="flex min-h-0 flex-1 flex-col">
-                            <div className="flex items-center justify-between px-7 pb-3 pt-6 lg:pt-7">
+                            {/* pr-16 keeps the count badge clear of the floating close button */}
+                            <div className="flex items-center justify-between px-7 pb-3 pt-6 pr-16 lg:pt-7">
                                 <h3 className="text-[12px] font-bold uppercase tracking-[0.16em] text-muted-foreground">
                                     Outline points
                                 </h3>
