@@ -112,6 +112,68 @@ export const generateVideoContentSchema = z.object({
 export type GenerateVideoContentInput = z.infer<typeof generateVideoContentSchema>;
 
 /**
+ * Long-form free text (slide narration). Unlike `safeString` this permits the
+ * full 3500-4500 word narration bodies and does not reject on `<script`
+ * (narration is plain prose fed to TTS, never rendered as HTML), but it still
+ * trims and bounds the length to keep payloads sane.
+ */
+const longText = (maxLength: number) =>
+  z.string().trim().min(1, "Field cannot be empty").max(maxLength, `Field must be at most ${maxLength} characters`);
+
+/**
+ * Schema for POST /api/approve-slides
+ * Fired when the user approves the reviewed slides + narration, kicking off the
+ * gated TTS/audio phase of the pipeline.
+ */
+export const approveSlidesSchema = z.object({
+  chapter: z.object({
+    chapterId: safeString(255),
+    chapterTitle: safeString(500),
+    subContent: z.array(z.string()).optional(),
+  }).passthrough(),
+  courseId: idField,
+  courseName: safeString(500),
+  chapterIndex: z.number().int().min(0).max(100),
+});
+export type ApproveSlidesInput = z.infer<typeof approveSlidesSchema>;
+
+/**
+ * Schema for POST /api/regenerate-slide
+ * Stage 2 — regenerate a SINGLE slide's visuals + narration from a user's
+ * change request, reusing the same single-slide LLM prompt.
+ */
+export const regenerateSlideSchema = z.object({
+  courseId: idField,
+  chapterId: idField,
+  slideId: safeString(255),
+  instruction: safeString(600),
+});
+export type RegenerateSlideInput = z.infer<typeof regenerateSlideSchema>;
+
+/**
+ * Schema for PATCH /api/slide-content
+ * Stage 3 — persist an edited narration for a single slide (before TTS runs).
+ */
+export const updateSlideNarrationSchema = z.object({
+  courseId: idField,
+  chapterId: idField,
+  slideId: safeString(255),
+  narration: longText(60000),
+});
+export type UpdateSlideNarrationInput = z.infer<typeof updateSlideNarrationSchema>;
+
+/**
+ * Schema for POST /api/enhance-narration
+ * Stage 3 — polish a slide's narration text with the LLM (inline replace + undo).
+ */
+export const enhanceNarrationSchema = z.object({
+  text: longText(60000),
+  slideTopic: safeString(500).optional(),
+  chapterTitle: safeString(500).optional(),
+});
+export type EnhanceNarrationInput = z.infer<typeof enhanceNarrationSchema>;
+
+/**
  * Schema for GET /api/course query parameters
  * Validates course retrieval request.
  */

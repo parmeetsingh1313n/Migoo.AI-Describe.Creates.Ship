@@ -1,5 +1,5 @@
 import { inngest } from "@/inngest/client";
-import { generateCourseImagesFn, generateCourseThumbnailFn, generateCourseVideoContentFn } from "@/inngest/course-functions";
+import { generateCourseImagesFn, generateCourseThumbnailFn, generateCourseSlidesFn, generateCourseAudioFn } from "@/inngest/course-functions";
 import { generateMotionGraphic, generateShortVideo, generateShortSeriesThumbnailFn, helloWorld, renderMotionGraphicOnly } from "@/inngest/functions";
 import { serve } from "inngest/next";
 
@@ -22,6 +22,7 @@ export const { GET, POST, PUT } = serve({
         // ── Course Generation ─────────────────────────────────────────────
         generateCourseThumbnailFn,
         generateCourseImagesFn,
-        generateCourseVideoContentFn,
+        generateCourseSlidesFn,
+        generateCourseAudioFn,
     ],
 });

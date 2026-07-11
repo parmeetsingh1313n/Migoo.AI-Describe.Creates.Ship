@@ -8,7 +8,8 @@
  * Events:
  *   course/thumbnail.generate     → generateCourseThumbnailFn
  *   course/images.generate        → generateCourseImagesFn
- *   course/video-content.generate → generateCourseVideoContentFn
+ *   course/slides.generate        → generateCourseSlidesFn   (Phase 1 → review gate)
+ *   course/audio.generate         → generateCourseAudioFn    (Phase 2, after approval)
  */
 
 
@@ -537,13 +538,59 @@ export const generateCourseImagesFn = inngest.createFunction(
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
-// FUNCTION 3 — Generate Course Video Content (slides → DB, audio → Appwrite)
+// SHARED — per-slide design rotation hints (used by slide generation + regen)
+// ─────────────────────────────────────────────────────────────────────────────
+const SLIDE_FORMATS = ["Split Screen", "Comparison Table", "Progress Bars", "Process Flow", "Difference Table", "Bento Grid", "Stats Dashboard"];
+const SLIDE_SHAPES = ["pill", "circle", "blob", "hexagon", "diamond", "rounded-square", "banner"];
+const SLIDE_STYLES = ["glassmorphism", "neumorphic", "gradient-border", "outlined", "gradient-fill", "minimal-tag", "glassmorphism"];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SHARED — status upsert helper factory (both slides + audio functions use it)
+// ─────────────────────────────────────────────────────────────────────────────
+function makeUpsertStatus(courseId: string, chapterId: string) {
+    return async (patch: {
+        status?: string;
+        slidesComplete?: number;
+        slidesTotal?: number;
+        audioComplete?: number;
+        errorMessage?: string | null;
+        startedAt?: Date | null;
+        completedAt?: Date | null;
+    }) => {
+        await db.insert(chapterGenerationStatus).values({
+            courseId,
+            chapterId,
+            status: patch.status ?? "queued",
+            slidesComplete: patch.slidesComplete ?? 0,
+            slidesTotal: patch.slidesTotal ?? 0,
+            audioComplete: patch.audioComplete ?? 0,
+            errorMessage: patch.errorMessage ?? null,
+            startedAt: patch.startedAt ?? new Date(),
+            completedAt: patch.completedAt ?? null,
+            updatedAt: new Date(),
+        }).onConflictDoUpdate({
+            target: chapterGenerationStatus.chapterId,
+            set: {
+                ...patch,
+                updatedAt: new Date(),
+            },
+        });
+    };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FUNCTION 3 — Generate Course SLIDES (Phase 1: HTML + narration → DB)
+// ─────────────────────────────────────────────────────────────────────────────
+// Gated pipeline: this generates ONLY the slide visuals + narration and then
+// parks the chapter at status `review:slides`, awaiting human approval in the
+// Studio review cockpit. The expensive TTS/audio phase runs separately
+// (generateCourseAudioFn) only after the user approves.
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const generateCourseVideoContentFn = inngest.createFunction(
+export const generateCourseSlidesFn = inngest.createFunction(
     {
-        id: "generate-course-video-content",
-        triggers: [{ event: "course/video-content.generate" }],
+        id: "generate-course-slides",
+        triggers: [{ event: "course/slides.generate" }],
         // Each chapter runs as its own isolated event — no concurrency conflicts between chapters
         concurrency: [
             { limit: 2 },  // max 2 chapters generating in parallel globally
@@ -556,37 +603,10 @@ export const generateCourseVideoContentFn = inngest.createFunction(
 
         const TAG = `[Ch${chapterIndex + 1}]`;
         const chapterId = chapter.chapterId;
-        console.log(`\n🎬 ${TAG} VIDEO CONTENT: ${courseId} — ${chapter.chapterTitle}`);
+        console.log(`\n🎬 ${TAG} SLIDES: ${courseId} — ${chapter.chapterTitle}`);
 
         // ── Helper: upsert status row ────────────────────────────────────────
-        const upsertStatus = async (patch: {
-            status?: string;
-            slidesComplete?: number;
-            slidesTotal?: number;
-            audioComplete?: number;
-            errorMessage?: string | null;
-            startedAt?: Date | null;
-            completedAt?: Date | null;
-        }) => {
-            await db.insert(chapterGenerationStatus).values({
-                courseId,
-                chapterId,
-                status: patch.status ?? "queued",
-                slidesComplete: patch.slidesComplete ?? 0,
-                slidesTotal: patch.slidesTotal ?? 0,
-                audioComplete: patch.audioComplete ?? 0,
-                errorMessage: patch.errorMessage ?? null,
-                startedAt: patch.startedAt ?? new Date(),
-                completedAt: patch.completedAt ?? null,
-                updatedAt: new Date(),
-            }).onConflictDoUpdate({
-                target: chapterGenerationStatus.chapterId,
-                set: {
-                    ...patch,
-                    updatedAt: new Date(),
-                },
-            });
-        };
+        const upsertStatus = makeUpsertStatus(courseId, chapterId);
 
         // ── Step 0: Check if already complete ────────────────────────────────
         const existingSlides = await step.run("check-existing-slides", async () => {
@@ -598,6 +618,7 @@ export const generateCourseVideoContentFn = inngest.createFunction(
         const subTopics = chapter.subContent?.slice(0, 15) || [chapter.chapterTitle];
         const totalSlides = Math.min(15, subTopics.length);
 
+        // If audio already exists for every slide, the chapter is fully done.
         const isChapterComplete = existingSlides.length >= totalSlides && existingSlides.every(s => s.audioUrl);
         if (isChapterComplete) {
             console.log(`✅ ${TAG} Chapter already fully complete with ${existingSlides.length} slides — skipping`);
@@ -635,9 +656,6 @@ export const generateCourseVideoContentFn = inngest.createFunction(
 
         // ── Phase 1: Generate slide CONTENT (HTML + narration) ────────────────
         const slidesData: any[] = [];
-        const SLIDE_FORMATS = ["Split Screen", "Comparison Table", "Progress Bars", "Process Flow", "Difference Table", "Bento Grid", "Stats Dashboard"];
-        const SLIDE_SHAPES = ["pill", "circle", "blob", "hexagon", "diamond", "rounded-square", "banner"];
-        const SLIDE_STYLES = ["glassmorphism", "neumorphic", "gradient-border", "outlined", "gradient-fill", "minimal-tag", "glassmorphism"];
 
         for (let si = 0; si < totalSlides; si++) {
             const slideResult = await step.run(`generate-slide-${si}`, async () => {
@@ -770,121 +788,16 @@ export const generateCourseVideoContentFn = inngest.createFunction(
             throw new Error(`${TAG} No slides generated`);
         }
 
-        console.log(`✅ ${TAG} All ${slidesData.length} slide contents ready. Starting audio generation...`);
-
-        // ── Mark as generating:audio ─────────────────────────────────────────
-        await step.run("mark-generating-audio", async () => {
-            await upsertStatus({
-                status: "generating:audio",
-                slidesTotal: totalSlides,
-                slidesComplete: totalSlides,
-                audioComplete: existingAudioCount,
-            });
-        });
-
-        // ── Phase 2: Generate AUDIO (TTS + captions) per slide ────────────────
-        // Slides are processed sequentially to avoid concurrent rate-limiting
-        // and race conditions on the Sarvam API keys.
-        // Captions are generated instantly from narration text (no slow Sarvam STT job).
-
-        // Narrator voice chosen at course creation (falls back to the default speaker).
-        const courseVoice = await step.run("load-course-voice", async () => {
-            const [row] = await db.select({ voice: coursesTable.voice })
-                .from(coursesTable).where(eq(coursesTable.courseId, courseId));
-            return row?.voice || "kabir";
-        });
-
-        const insertedSlides: any[] = [];
-        let audioCompleteCount = Math.min(existingAudioCount, totalSlides);
-
-        for (let i = 0; i < slidesData.length; i++) {
-            const slide = slidesData[i];
-            if (!slide.narration?.fullText) {
-                console.warn(`⚠️ ${TAG} Slide ${i + 1} no narration — skipping`);
-                continue;
-            }
-
-            const result = await step.run(`process-slide-${i}`, async () => {
-                // Fast-path: audio already in memory
-                if (slide.audioUrl && slide.captions && slide.audioDuration) {
-                    console.log(`✅ ${TAG} Slide ${i + 1}/${slidesData.length} audio already exists — reusing`);
-                    return slide;
-                }
-                // Fast-path: audio from a previous partial run in DB
-                const freshSlides = await db.select().from(chapterContentSlides)
-                    .where(eq(chapterContentSlides.slideId, slide.slideId));
-                const freshSlide = freshSlides[0];
-                if (freshSlide?.audioUrl && freshSlide?.captions && freshSlide?.audioDuration) {
-                    console.log(`✅ ${TAG} Slide ${i + 1}/${slidesData.length} audio found in DB — reusing`);
-                    return freshSlide;
-                }
-
-                const narration = slide.narration.fullText;
-                console.log(`🎤 ${TAG} Slide ${i + 1}/${slidesData.length}: TTS for ${narration.length} chars`);
-
-                // TTS → MP3 buffer
-                const audioBuffer = await generateTTSAudio(narration, "en-IN", courseVoice);
-                const audioDuration = getMp3Duration(audioBuffer);
-                console.log(`✅ ${TAG} Slide ${i + 1} TTS: ${audioBuffer.length} bytes, ${audioDuration.toFixed(2)}s`);
-
-                // Upload MP3 → Appwrite
-                const slideKey = slide.slideId || `slide-${i}`;
-                const { url: audioUrl } = await putWithRotation(
-                    `course-audio/${courseId}/${chapterId}/${slideKey}.mp3`,
-                    audioBuffer,
-                    { access: "public", contentType: "audio/mpeg" }
-                );
-                console.log(`☁️  ${TAG} Slide ${i + 1} Audio → Appwrite: ${audioUrl}`);
-
-                // ⚡ Instant captions from narration — replaces slow Sarvam batch STT job
-                const captions = generateCaptionsFromNarration(narration, audioDuration, "en-IN");
-                console.log(`🎬 ${TAG} Slide ${i + 1} Captions: ${captions.chunks?.length ?? 0} chunks`);
-
-                // Persist to DB
-                const revealData = slide.fragmentData ?? slide.revealData ?? [];
-                const [inserted] = await db.insert(chapterContentSlides).values({
-                    courseId, chapterId,
-                    slideId: slideKey,
-                    slideIndex: slide.slideIndex ?? i,
-                    audioUrl, audioDuration,
-                    narration: slide.narration,
-                    captions,
-                    html: slide.html ?? null,
-                    revealData,
-                }).onConflictDoUpdate({
-                    target: chapterContentSlides.slideId,
-                    set: { audioUrl, audioDuration, narration: slide.narration, captions, html: slide.html ?? null, revealData, slideIndex: slide.slideIndex ?? i },
-                }).returning();
-
-                console.log(`💾 ${TAG} Slide ${i + 1}/${slidesData.length} fully saved with audio ✅`);
-                return inserted;
-            });
-
-            if (result) {
-                insertedSlides.push(result);
-                const isNewlyProcessed = result.audioUrl && !slidesData[i]?.audioUrl;
-                if (isNewlyProcessed) audioCompleteCount = Math.min(totalSlides, audioCompleteCount + 1);
-            }
-
-            // Consolidate status updates to keep progress tracking elegant
-            await step.run(`update-audio-progress-${i}`, async () => {
-                await upsertStatus({
-                    status: "generating:audio",
-                    slidesTotal: totalSlides,
-                    slidesComplete: totalSlides,
-                    audioComplete: audioCompleteCount,
-                });
-            });
-        }
+        console.log(`✅ ${TAG} All ${slidesData.length} slide contents ready. Parking at review gate...`);
 
         // ── Final image injection pass (race condition guard) ─────────────────
         // Images may have become available AFTER slide generation started.
         // Re-load from DB and inject into any slides still holding placeholder tokens.
-        await step.run("final-image-injection", async () => {
+        await step.run("slides-image-injection", async () => {
             const finalImages = await db.select().from(courseImages)
                 .where(eq(courseImages.courseId, courseId));
             if (finalImages.length === 0) {
-                console.log(`⚠️ ${TAG} No course images found for final injection — placeholders remain`);
+                console.log(`⚠️ ${TAG} No course images found for injection — placeholders remain`);
                 return { injected: 0 };
             }
             finalImages.sort((a, b) => a.imageIndex - b.imageIndex);
@@ -907,9 +820,168 @@ export const generateCourseVideoContentFn = inngest.createFunction(
                 injected++;
             }
 
-            console.log(`🖼️ ${TAG} Final injection: ${injected} slides had placeholders replaced`);
+            console.log(`🖼️ ${TAG} Slide injection: ${injected} slides had placeholders replaced`);
             return { injected };
         });
+
+        // ── Park at review gate ───────────────────────────────────────────────
+        // Slides + narration are ready. Audio (TTS) is NOT generated yet — the
+        // user reviews & approves in the Studio cockpit, which then fires
+        // `course/audio.generate` to run generateCourseAudioFn.
+        await step.run("mark-review-slides", async () => {
+            await upsertStatus({
+                status: "review:slides",
+                slidesTotal: totalSlides,
+                slidesComplete: totalSlides,
+                audioComplete: existingAudioCount,
+                completedAt: null,
+                errorMessage: null,
+            });
+        });
+
+        console.log(`🟣 ${TAG} Chapter ${chapterIndex + 1} SLIDES READY for review: ${slidesData.length} slides`);
+        return { slides: slidesData, chapterId, courseId, chapterIndex, review: true };
+    }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FUNCTION 4 — Generate Course AUDIO (Phase 2: TTS + captions → Appwrite)
+// ─────────────────────────────────────────────────────────────────────────────
+// Runs ONLY after the user approves the reviewed slides + narration. Loads the
+// (possibly user-edited) slides from the DB, synthesises narration audio via
+// Sarvam (sticky key rotation), and marks the chapter `completed`.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const generateCourseAudioFn = inngest.createFunction(
+    {
+        id: "generate-course-audio",
+        triggers: [{ event: "course/audio.generate" }],
+        concurrency: [
+            { limit: 2 },
+        ],
+    },
+    async ({ event, step }) => {
+        const { chapter, courseId, courseName, chapterIndex } = event.data as {
+            chapter: any; courseId: string; courseName: string; chapterIndex: number;
+        };
+
+        const TAG = `[Ch${chapterIndex + 1}]`;
+        const chapterId = chapter.chapterId;
+        console.log(`\n🔊 ${TAG} AUDIO: ${courseId} — ${chapter.chapterTitle}`);
+
+        const upsertStatus = makeUpsertStatus(courseId, chapterId);
+
+        // ── Load the reviewed slides from DB (Phase 1 already persisted them) ──
+        const slidesData = await step.run("load-reviewed-slides", async () => {
+            const rows = await db.select().from(chapterContentSlides)
+                .where(eq(chapterContentSlides.chapterId, chapterId));
+            rows.sort((a, b) => (a.slideIndex ?? 0) - (b.slideIndex ?? 0));
+            return rows;
+        });
+
+        if (!slidesData?.length) {
+            await upsertStatus({ status: "failed", errorMessage: `No slides to narrate for chapter ${chapterId}` });
+            throw new Error(`${TAG} No slides found for audio generation`);
+        }
+
+        const totalSlides = slidesData.length;
+        const existingAudioCount = slidesData.filter(s => s.audioUrl).length;
+
+        // ── Mark as generating:audio ─────────────────────────────────────────
+        await step.run("mark-generating-audio", async () => {
+            await upsertStatus({
+                status: "generating:audio",
+                slidesTotal: totalSlides,
+                slidesComplete: totalSlides,
+                audioComplete: existingAudioCount,
+                startedAt: new Date(),
+                completedAt: null,
+                errorMessage: null,
+            });
+        });
+
+        // Narrator voice chosen at course creation (falls back to the default speaker).
+        const courseVoice = await step.run("load-course-voice", async () => {
+            const [row] = await db.select({ voice: coursesTable.voice })
+                .from(coursesTable).where(eq(coursesTable.courseId, courseId));
+            return row?.voice || "kabir";
+        });
+
+        const insertedSlides: any[] = [];
+        let audioCompleteCount = Math.min(existingAudioCount, totalSlides);
+
+        for (let i = 0; i < slidesData.length; i++) {
+            const slide = slidesData[i];
+            const narrationText = (slide.narration as any)?.fullText;
+            if (!narrationText) {
+                console.warn(`⚠️ ${TAG} Slide ${i + 1} no narration — skipping`);
+                continue;
+            }
+
+            const result = await step.run(`process-slide-${i}`, async () => {
+                // Fast-path: audio already generated (in a previous partial run)
+                if (slide.audioUrl && slide.captions && slide.audioDuration) {
+                    console.log(`✅ ${TAG} Slide ${i + 1}/${slidesData.length} audio already exists — reusing`);
+                    return slide;
+                }
+
+                const narration = narrationText;
+                console.log(`🎤 ${TAG} Slide ${i + 1}/${slidesData.length}: TTS for ${narration.length} chars`);
+
+                // TTS → MP3 buffer
+                const audioBuffer = await generateTTSAudio(narration, "en-IN", courseVoice);
+                const audioDuration = getMp3Duration(audioBuffer);
+                console.log(`✅ ${TAG} Slide ${i + 1} TTS: ${audioBuffer.length} bytes, ${audioDuration.toFixed(2)}s`);
+
+                // Upload MP3 → Appwrite
+                const slideKey = slide.slideId || `slide-${i}`;
+                const { url: audioUrl } = await putWithRotation(
+                    `course-audio/${courseId}/${chapterId}/${slideKey}.mp3`,
+                    audioBuffer,
+                    { access: "public", contentType: "audio/mpeg" }
+                );
+                console.log(`☁️  ${TAG} Slide ${i + 1} Audio → Appwrite: ${audioUrl}`);
+
+                // ⚡ Instant captions from narration — replaces slow Sarvam batch STT job
+                const captions = generateCaptionsFromNarration(narration, audioDuration, "en-IN");
+                console.log(`🎬 ${TAG} Slide ${i + 1} Captions: ${captions.chunks?.length ?? 0} chunks`);
+
+                // Persist to DB
+                const revealData = slide.revealData ?? [];
+                const [inserted] = await db.insert(chapterContentSlides).values({
+                    courseId, chapterId,
+                    slideId: slideKey,
+                    slideIndex: slide.slideIndex ?? i,
+                    audioUrl, audioDuration,
+                    narration: slide.narration,
+                    captions,
+                    html: slide.html ?? null,
+                    revealData,
+                }).onConflictDoUpdate({
+                    target: chapterContentSlides.slideId,
+                    set: { audioUrl, audioDuration, captions, slideIndex: slide.slideIndex ?? i },
+                }).returning();
+
+                console.log(`💾 ${TAG} Slide ${i + 1}/${slidesData.length} fully saved with audio ✅`);
+                return inserted;
+            });
+
+            if (result) {
+                insertedSlides.push(result);
+                const isNewlyProcessed = result.audioUrl && !slidesData[i]?.audioUrl;
+                if (isNewlyProcessed) audioCompleteCount = Math.min(totalSlides, audioCompleteCount + 1);
+            }
+
+            // Consolidate status updates to keep progress tracking elegant
+            await step.run(`update-audio-progress-${i}`, async () => {
+                await upsertStatus({
+                    status: "generating:audio",
+                    slidesTotal: totalSlides,
+                    slidesComplete: totalSlides,
+                    audioComplete: audioCompleteCount,
+                });
+            });
+        }
 
         // ── Mark as completed ────────────────────────────────────────────────────────
         await step.run("mark-completed", async () => {

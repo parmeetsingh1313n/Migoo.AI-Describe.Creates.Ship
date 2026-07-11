@@ -7,6 +7,7 @@ import { CourseComposition } from './ChapterVideo';
 import { CustomPlayerControls } from './CustomPlayerControls';
 import { ChapterNotesDialog } from './ChapterNotesDialog';
 import OutlineCockpit from './OutlineCockpit';
+import StudioReviewCockpit, { ReviewSlide } from './StudioReviewCockpit';
 import DrawOutlineButton from '@/components/ui/DrawOutlineButton';
 import axios from 'axios';
 import { toast } from 'sonner';
@@ -54,6 +55,12 @@ function CourseChapters({ course, onRefresh }: Props) {
     // so the edit reflects immediately without waiting for a full course refetch.
     const [outlineChapter, setOutlineChapter] = useState<{ chapterId: string; title: string; index: number; points: string[] } | null>(null);
     const [localOutlines, setLocalOutlines] = useState<Record<string, string[]>>({});
+
+    // ── Studio review cockpit state (Stages 2 & 3) ────────────────────────────
+    // Opened when a chapter is parked at `review:slides`: the user screens the
+    // generated slides, requests per-slide changes, edits narration, then
+    // approves — which fires the gated audio phase.
+    const [reviewChapter, setReviewChapter] = useState<{ chapterId: string; title: string; index: number; slides: ReviewSlide[] } | null>(null);
 
     const stopPoll = (chapterId: string) => {
         if (pollTimers.current[chapterId]) {
@@ -249,6 +256,12 @@ function CourseChapters({ course, onRefresh }: Props) {
                 if (row.status === 'completed' && prev?.status !== 'completed') {
                     completedSome = true;
                 }
+                // When a chapter reaches the review gate, refetch the course so the
+                // freshly generated slides (html + narration) are available to the
+                // Studio review cockpit.
+                if (row.status === 'review:slides' && prev?.status !== 'review:slides') {
+                    completedSome = true;
+                }
             }
             
             setStatuses(map);
@@ -428,6 +441,56 @@ function CourseChapters({ course, onRefresh }: Props) {
         }
     };
 
+    // Open the Studio review cockpit for a chapter parked at `review:slides`.
+    const openReview = useCallback((chapter: any, index: number, chapterSlides: any[]) => {
+        const slides: ReviewSlide[] = [...chapterSlides]
+            .sort((a, b) => (a.slideIndex ?? 0) - (b.slideIndex ?? 0))
+            .map(s => ({
+                slideId: s.slideId,
+                slideIndex: s.slideIndex,
+                html: s.html ?? '',
+                narration: s.narration,
+                revealData: s.revealData,
+            }));
+        if (slides.length === 0) {
+            toast.info('Slides are still finishing up — try again in a moment.');
+            if (onRefresh) onRefresh();
+            return;
+        }
+        setReviewChapter({ chapterId: chapter.chapterId, title: chapter.chapterTitle, index, slides });
+    }, [onRefresh]);
+
+    // Approve reviewed slides → fire the gated audio (TTS) phase.
+    const handleApproveSlides = useCallback(async (chapter: any, index: number) => {
+        if (!course?.courseId) return;
+        // Optimistically flip to the audio phase so the card shows progress + polls.
+        setStatuses(prev => {
+            const existing = prev[chapter.chapterId];
+            const total = existing?.slidesTotal || chapter.subContent?.length || 7;
+            return {
+                ...prev,
+                [chapter.chapterId]: {
+                    status: 'generating:audio',
+                    slidesComplete: total,
+                    slidesTotal: total,
+                    audioComplete: 0,
+                    errorMessage: null,
+                },
+            };
+        });
+        try {
+            await axios.post('/api/approve-slides', {
+                chapter,
+                courseId: course.courseId,
+                courseName: course.courseName,
+                chapterIndex: index,
+            });
+        } catch (err: any) {
+            console.error('❌ Approve failed:', err);
+            toast.error(`Failed to start voiceover: ${err?.response?.data?.error || err.message}`);
+        }
+    }, [course?.courseId, course?.courseName]);
+
     // Instantly compute durations from stored audioDuration (no async fetch needed)
     const durationsByChapterId = useMemo(() => {
         if (!course?.chapterContentSlides || course.chapterContentSlides.length === 0) {
@@ -493,7 +556,7 @@ function CourseChapters({ course, onRefresh }: Props) {
     };
 
     // Render the beautiful generation overlay states
-    const renderGenerationUI = (chapter: any, index: number) => {
+    const renderGenerationUI = (chapter: any, index: number, chapterSlides: any[] = []) => {
         const s = statuses[chapter.chapterId] || {
             status: 'idle',
             slidesComplete: 0,
@@ -650,6 +713,36 @@ function CourseChapters({ course, onRefresh }: Props) {
                     </div>
                 );
             }
+            case 'review:slides':
+                return (
+                    <div className="relative flex flex-col items-center justify-center h-full p-5 text-center bg-gradient-to-br from-zinc-950 via-[#0b1220] to-zinc-950 text-white gap-3 select-none overflow-hidden">
+                        {animationStyles}
+                        <div className="absolute top-1/2 left-1/2 w-64 h-64 rounded-full blur-[80px] -translate-x-1/2 -translate-y-1/2 pointer-events-none" style={{ background: 'rgba(109,91,211,0.25)', animation: 'ambientPulse 7s ease-in-out infinite' }} />
+
+                        <div className="relative z-10 flex flex-col items-center gap-3">
+                            <div className="relative flex h-14 w-14 items-center justify-center rounded-2xl border border-white/10 bg-white/5 shadow-[0_0_20px_rgba(109,91,211,0.35)]">
+                                <Sparkles className="h-6 w-6 text-violet-300 animate-pulse" />
+                                <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-emerald-500 text-[10px] font-bold text-white shadow">
+                                    <CheckCircle2 className="h-3.5 w-3.5" />
+                                </span>
+                            </div>
+                            <div className="space-y-1">
+                                <p className="text-sm font-bold text-white">Slides ready to review</p>
+                                <p className="text-[11px] text-zinc-400 max-w-[260px] leading-relaxed">
+                                    Screen every slide, request changes, and fine-tune the narration before the voiceover is generated.
+                                </p>
+                            </div>
+                            <button
+                                onClick={() => openReview(chapter, index, chapterSlides)}
+                                className="mt-1 cursor-pointer flex items-center gap-2 px-5 py-2 rounded-full text-xs font-bold text-white shadow-lg transition-transform hover:scale-105 active:scale-95"
+                                style={{ background: 'linear-gradient(135deg, #3EA5D6 0%, #3363AD 50%, #6D5BD3 100%)' }}
+                            >
+                                <Play className="h-3.5 w-3.5 fill-current" />
+                                Review &amp; finalize
+                            </button>
+                        </div>
+                    </div>
+                );
             case 'failed':
                 return (
                     <div className="relative flex flex-col items-center justify-center h-full p-4 text-center bg-zinc-950 text-white gap-3 select-none overflow-hidden">
@@ -738,8 +831,9 @@ function CourseChapters({ course, onRefresh }: Props) {
                     const effectivePoints = localOutlines[chapter.chapterId] ?? chapter.subContent ?? [];
                     // Editable only before generation (idle/failed) — once slides exist, the points
                     // already drove slide creation, so editing is locked until a reset.
+                    const isReviewing = chStatus?.status === 'review:slides';
                     const isGenerating = chStatus?.status === 'queued' || chStatus?.status === 'generating:slides' || chStatus?.status === 'generating:audio';
-                    const canEditOutline = !isGenerated && !isGenerating;
+                    const canEditOutline = !isGenerated && !isGenerating && !isReviewing;
 
                     return (
                         <Card key={index} className='mb-5'>
@@ -873,7 +967,7 @@ function CourseChapters({ course, onRefresh }: Props) {
                                     }}>
                                         {!isGenerated ? (
                                             /* Render beautiful generation state machine UI */
-                                            renderGenerationUI(chapter, index)
+                                            renderGenerationUI(chapter, index, chapterSlides)
                                         ) : !chapterStarted ? (
                                             /* YouTube-style black placeholder overlay */
                                             <div
@@ -1051,6 +1145,26 @@ function CourseChapters({ course, onRefresh }: Props) {
                             subContent: points,
                         };
                         handleGenerateChapter(chapterForGen, outlineChapter.index);
+                    }}
+                />
+            )}
+
+            {reviewChapter && (
+                <StudioReviewCockpit
+                    open={!!reviewChapter}
+                    onClose={() => setReviewChapter(null)}
+                    courseId={course?.courseId || ''}
+                    chapterId={reviewChapter.chapterId}
+                    chapterTitle={reviewChapter.title}
+                    chapterIndex={reviewChapter.index}
+                    slides={reviewChapter.slides}
+                    onApprove={() => {
+                        const chapterForGen = {
+                            ...(course?.courseLayout?.chapters?.find(c => c.chapterId === reviewChapter.chapterId) || {}),
+                            chapterId: reviewChapter.chapterId,
+                            chapterTitle: reviewChapter.title,
+                        };
+                        handleApproveSlides(chapterForGen, reviewChapter.index);
                     }}
                 />
             )}
