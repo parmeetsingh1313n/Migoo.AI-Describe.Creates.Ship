@@ -909,131 +909,61 @@ You will receive a JSON input with these fields:
    - No new concepts — only synthesis and reinforcement
 
 ═══════════════════════════════════════════════════════════════════════════════
-📐 HTML & LAYOUT RULES — READ CAREFULLY, EVERY RULE IS MANDATORY
+DESIGN LANGUAGE — "EDITORIAL MAGAZINE" (this section OVERRIDES every boxy/card instinct)
+
+Think Kinfolk / Monocle / a premium Apple keynote — NOT a dashboard, NOT a bento grid of bordered cards. Every slide must look hand-designed by a senior art director, never auto-generated.
+
+CANVAS & TECH RULES (mandatory — never break these):
+- Canvas is 1440x720px (16:9); it scales to fit, so design content to fill that frame naturally.
+- One root <section> carrying a data-background-gradient (or data-background-color) attribute.
+- SINGLE QUOTES for ALL HTML attributes. NEVER put a double quote inside the HTML.
+- CSS font-family WITHOUT inner quotes: font-family: Playfair Display, serif;  (never write 'Playfair Display')
+- Every <img> src MUST be the literal {{IMAGE_PLACEHOLDER}}. Never invent or hardcode a URL.
+- Style EVERYTHING with INLINE style='...'. Do NOT rely on CSS class names for visuals — inline styles are the ONLY thing guaranteed to render identically in the live preview AND the final video.
+- Animate with class='fragment fade-up' data-fragment-index='N' (vary the fragment style). Use 12-18 fragments and keep the fragmentData array aligned to exactly the indices you use.
+- NO <script> tags.
+
+THE ONE RULE THAT MATTERS MOST — KILL THE BOXES:
+- NEVER build a slide as a grid of bordered/rounded rectangles that each hold [tiny icon + bold title + grey caption]. That single pattern is the #1 reason slides look AI-generated. Do not use it.
+- NO repeating the same card 3-6 times in a grid. NO full 1px borders wrapping every block. NO "six equal tiles".
+- INSTEAD compose like a magazine spread: one dominant idea, confident hierarchy, and lots of breathing room.
+
+EDITORIAL TOOLKIT (compose from these with inline styles):
+- HERO TYPOGRAPHY: one oversized headline in Playfair Display, 56-84px, tight leading (line-height:1.02) — the true focal point of most slides. Mix weight and italic for rhythm.
+- GHOST NUMERALS: a huge faint index number (e.g. '03') at 200-340px, opacity 0.06-0.12, sitting behind/beside the headline to create depth.
+- HAIRLINES, NOT BORDERS: divide ideas with a 1px rule or a short 2-4px accent bar plus generous margins and whitespace — never a full border box.
+- COLOR-BLOCK PANELS (sparingly): at most ONE bordered-less solid/gradient band or column to anchor a section — never a grid of them.
+- ACCENT DISCIPLINE: choose ONE accent color per slide and apply it to a single highlighted word or a short underline — not to every element.
+- NEGATIVE SPACE: leave 30-45% of the slide intentionally empty. Crowding reads as amateur.
+- ASYMMETRY: off-center compositions and ~60/40 or 65/35 splits. Do NOT center everything by default.
+- IMAGERY: let {{IMAGE_PLACEHOLDER}} BLEED off one edge (full-height side column, large circular portrait, or a soft duotone watermark at 8-15% opacity behind the text). Never a small framed thumbnail inside a card.
+
+LAYOUT ARCHETYPE (use the one named in the input's designHint; if none, pick what fits the content — and make CONSECUTIVE slides look clearly DIFFERENT from each other):
+1) COVER — opener: small uppercase kicker, one massive Playfair headline, a single-line dek, an image bleeding off the right edge, and a huge ghost numeral.
+2) HERO-LEFT + IMAGE-BLEED — headline plus 2-3 short editorial lines on the left ~60%; a full-height image bleeding the right ~40%.
+3) INDEX SPREAD — a numbered editorial list (01 / 02 / 03) down the page separated by hairlines; each row = big number + short bold phrase + one thin sub-line. No boxes.
+4) BIG-NUMERAL FEATURE — one giant statistic (120-220px gradient number) with a short caption; the supporting idea set quietly to the side.
+5) EDITORIAL SPLIT / COMPARISON — a single vertical hairline (or one color-block column) dividing two contrasting ideas, each tagged with a small-caps kicker. No bordered panels.
+6) PULL-QUOTE — a large italic Playfair quote with a hanging quotation mark and a small attribution rule beneath; near-empty canvas.
+7) TIMELINE RIBBON — one horizontal hairline with 3-5 nodes (dot + short label + micro-note) along it; never stacked boxes.
+8) SYNTHESIS (conclusion) — recap as a numbered editorial index OR one strong closing statement over a faint full-bleed watermark image. NEVER a grid of summary cards.
+
+TYPE SYSTEM (use ONLY these fonts — they render in both preview and video):
+- Display / headline: Playfair Display (editorial serif). Instrument Serif for extra italic flourish.
+- Body / lead / labels: pair the serif with ONE sans from Outfit, Space Grotesk, Inter, DM Sans, or Poppins.
+- Kickers / labels: UPPERCASE, 11-13px, letter-spacing 2-4px, muted color.
+Sizes: Hero headline 56-84px | Big numeral 120-220px | Dek/lead 18-22px | Body 14-16px | Kicker 11-13px.
+Include this <link> INSIDE the <section>:
+<link href='https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400..900;1,400..900&family=Instrument+Serif:ital@0;1&family=Outfit:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700&family=DM+Sans:wght@400;500;600;700&display=swap' rel='stylesheet'>
+
+BACKGROUNDS — vary them across slides so the chapter never looks monotonous:
+- Most slides: rich near-black / deep-navy or deep jewel gradients, e.g. linear-gradient(135deg,#0b1020,#111a2e).
+- Occasionally an off-white / cream editorial slide (e.g. #f6f3ec) with dark ink text for contrast — ideal for a cover or pull-quote.
+- Add at most a subtle radial glow, faint grain, or a single low-opacity accent shape. No busy patterns.
+Accent palette (pick ONE per slide): #6D5BD3  #3EA5D6  #E0653A  #E8B84B  #2FA98C  #D64B7F
+
+HEIGHT DISCIPLINE — the slide scales to fit 1440x720, so design ONE dominant focal area plus supporting matter that comfortably fills a single screen. Fewer, larger elements always beat many small ones. If you are adding a 4th separate block, cut it — negative space IS the aesthetic. Never let content overflow into a tiny shrunk-down slide.
 ═══════════════════════════════════════════════════════════════════════════════
-
-- Canvas: 1280x720px (16:9). Reveal.js auto-scales.
-- Use SINGLE QUOTES for ALL HTML attributes. NEVER double quotes inside HTML.
-- CSS font-family: use single quotes: font-family: 'Inter', system-ui;
-- Each slide is ONE <section> with data-background-gradient attribute.
-- MUST include {{IMAGE_PLACEHOLDER}} — replaced with real AI image at runtime.
-- HORIZONTAL-FIRST layout — cards in rows, never stacked vertically.
-- Fragment animations: class='fragment [style]' data-fragment-index='N' (15-20 elements).
-- Use AT LEAST 3 DIFFERENT fragment styles per slide.
-- NO <script> tags, NO custom CSS for .reveal or .fragment classes.
-
-🚨🚨🚨 PRE-DEFINED PREMIUM COMPONENT & LAYOUT CLASSES (MANDATORY TO USE) 🚨🚨🚨
-To maintain maximum visual variety and ensure content NEVER overflows 720px height (preventing ugly zoom-out), combine fragment classes with our built-in premium visual classes:
-
-1. **Card Visual Classes (Always combine with animation fragments!)**:
-   - glassmorphism-card (stunning glass effect)
-   - gradient-border-card (edge neon-glow border)
-   - outlined-card (clean minimal outline)
-   - neumorphic-card (magazine neumorphic style)
-   - gradient-fill-card (semitransparent colorful fill)
-   - minimal-tag (compact pill/chip for badges or small labels)
-   Example: <div class='fragment fade-up glassmorphism-card' data-fragment-index='3'>...</div>
-
-2. **Responsive Grids & Flex Layouts (Horizontal-First)**:
-   - grid-2-col / grid-3-col / grid-4-col: Forces columns horizontally. Use this for lists of cards or stats!
-   - flex-row-layout / flex-col-layout: Flex helpers.
-   Example: <div class='grid-3-col' style='margin: 10px 0;'>...cards here...</div>
-
-3. **Different Ways to Represent Text (Introduce variety EVERY slide — NEVER repeat the same pattern!):**
-
-   CLASSIC PATTERNS:
-   - **Bento Matrix Grid**: Use <div class='bento-grid'> with children. Some cells can have class bento-span-2 or bento-span-3 for magazine-style layouts.
-   - **Process Flow**: Use <div class='process-row'> containing multiple <div class='process-step'> elements. Inside each step, place <div class='process-step-number'>N</div> followed by compact text.
-   - **Horizontal Timeline**: Use <div class='timeline-row'> with <div class='timeline-bar'></div> inside, and multiple <div class='timeline-node'><div class='timeline-dot'></div>...</div> nodes.
-   - **Comparison Table**: Use <table class='premium-table'><thead><tr><th>Header</th>...</tr></thead><tbody><tr><td>Data</td>...</tr></tbody></table>
-   - **Highlight Callouts**: Use alert-box (amber), info-box (blue), success-box (green), or gradient-box (purple) for warnings, tips, formulas, or key quotes.
-   - **Premium Bullet Lists**: Use <ul class='premium-list'><li class='premium-list-item'>Point 1</li>...</ul>
-   - **Code blocks**: Use <pre class='code-block-premium'><code>...</code></pre> with max-height 350px.
-
-   ✨ NEW PATTERNS — USE THESE FOR MAXIMUM VARIETY:
-   - **Stat / Metric Row**: Use <div class='grid-3-col'> or <div class='grid-4-col'> of <div class='stat-block'> children. Each stat-block has a <div class='stat-number'>42%</div> (big gradient number) and <div class='stat-label'>Label</div>. Perfect for data-heavy slides.
-   - **Two-Tone Split Card**: Use <div class='split-card'><div class='split-card-accent'></div><div class='split-card-body'>Content</div></div>. Great for feature lists where each item has an accent color.
-   - **Terminal / Console Card**: Use <div class='terminal-card'><div class='terminal-header'><div class='terminal-dot' style='background:#ff5f57'></div><div class='terminal-dot' style='background:#ffbd2e'></div><div class='terminal-dot' style='background:#28ca41'></div></div><div class='terminal-body'>$ command output here</div></div>. Perfect for code concepts, CLI explanations.
-   - **Kanban / Status Board**: Use <div class='kanban-board'><div class='kanban-column'><div class='kanban-header' style='color:#f59e0b;background:rgba(245,158,11,0.1)'>To Do</div><div class='kanban-item' style='border-color:#f59e0b'>Task</div></div>...</div>. 3 columns for workflow/status concepts.
-   - **Quote / Blockquote**: Use <div class='quote-card'>'Quote text here'<span class='quote-attribution'>— Author / Source</span></div>. Great for chapter openings or key insights.
-   - **Feature Matrix (Icon Grid)**: Use <div class='feature-matrix'><div class='feature-matrix-cell'><span style='font-size:22px'>⚡</span><strong style='font-size:11px'>Speed</strong><span style='color:#94a3b8'>Sub-100ms</span></div>...</div>. 4 columns of icon+title+desc cells.
-   - **Hotspot / Active Feature Card**: Use <div class='hotspot-card'><div class='hotspot-dot'></div><strong>Live Concept</strong><p style='font-size:11px;color:#94a3b8'>Description</p></div>. Great for current/active features.
-   - **Alternating Row List**: Use <div class='row-list'><div class='row-list-item'><span class='row-list-icon'>1️⃣</span><div><strong>Step title</strong><br><span style='color:#94a3b8'>Detail</span></div></div>...</div>. Max 5 rows to stay in budget.
-   - **Before / After Diff Panel**: Use <div class='diff-panel'><div class='diff-panel-left'><span class='diff-label' style='color:#f43f5e'>❌ Before</span>Old approach...</div><div class='diff-panel-right'><span class='diff-label' style='color:#10b981'>✅ After</span>New approach...</div></div>. Perfect for showing improvement/migration.
-
-🚨🚨🚨 CRITICAL RULES TO PREVENT HEIGHT OVERFLOW (NON-NEGOTIABLE) 🚨🚨🚨
-1. NEVER stack more than 3 text items or cards vertically. If you have 4-6 items, use grid-2-col or grid-3-col to lay them out horizontally.
-2. For CONCLUSION slides, NEVER stack summary items vertically. Instead, use a 3-column Bento grid, comparison tables, or 2x2 key grids to present final synthesis horizontally. Keep all summaries extremely compact (1-2 sentences max per point).
-3. Font size must remain small and compact: Title: 28-36px, Subtitle: 14-16px, Body: 12-14px, Cards/Grid cells: 11-13px.
-4. Keep card padding compact: 8-12px.
-
-🚨🚨🚨 HEIGHT BUDGET CALCULATOR — PLAN THIS BEFORE WRITING A SINGLE LINE OF HTML 🚨🚨🚨
-The runtime hard-clips content at exactly 720px height (CSS overflow:hidden on the section).
-Content that exceeds 720px is INVISIBLY CUT OFF at the bottom — NOT scrolled, NOT zoomed out.
-There is NO recovery. If you overflow, the bottom of your slide simply does not exist.
-
-AVAILABLE HEIGHT: 720px total
-− Outer padding (30px top + 30px bottom): 60px
-= Available for all content elements: 660px MAX
-
-ELEMENT HEIGHT REFERENCE (use these pixel costs when planning):
-┌───────────────────────────────────────────────┬──────────┐
-│ Element                                          │ Height   │
-├───────────────────────────────────────────────┼──────────┤
-│ Badge / chapter label chip                       │ ~28px    │
-│ H1 title (32–36px font)                          │ ~44px    │
-│ Subtitle / tagline (14–16px font)                │ ~22px    │
-│ Gap between sections                             │ 12–14px  │
-│ Single compact card (10-12px padding, 11-13px)   │ ~65px    │
-│ grid-3-col row of 3 compact cards                │ ~80px    │
-│ grid-2-col row of 2 cards                        │ ~90px    │
-│ premium-table (header + 4 data rows)             │ ~120px   │
-│ process-row (4–5 steps)                          │ ~90px    │
-│ timeline-row                                     │ ~80px    │
-│ bento-grid (2 rows × 3 cells, cells ≤80px)       │ ~175px   │
-│ alert-box / info-box / gradient-box              │ ~52px    │
-│ code-block-premium (8–10 visible lines)          │ ~140px   │
-│ Inline image (160px height shape)                │ ~165px   │
-│ stat-block row (grid-3-col of 3 stat-blocks)     │ ~90px    │
-│ split-card (single)                              │ ~65px    │
-│ terminal-card (8 lines)                          │ ~130px   │
-│ kanban-board (3 cols, 3 items each)              │ ~160px   │
-│ quote-card                                       │ ~70px    │
-│ feature-matrix (4 cells)                         │ ~90px    │
-│ row-list (5 rows)                                │ ~110px   │
-│ diff-panel (4 items per side)                    │ ~120px   │
-└───────────────────────────────────────────────┴──────────┘
-
-BEFORE WRITING HTML: Add up all your planned elements. TOTAL MUST STAY UNDER 600px.
-If total > 600px: REDUCE content, combine into a denser grid, or drop an element.
-
-CONCLUSION SLIDE — MANDATORY WATERMARK-ONLY TEMPLATE (slidePosition = CONCLUSION):
-Use ONLY this layout structure for conclusion slides. It MUST have a watermark background image, NOT an inline image inside any component:
-  ✅ Watermark background: {{IMAGE_PLACEHOLDER}} (stretched absolute, opacity: 0.1, blur: 2px) - THIS IS THE ONLY IMAGE ON SLIDE 7. Do NOT use inline/component images.
-  ✅ Badge + H1 Title + Subtitle → 94px
-  ✅ bento-grid (2 rows × 3 cells, each cell ≤75px, synthesizing 6 key concepts, stretched to full width) → 165px
-  ✅ gap → 14px
-  ✅ gradient-box with 1 unified insight sentence → 52px
-  ✅ TOTAL: ~325px — well within budget ✔️
-
-NEVER for conclusion slides:
-  ❌ Inline / component image (the image MUST strictly be background watermark only!)
-  ❌ Vertical list of 6–8 bullet-point takeaways (= 480px+ → OVERFLOWS!)
-  ❌ Stacking 4+ individual cards in a column
-  ❌ Using a tall code block in the conclusion
-
-🔤 GOOGLE FONTS — MANDATORY: Include this <link> tag INSIDE the <section>:
-<link href='https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Space+Grotesk:wght@400;600;700&family=Manrope:wght@400;600;700&family=DM+Sans:wght@400;600;700&family=Outfit:wght@400;600;700&family=Plus+Jakarta+Sans:wght@400;600;700&display=swap' rel='stylesheet'>
-
-Fragment styles: fade-up, fade-down, fade-left, fade-right, grow, scale-in, blur-in, fade-in, slide-up
-
-Image strategies:
-  Strategy 1 (default): Inline <img src='{{IMAGE_PLACEHOLDER}}'> with unique shape.
-  Strategy 2 (dense content): Watermark bg at 8-12% opacity + blur.
-  Strategy 3 (intro): Full-bleed at 30-40% opacity with text overlay.
-
-Color accents: #3b82f6 #8b5cf6 #ec4899 #f59e0b #10b981 #06b6d4
-Font sizes: Title 28-36px | Subtitle 14-18px | Body 12-14px | Cards 11-13px
 
 ═══════════════════════════════════════════════════════════════════════════════
 📝 NARRATION REQUIREMENTS — CONTEXT-CHAINED CONTENT

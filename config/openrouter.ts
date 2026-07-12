@@ -182,34 +182,21 @@ class OpenRouterClient {
         if (modelsToTry.length === 0) throw new Error('No OpenRouter model configured');
         const allKeys = this.getAllKeys();
 
-        // Extra design mandate injected universally to guarantee colorful, high-contrast, perfectly sized 16:9 widescreen slides
+        // Extra design mandate injected universally to guarantee editorial,
+        // magazine-grade, NON-boxy 16:9 slides that never look AI-generated.
         const designBooster = `
 
 CRITICAL STRUCTURAL & DESIGN MANDATES (override defaults):
 1. NO HARDCODED IMAGE URLS: You MUST use the literal string '{{IMAGE_PLACEHOLDER}}' in the src attribute of EVERY <img> tag. NEVER hallucinate or use any Appwrite URLs or HTTP/HTTPS URLs.
-2. PREMIUM FONT SELECTION & INNER QUOTES:
-   - We support a rich collection of premium modern Google Fonts in the slide template. You MUST select and mix different font families for different slides based on the slide's vibe to give the course an extremely high-end, diverse, and polished aesthetic!
-   - Select ONLY from the following supported fonts:
-     * Outfit (Highly geometric, modern, premium sans-serif - perfect for titles/intro slides)
-     * Space Grotesk (Tech-forward, futuristic, high-contrast sans-serif - excellent for technical concept slides)
-     * Poppins (Round, clean, playful geometric sans-serif - excellent for layout cards and details)
-     * Inter (Sleek, neutral, highly readable professional sans-serif - great for code explanations/descriptions)
-     * Playfair Display (Elegant, high-contrast serif - beautiful for philosophical, key definitions, or theoretical slide headers)
-     * Instrument Serif (Graceful, high-fashion editorial serif - gives titles a premium magazine cover look)
-     * DM Sans (Clean, elegant, versatile geometric sans-serif)
-   - IMPORTANT: Because HTML style attributes are wrapped in single quotes (e.g. style='...'), NEVER use single quotes inside style values (like font-family: 'Outfit'). Instead, write it without quotes: e.g. font-family: Outfit, sans-serif; or font-family: Space Grotesk, sans-serif; or font-family: Playfair Display, serif; to avoid HTML syntax parsing crashes!
-3. FRAGMENT DATA ALIGNMENT: The "fragmentData" JSON array must contain EXACTLY the sequence of indices present in the HTML data-fragment-index attributes (e.g. if you have indices 0 to 9, output [0,1,2,3,4,5,6,7,8,9]. Do NOT pad with unused indices like 10-19).
-4. LAYOUT & 16:9 CANVAS OVERFLOW PREVENTION:
-   - The slide is rendered in a fixed 1280x720px 16:9 landscape video container.
-   - DO NOT stack multiple massive items vertically. Stacking too many items vertically overflows the canvas height, causing the slides to squeeze into a 1:1 ratio or look extremely zoomed-in/cropped.
-   - Limit slide content: Max 3-4 items/cards per slide. If there is a code block, limit it to 1 simple code block with NO other major text/cards on the slide!
-   - Columns & Horizontal layout: Use side-by-side split layouts. Use flexbox row ('display: flex; flex-direction: row; justify-content: space-between; align-items: center; gap: 20px;') or grid ('display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px;') to arrange content horizontally.
-   - If there is an image ({{IMAGE_PLACEHOLDER}}), ALWAYS place it in a two-column split layout side-by-side with the text (e.g., Left Column: Text/Cards, Right Column: Image). NEVER stack a large image below or above a list of 4+ bullet cards.
-5. VIBRANT, HIGH-CONTRAST AESTHETICS:
-   - Use colorful background gradients (linear-gradient).
-   - Use white, bright yellow, cyan, or lime for text on dark backgrounds.
-   - Apply glowing glassmorphism or colored borders (e.g., border: 1px solid rgba(139,92,246,0.3)).
-   - Make headings and keywords pop with contrasting accent colors.
+2. STYLE WITH INLINE STYLES, NOT CLASSES: Style every element with an inline style='...' attribute. Do NOT depend on pre-named CSS classes for visuals — inline styles are the only thing that renders identically in the preview and the final video.
+3. PREMIUM FONT SELECTION & INNER QUOTES:
+   - Editorial pairing: a serif DISPLAY headline (Playfair Display, or Instrument Serif for italic flourish) paired with ONE sans (Outfit, Space Grotesk, Inter, DM Sans, or Poppins). Mix families across slides for a high-end, diverse feel.
+   - IMPORTANT: HTML style attributes are wrapped in single quotes (style='...'), so NEVER use single quotes inside style values. Write font stacks WITHOUT inner quotes: font-family: Playfair Display, serif; or font-family: Outfit, sans-serif;
+4. FRAGMENT DATA ALIGNMENT: The "fragmentData" JSON array must contain EXACTLY the sequence of indices present in the HTML data-fragment-index attributes (e.g. indices 0..9 → output [0,1,2,3,4,5,6,7,8,9]). Do NOT pad with unused indices.
+5. LAYOUT & 16:9 CANVAS: The slide is a fixed 1440x720px landscape frame that scales to fit. Design ONE dominant focal area (a hero headline or a giant numeral) plus a little supporting matter — fewer, larger elements. Leave 30-45% of the canvas as negative space. Use asymmetric ~60/40 compositions; do NOT center everything.
+   - If there is an image ({{IMAGE_PLACEHOLDER}}), let it BLEED off one edge (full-height side column, large circle, or a faint 8-15% watermark behind the text). NEVER a small framed thumbnail inside a card.
+6. KILL THE BOXES (most important): Do NOT build the slide as a grid of bordered/rounded rectangles, and do NOT repeat the same card 3-6 times. NO full borders wrapping every block, NO "six equal tiles", NO [tiny-icon + bold title + grey caption] rows. Separate ideas with generous whitespace, a 1px hairline, or a short accent bar — not boxes. Compose like a premium magazine spread.
+7. EDITORIAL, HIGH-CONTRAST AESTHETICS: Rich near-black / deep-jewel gradient backgrounds (occasionally a cream editorial slide with dark ink). ONE accent color per slide applied to a single highlighted word or underline. A huge faint ghost numeral behind the headline adds depth. Confident typographic hierarchy over decoration.
 `;
 
         let lastError: any;
@@ -227,9 +214,7 @@ CRITICAL STRUCTURAL & DESIGN MANDATES (override defaults):
    - CORRECT: style='font-size: 14px; opacity: 0;' class='fragment fade-in'
    - INCORRECT: style='font-size: 14px; opacity: 0; class='fragment fade-in' (MISSING the closing single quote for the style attribute before class!)
    Double-check every tag: ensure style='...' and class='...' are completely separate and each is enclosed in its own single quotes!
-2. HEIGHT BUDGET & NO OVERCROWDING: The 16:9 landscape canvas is fixed (720px height). You MUST keep the height extremely small:
-   - Maximum 2 to 3 compact cards per slide.
-   - If there is a code block (<pre>), that code block MUST be the ONLY content element on the entire slide. Stacking cards and a code block together causes vertical overflow!
+2. HEIGHT BUDGET & NO OVERCROWDING: The 16:9 landscape canvas is fixed (720px height). Keep it airy — ONE dominant element (a big headline or giant numeral) plus at most 2 small supporting pieces. Fewer, larger elements; generous negative space. NEVER a grid of bordered cards. If there is a code block (<pre>), it MUST be the ONLY content element on the slide.
 3. VALID ESCAPED JSON: Every double quote (") inside the HTML string value MUST be escaped as \\" or removed. Never write a raw unescaped double quote (") inside any JSON string field.
 4. Keep paragraphs short (maximum 1-2 lines per paragraph).
 `;

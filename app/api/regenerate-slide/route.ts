@@ -27,10 +27,24 @@ import { NextRequest } from "next/server";
 // Slide LLM generation is token-heavy — give it the full serverless budget.
 export const maxDuration = 300;
 
-// Per-slide design rotation hints (mirrors inngest/course-functions.ts)
-const SLIDE_FORMATS = ["Split Screen", "Comparison Table", "Progress Bars", "Process Flow", "Difference Table", "Bento Grid", "Stats Dashboard"];
-const SLIDE_SHAPES = ["pill", "circle", "blob", "hexagon", "diamond", "rounded-square", "banner"];
-const SLIDE_STYLES = ["glassmorphism", "neumorphic", "gradient-border", "outlined", "gradient-fill", "minimal-tag", "glassmorphism"];
+// Per-slide editorial design rotation (mirrors inngest/course-functions.ts)
+const SLIDE_ARCHETYPES = [
+    "COVER — kicker + one massive Playfair headline + single-line dek + image bleeding off the right edge + huge ghost numeral",
+    "HERO-LEFT + IMAGE-BLEED — headline and 2-3 editorial lines on the left ~60%, full-height image bleeding the right ~40%",
+    "INDEX SPREAD — numbered editorial list (01/02/03) down the page separated by hairlines; big number + bold phrase + thin sub-line, no boxes",
+    "BIG-NUMERAL FEATURE — one giant statistic (120-220px gradient number) with a short caption, supporting idea set quietly aside",
+    "EDITORIAL SPLIT — one vertical hairline (or a single color-block column) dividing two contrasting ideas, each with a small-caps kicker",
+    "PULL-QUOTE — a large italic Playfair quote with a hanging quotation mark and a small attribution rule, near-empty canvas",
+    "TIMELINE RIBBON — one horizontal hairline with 3-5 nodes (dot + short label + micro-note) along it, never stacked boxes",
+];
+const SLIDE_TYPE_PAIRS = [
+    "Playfair Display headline + Outfit body",
+    "Instrument Serif italic headline + Space Grotesk body",
+    "Playfair Display headline + Inter body",
+    "Instrument Serif headline + DM Sans body",
+    "Playfair Display italic headline + Poppins body",
+];
+const SLIDE_ACCENTS = ["#6D5BD3", "#3EA5D6", "#E0653A", "#E8B84B", "#2FA98C", "#D64B7F"];
 
 export async function POST(req: NextRequest) {
     try {
@@ -94,7 +108,7 @@ export async function POST(req: NextRequest) {
             slidePosition: si === 0 ? "INTRO" : si === totalSlides - 1 ? "CONCLUSION" : "MIDDLE",
             previousSlidesContext: previousContext,
             nextSlideTopic: si + 1 < totalSlides ? subTopics[si + 1] : null,
-            designHint: `Format: ${SLIDE_FORMATS[si % SLIDE_FORMATS.length]}. Image shape: ${SLIDE_SHAPES[si % SLIDE_SHAPES.length]}. Card style: ${SLIDE_STYLES[si % SLIDE_STYLES.length]}.`,
+            designHint: `Layout archetype: ${si === 0 ? SLIDE_ARCHETYPES[0] : SLIDE_ARCHETYPES[si % SLIDE_ARCHETYPES.length]}. Type pairing: ${SLIDE_TYPE_PAIRS[si % SLIDE_TYPE_PAIRS.length]}. Accent color: ${SLIDE_ACCENTS[si % SLIDE_ACCENTS.length]}.`,
             // ── The user's requested change — the whole point of this endpoint ──
             userChangeRequest: instruction,
         });
