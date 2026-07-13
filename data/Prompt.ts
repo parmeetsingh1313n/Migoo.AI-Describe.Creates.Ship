@@ -923,30 +923,34 @@ Slides were coming out with the title printed twice on top of itself, paragraphs
 - If you use a big index numeral, put it in its OWN flow column/cell beside the content — NEVER behind or on top of the headline.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-📐 MANDATORY ROOT LAYOUT CONTRACT — FIT 720px AT NATURAL SIZE, NEVER GET ZOOMED OUT
+📐 MANDATORY ROOT LAYOUT CONTRACT — NEVER CLIP DATA, NEVER ZOOM OUT
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-CRITICAL: the video renderer measures your slide's REAL height and, if it is taller than 720px, it SHRINKS THE WHOLE SLIDE DOWN to fit — which makes every font tiny and unreadable. This already happened (a big image + text overflowed and everything zoomed out). You MUST design so the content fits inside 720px at its natural size. Do NOT rely on the scaler. If content does not fit, REMOVE data — never let it overflow.
+How the renderer works (READ THIS): it measures your slide's natural height and, if it is a little taller than 720px, it gently scales the WHOLE slide down proportionally so everything stays visible and readable. That gentle scaling is FINE. Two things are NOT fine and you must avoid both:
+  ✗ CLIPPING — do NOT put overflow:hidden or a fixed height:720px on the root or on any content wrapper. That hides/cuts the edges of code, tables and cards (data gets chopped off left/right/bottom). NEVER clip.
+  ✗ HEAVY ZOOM-OUT — do NOT cram so much that the slide is far taller than 720px, forcing a big shrink that makes fonts tiny. Keep content light so any scaling is minimal.
+The way to satisfy both: put LESS on the slide (see CONTENT DENSITY) and let the content flow naturally at readable sizes. Aim for content that is naturally close to one 720px screen.
 
-The root <section> is a fixed frame:
-<section data-background-gradient='linear-gradient(135deg,#0b1020,#131c33)' style='width:1440px;height:720px;box-sizing:border-box;padding:44px 64px;display:flex;flex-direction:column;gap:20px;overflow:hidden;font-family:Outfit, sans-serif;color:#e8ecf5;position:relative;'>
+The root <section> — natural height, NO clipping:
+<section data-background-gradient='linear-gradient(135deg,#0b1020,#131c33)' style='width:1440px;min-height:720px;box-sizing:border-box;padding:56px 72px;display:flex;flex-direction:column;gap:22px;font-family:Outfit, sans-serif;color:#e8ecf5;position:relative;'>
+(Note: min-height:720px so short slides fill the frame; NO height:720px and NO overflow:hidden — those clip data. Let a slightly tall slide be gently scaled by the renderer instead.)
 
-Compose THREE stacked zones with a STRICT HEIGHT BUDGET (they must sum to ≤ 632px so 44px top + 44px bottom padding = 720):
-1. HEADER zone (~120px max): UPPERCASE kicker (letter-spacing:3px, accent) + headline (≤ 2 lines).
-2. BODY zone (~450px max): style='flex:1;min-height:0;overflow:hidden;display:flex;...' — ONE primary component that fills this space. The 'min-height:0' is MANDATORY: without it a tall child (especially an image) expands the frame past 720 and the slide gets zoomed out.
-3. FOOTER zone (~42px, optional): a thin accent rule + one short "Key insight" line.
+Compose three stacked zones, sized to fit ~720px naturally:
+1. HEADER (~120px): UPPERCASE kicker (letter-spacing:3px, accent) + headline (≤ 2 lines).
+2. BODY (style='flex:1;display:flex;...'): ONE primary component. Do NOT add overflow or fixed heights here.
+3. FOOTER (~42px, optional): thin accent rule + one short "Key insight" line.
 
-HARD RULES that prevent the zoom-out:
-- Body MUST have min-height:0 and overflow:hidden. Any flex column holding an image/table MUST also have min-height:0 (and min-width:0) so it cannot push the height.
-- NEVER place a large standalone/centered image that stacks under the headline (that is exactly what got zoomed out). Images go ONLY in a bounded side column (see recipe J).
-- Keep it to 1 headline + 1 primary component (+ optional footer). Do NOT stack multiple big blocks vertically.
-- Everything sized so it visibly fits with a little breathing room — assume the scaler is OFF.
+HARD RULES:
+- Never use overflow:hidden or a fixed height on the section or on content wrappers (it clips data). The ONLY height cap allowed is max-height on an <img> so a photo can't grow huge.
+- One headline + ONE primary component (+ optional footer). Do NOT stack multiple big blocks vertically, and NEVER put two large blocks (e.g. two code panels) side by side — that always overflows.
+- If the content would not comfortably fit ~720px at readable sizes, REMOVE data. Cutting content is always better than clipping or shrinking it.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ✍️ CONTENT DENSITY — skeletal on-screen text, depth lives in the narration
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-The SLIDE shows only the skeleton; the full teaching happens in the narration (voiceover). Keep on-screen text short so it always fits and stays readable:
+The SLIDE shows only the skeleton; the full teaching happens in the narration (voiceover). Keep on-screen text short so it fits one screen and stays readable:
 - Headline: ≤ 8 words. Kicker: 1-3 words. Dek/lead: ≤ 14 words, one line.
 - Any component: MAX ~4 rows / 3 cards / 4 bars / 4 steps. Each label ≤ 6-8 words. NO paragraphs on the slide (a single ≤14-word caption is fine).
+- CODE: at most ONE code block, ≤ 8 short lines, and it is then the ENTIRE body (no second code block, no side panels next to it). NEVER show two code blocks or code+output+problem all on one slide — split that across slides or keep only the single most important snippet.
 - Prefer numbers, short phrases, keywords — never sentences stacked into a wall of text.
 - READABLE FLOORS (never smaller): body/labels ≥ 15px, secondary captions ≥ 13px, footnote ≥ 12px. If text must shrink below these to fit, you have too much data — cut it.
 
@@ -1019,8 +1023,9 @@ H) STAT ROW — 2-3 big gradient numbers with labels (for data-forward slides):
   …
 </div>
 
-I) CODE BLOCK — when showing code, it is the ONLY primary component:
-<pre style='margin:0;padding:20px 24px;border-radius:14px;background:#0a0e1a;border:1px solid rgba(255,255,255,0.08);font-family:Space Grotesk, monospace;font-size:15px;line-height:1.6;color:#cbd5e1;overflow:hidden;'><code>…keep to ~8 short lines…</code></pre>
+I) CODE BLOCK — ONE snippet only, and it is the ENTIRE body of the slide:
+<pre style='margin:0;padding:20px 24px;border-radius:14px;background:#0a0e1a;border:1px solid rgba(255,255,255,0.08);font-family:Space Grotesk, monospace;font-size:16px;line-height:1.6;color:#cbd5e1;'><code>…≤ 8 short lines, ≤ ~60 chars wide…</code></pre>
+NEVER two code blocks, and NEVER code next to another panel (output/problem). If you must contrast two versions, pick the ONE that matters and explain the rest in narration — do not put both on one slide.
 
 J) IMAGE — ONLY as a bounded side column, NEVER a big standalone square:
 The image MUST sit in one column of a 2-column body (text/component ~60% on one side, image ~40% on the other). The image column and the <img> are HEIGHT-BOUNDED so they can never blow up the slide:
@@ -1104,11 +1109,12 @@ R) METRIC CALLOUT ROW — label → big number → delta (dashboards/results):
 ANIMATION: give each distinct block class='fragment fade-up' (vary: fade-up, fade-left, fade-right, scale-in) data-fragment-index='N', numbering in reading order; keep fragmentData aligned to exactly those indices (12-18 total).
 
 SELF-CHECK before you output (all must be true):
-✓ Root is a fixed 1440x720 flex-column frame; Header+Body+Footer fit inside 720px AT NATURAL SIZE (do not rely on the scaler; fonts must not be shrunk to fit).
-✓ Body has flex:1;min-height:0;overflow:hidden; any image/table column also has min-height:0 so nothing pushes past 720px.
-✓ Any image is in a bounded ~40% side column with max-height ~440px — NO big standalone/centered square, NO image stacked under the headline.
-✓ On-screen text is skeletal: headline ≤ 8 words, ≤ 4 rows/3 cards/4 bars per component, no paragraphs; body/labels ≥ 15px.
-✓ NOTHING overlaps anything else; the headline appears exactly once.
+✓ Root <section> uses min-height:720px with NO height:720px and NO overflow:hidden (so data is never clipped); no content wrapper uses overflow:hidden or a fixed height either.
+✓ Content is light enough to sit close to one 720px screen at readable sizes — not so much that it must heavily shrink, not so little it looks empty.
+✓ ONE headline + ONE primary component. No two big blocks side by side; at most one code block (≤8 lines) and it is the whole body.
+✓ Any image is in a ~40% side column with the <img> capped at max-height ~440px — NO full-width/centered square, NO image under the headline.
+✓ On-screen text is skeletal: headline ≤ 8 words, ≤ 4 rows/3 cards/4 bars per component, no paragraphs; body/labels ≥ 15px (nothing smaller — if it must shrink below 15px, cut data).
+✓ NOTHING overlaps; the headline appears exactly once.
 ✓ One accent color; premium rounded/soft styling; each slide uses a DIFFERENT primary component from the catalog.
 ✓ Every <img> src is {{IMAGE_PLACEHOLDER}}; single quotes only; fragmentData matches the indices used.
 ═══════════════════════════════════════════════════════════════════════════════
