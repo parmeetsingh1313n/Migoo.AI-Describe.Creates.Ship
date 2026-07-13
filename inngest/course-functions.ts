@@ -18,7 +18,7 @@ import { openrouter } from "@/config/openrouter";
 import { chapterContentSlides, chapterGenerationStatus, courseImages, coursesTable } from "@/config/schema";
 import { GENERATE_SINGLE_SLIDE_PROMPT } from "@/data/Prompt";
 import { putWithRotation } from "@/lib/blob";
-import { generateNanoBananaImage } from "@/lib/apify-image";
+import { generateNanoBananaImage, generateNanoBananaImagesParallel } from "@/lib/apify-image";
 import { eq } from "drizzle-orm";
 import { inngest } from "./client";
 
@@ -454,49 +454,82 @@ export const generateCourseImagesFn = inngest.createFunction(
             return await db.select().from(courseImages).where(eq(courseImages.courseId, courseId));
         });
 
-        if (existing.length > 0) {
-            console.log(`✅ ${existing.length} images already exist for ${courseId} — skipping`);
-            return { skipped: true, count: existing.length };
-        }
+        // We now generate ONE image per SLIDE (not per chapter). Images are keyed by a
+        // GLOBAL slide index = chapterIndex * IMG_STRIDE + slideIdx, so each slide maps
+        // 1:1 to its own image at injection time. IMG_STRIDE must match the slide cap.
+        const IMG_STRIDE = 15;
 
-        const generated: any[] = [];
-
+        // Build the full per-slide job list up front.
+        const imageJobs: { globalIdx: number; chIdx: number; slideIdx: number; chapterTitle: string; topic: string; prompt: string }[] = [];
         for (let chIdx = 0; chIdx < chapters.length; chIdx++) {
             const chapter = chapters[chIdx];
             const chapterTitle = chapter.chapterTitle || `Chapter ${chIdx + 1}`;
-            const topic = chapter.subContent?.[0] || chapterTitle;
-
-            const result = await step.run(`generate-image-chapter-${chIdx}`, async () => {
-                console.log(`📸 Chapter ${chIdx + 1}/${chapters.length}: "${chapterTitle}"`);
-                const prompt = buildImagePrompt(courseName, chapterTitle, topic, chIdx);
-
-                // Generate via Leonardo
-                const leonardoUrl = await generateNanoBananaImage(prompt, 1024, 1024, "111dc692-d470-4eec-b791-3475abac4c46");
-
-                // Download → Appwrite
-                const imgRes = await fetch(leonardoUrl);
-                if (!imgRes.ok) throw new Error(`Fetch failed: ${imgRes.statusText}`);
-                const buf = Buffer.from(await imgRes.arrayBuffer());
-                const { url } = await putWithRotation(
-                    `course-images/${courseId}/${chIdx}_${Date.now()}.webp`,
-                    buf,
-                    { access: "public", contentType: "image/webp" }
-                );
-
-                const [inserted] = await db.insert(courseImages).values({
-                    courseId, imageIndex: chIdx,
-                    imagePrompt: prompt.substring(0, 500),
-                    imageUrl: url, width: 1024, height: 1024,
-                }).returning();
-
-                console.log(`💾 Saved image ${chIdx + 1} to Appwrite: ${url}`);
-                return inserted;
+            const subTopics: string[] = (chapter.subContent?.slice(0, IMG_STRIDE)) || [chapterTitle];
+            subTopics.forEach((topic, slideIdx) => {
+                const globalIdx = chIdx * IMG_STRIDE + slideIdx;
+                imageJobs.push({
+                    globalIdx, chIdx, slideIdx, chapterTitle,
+                    topic: topic || chapterTitle,
+                    prompt: buildImagePrompt(courseName, chapterTitle, topic || chapterTitle, globalIdx),
+                });
             });
-
-            if (result) generated.push(result);
         }
 
-        console.log(`🎉 Images complete: ${generated.length}/${chapters.length}`);
+        // If we already have an image for every planned slide, skip.
+        if (existing.length >= imageJobs.length && imageJobs.length > 0) {
+            console.log(`✅ ${existing.length} images already exist for ${courseId} (≥ ${imageJobs.length} slides) — skipping`);
+            return { skipped: true, count: existing.length };
+        }
+        const existingIdx = new Set(existing.map(e => e.imageIndex));
+        const pending = imageJobs.filter(j => !existingIdx.has(j.globalIdx));
+        console.log(`📸 Generating ${pending.length} slide images (${imageJobs.length} slides, ${existing.length} already present) for ${courseId}`);
+
+        const generated: any[] = [];
+
+        // Generate in parallel batches (bounded by the apify concurrency limiter + token pool).
+        const BATCH = 6;
+        for (let b = 0; b < pending.length; b += BATCH) {
+            const batch = pending.slice(b, b + BATCH);
+            const batchResult = await step.run(`generate-image-batch-${b / BATCH}`, async () => {
+                const results = await generateNanoBananaImagesParallel(
+                    batch.map(j => ({ index: j.globalIdx, prompt: j.prompt, width: 1024, height: 1024, styleUUID: "111dc692-d470-4eec-b791-3475abac4c46" })),
+                    undefined,
+                    Math.min(BATCH, batch.length),
+                );
+
+                const saved: any[] = [];
+                for (const job of batch) {
+                    const r = results.find(x => x.index === job.globalIdx);
+                    const srcUrl = r?.success ? (r.imageUrl || r.signedUrl) : undefined;
+                    if (!srcUrl) {
+                        console.warn(`⚠️ Image for slide ${job.globalIdx} failed — leaving placeholder for a later pass`);
+                        continue;
+                    }
+                    try {
+                        const imgRes = await fetch(srcUrl);
+                        if (!imgRes.ok) throw new Error(`Fetch failed: ${imgRes.statusText}`);
+                        const buf = Buffer.from(await imgRes.arrayBuffer());
+                        const { url } = await putWithRotation(
+                            `course-images/${courseId}/${job.globalIdx}_${Date.now()}.webp`,
+                            buf,
+                            { access: "public", contentType: "image/webp" }
+                        );
+                        const [inserted] = await db.insert(courseImages).values({
+                            courseId, imageIndex: job.globalIdx,
+                            imagePrompt: job.prompt.substring(0, 500),
+                            imageUrl: url, width: 1024, height: 1024,
+                        }).onConflictDoNothing().returning();
+                        if (inserted) { saved.push(inserted); console.log(`💾 Saved slide image ${job.globalIdx} → ${url}`); }
+                    } catch (e: any) {
+                        console.warn(`⚠️ Store image ${job.globalIdx} failed: ${e.message?.substring(0, 120)}`);
+                    }
+                }
+                return saved;
+            });
+            if (batchResult) generated.push(...batchResult);
+        }
+
+        console.log(`🎉 Slide images complete: ${generated.length} new (${imageJobs.length} slides total)`);
 
         // ── RETROACTIVE INJECTION PASS ───────────────────────────────────────
         // Slides may have been generated BEFORE images were ready (race condition).
@@ -507,6 +540,10 @@ export const generateCourseImagesFn = inngest.createFunction(
                 .where(eq(courseImages.courseId, courseId));
             if (savedImages.length === 0) return { injected: 0 };
             savedImages.sort((a, b) => a.imageIndex - b.imageIndex);
+            // Map each image by its global slide index for exact 1:1 lookup.
+            const byIndex = new Map(savedImages.map(img => [img.imageIndex, img.imageUrl]));
+            // chapterId → chapter position, so a slide can compute its global image index.
+            const chapterPos = new Map(chapters.map((c, i) => [c.chapterId, i]));
 
             // Load all slides for this course
             const allSlides = await db.select().from(chapterContentSlides)
@@ -516,10 +553,14 @@ export const generateCourseImagesFn = inngest.createFunction(
             for (const slide of allSlides) {
                 if (!slide.html || !slide.html.includes('{{IMAGE_PLACEHOLDER}}')) continue;
 
+                const chPos = chapterPos.get(slide.chapterId) ?? 0;
                 const slideNum = (slide.slideIndex ?? 1) - 1;
-                let imgIdx = 0;
+                const globalIdx = chPos * IMG_STRIDE + slideNum;
+                let extra = 0;
                 const newHtml = slide.html.replace(/\{\{IMAGE_PLACEHOLDER\}\}/g, () => {
-                    const url = savedImages[(slideNum + imgIdx++) % savedImages.length].imageUrl;
+                    // Exact per-slide image first; if missing, fall back to a nearby one.
+                    const url = byIndex.get(globalIdx)
+                        ?? savedImages[(globalIdx + extra++) % savedImages.length].imageUrl;
                     return url;
                 });
 
@@ -533,7 +574,7 @@ export const generateCourseImagesFn = inngest.createFunction(
             return { injected, total: allSlides.length };
         });
 
-        return { generated: generated.length, total: chapters.length, courseId };
+        return { generated: generated.length, total: imageJobs.length, courseId };
     }
 );
 
@@ -543,18 +584,31 @@ export const generateCourseImagesFn = inngest.createFunction(
 // and structured — never the same layout twice, never a uniform grid of tiles.
 // ─────────────────────────────────────────────────────────────────────────────
 const SLIDE_ARCHETYPES = [
-    "COVER — kicker + one large headline + single-line dek in the header zone; body shows a clean image in a bounded ~40% side column (image never full-width, never over text)",
-    "COMPARISON TABLE — the body is a premium 3-5 row table (Aspect / Option A / Option B) with a tinted header row; great for differences and 'X vs Y'",
-    "DONUT / RING STAT — a conic-gradient percentage ring on one side + a short label/explanation on the other",
+    // First 8 are what an 8-slide chapter uses — deliberately diverse + image-rich, NOT table/diff.
+    "COVER — kicker + one large headline + single-line dek; body shows a relevant image in a bounded ~40% side column (never full-width, never under the headline)",
+    "GAUGE / SPEEDOMETER — a half-ring conic meter showing one score/level on the left + a short explanation on the right",
+    "ANNOTATED DIAGRAM — a relevant image in a ~50% side column with 2-3 numbered callout labels beside it (labels NEXT TO the image, never on top)",
+    "FUNNEL — 4 narrowing gradient stage bars (e.g. pipeline / conversion / drop-off) with a percentage each",
+    "QUADRANT / 2x2 MATRIX — two labelled axes and four tinted cells (e.g. value vs effort); each cell one short label",
+    "HORIZONTAL TIMELINE / FLOW — 3-5 circular step nodes joined by a gradient line/arrows, each with a short label",
+    "PYRAMID / HIERARCHY — 3-4 stacked tiers from wide foundation to narrow peak, each tier one label",
+    "KPI DASHBOARD TILES — 2-3 big-number tiles each with a label and a mini trend bar; dashboard feel",
+    // Remaining components (used for longer chapters / single-slide regen).
+    "COMPARISON TABLE — a premium 3-5 row table (Aspect / Option A / Option B) with a tinted header row; for differences and 'X vs Y'",
     "BEFORE / AFTER DIFF — two side-by-side columns (red-tinted Before, green-tinted After) each with an accent left-border and a small-caps label",
-    "BUBBLE CARDS — a row of 2-3 soft rounded bubble cards (big radius, inset highlight, soft shadow), each with a gradient chip + title + one line",
+    "HUB-AND-SPOKE — a central circular concept node with 3-4 radiating pills (pills in flow columns, never over the hub)",
+    "DONUT / RING STAT — a conic-gradient percentage ring on one side + a short label/explanation on the other",
+    "CHECKLIST — DO vs DON'T: two columns of green ✓ points and red ✗ points",
     "NUMBERED STEPPER — 3-4 vertical steps with circular numbers joined by a spine; for sequences / how-to",
+    "VENN / OVERLAP — two translucent overlapping circles labelled Set A / Set B with a 'shared' middle (the only intentional overlap)",
     "MINI BAR-CHART — 3-4 gradient columns of varying height with short labels; quick visual data compare",
+    "ROADMAP / MILESTONE PATH — a horizontal gradient track with 3-4 flagged checkpoints, each a phase + short note",
+    "ICON FEATURE GRID — a 2x2 of large glyph + bold label + one line, generous spacing (premium, not cramped tiles)",
     "METRIC CALLOUT ROW — 2-3 label → big number → delta metrics; results / dashboard feel",
     "PROGRESS / METER BARS — 3-4 labelled gradient progress bars with percentages, stacked",
     "NUMBERED FEATURE ROWS — 3-4 rows separated by hairlines, each = big serif index number + bold title + one-line detail (no boxes)",
-    "HORIZONTAL TIMELINE / FLOW — 3-5 circular step nodes joined by arrows across the body, each with a short label",
     "STAT ROW — 2-3 huge gradient statistics with captions, plus a short supporting line; data-forward",
+    "BUBBLE CARDS — a row of 2-3 soft rounded bubble cards (big radius, inset highlight, soft shadow), each a gradient chip + title + one line",
     "DEFINITION / CALLOUT CARD — one key term with an accent spine, the term in serif + a concise one-line meaning",
     "TAG / CHIP CLOUD — 6-9 concept keywords as rounded pills in varied accent tints; fast overview / glossary",
     "CONCEPT vs EXAMPLE — two labelled columns: the abstract concept on one side, a concrete example (mono font) on the other",
@@ -699,9 +753,12 @@ export const generateCourseSlidesFn = inngest.createFunction(
                     // course images were generated (placeholder tokens remain).
                     let existingHtml = existing.html ?? null;
                     if (existingHtml && allImages.length > 0 && existingHtml.includes('{{IMAGE_PLACEHOLDER}}')) {
-                        let imgIdx = 0;
+                        // Each slide maps to its own image by global index (chapterIndex*15 + si).
+                        const gIdx = chapterIndex * 15 + si;
+                        let extra = 0;
                         existingHtml = existingHtml.replace(/\{\{IMAGE_PLACEHOLDER\}\}/g, () => {
-                            const url = allImages[(si + imgIdx++) % allImages.length].imageUrl;
+                            const url = allImages.find(im => im.imageIndex === gIdx)?.imageUrl
+                                ?? allImages[(gIdx + extra++) % allImages.length].imageUrl;
                             return url;
                         });
                         await db.update(chapterContentSlides)
@@ -773,11 +830,13 @@ export const generateCourseSlidesFn = inngest.createFunction(
                 slideContent.slideIndex = si + 1;
                 slideContent.slideId = slideContent.slideId || `${chapterId}-slide-${si + 1}`;
 
-                // Inject image URLs into placeholders
+                // Inject image URLs into placeholders — each slide gets its OWN image (global index).
                 if (slideContent.html && allImages.length > 0) {
-                    let imgIdx = 0;
+                    const gIdx = chapterIndex * 15 + si;
+                    let extra = 0;
                     slideContent.html = slideContent.html.replace(/\{\{IMAGE_PLACEHOLDER\}\}/g, () => {
-                        const url = allImages[(chapterIndex * totalSlides + si + imgIdx++) % allImages.length].imageUrl;
+                        const url = allImages.find(im => im.imageIndex === gIdx)?.imageUrl
+                            ?? allImages[(gIdx + extra++) % allImages.length].imageUrl;
                         return url;
                     });
                 }
@@ -841,9 +900,11 @@ export const generateCourseSlidesFn = inngest.createFunction(
             for (const slide of chapterSlides) {
                 if (!slide.html || !slide.html.includes('{{IMAGE_PLACEHOLDER}}')) continue;
                 const slideNum = (slide.slideIndex ?? 1) - 1;
-                let imgIdx = 0;
+                const gIdx = chapterIndex * 15 + slideNum;
+                let extra = 0;
                 const newHtml = slide.html.replace(/\{\{IMAGE_PLACEHOLDER\}\}/g, () => {
-                    const url = finalImages[(chapterIndex * totalSlides + slideNum + imgIdx++) % finalImages.length].imageUrl;
+                    const url = finalImages.find(im => im.imageIndex === gIdx)?.imageUrl
+                        ?? finalImages[(gIdx + extra++) % finalImages.length].imageUrl;
                     return url;
                 });
                 await db.update(chapterContentSlides)

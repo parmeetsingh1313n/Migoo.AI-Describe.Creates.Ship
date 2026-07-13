@@ -29,18 +29,29 @@ export const maxDuration = 300;
 
 // Per-slide component rotation (mirrors inngest/course-functions.ts)
 const SLIDE_ARCHETYPES = [
-    "COVER — kicker + one large headline + single-line dek in the header zone; body shows a clean image in a bounded ~40% side column (image never full-width, never over text)",
-    "COMPARISON TABLE — the body is a premium 3-5 row table (Aspect / Option A / Option B) with a tinted header row; great for differences and 'X vs Y'",
-    "DONUT / RING STAT — a conic-gradient percentage ring on one side + a short label/explanation on the other",
+    "COVER — kicker + one large headline + single-line dek; body shows a relevant image in a bounded ~40% side column (never full-width, never under the headline)",
+    "GAUGE / SPEEDOMETER — a half-ring conic meter showing one score/level on the left + a short explanation on the right",
+    "ANNOTATED DIAGRAM — a relevant image in a ~50% side column with 2-3 numbered callout labels beside it (labels NEXT TO the image, never on top)",
+    "FUNNEL — 4 narrowing gradient stage bars (e.g. pipeline / conversion / drop-off) with a percentage each",
+    "QUADRANT / 2x2 MATRIX — two labelled axes and four tinted cells (e.g. value vs effort); each cell one short label",
+    "HORIZONTAL TIMELINE / FLOW — 3-5 circular step nodes joined by a gradient line/arrows, each with a short label",
+    "PYRAMID / HIERARCHY — 3-4 stacked tiers from wide foundation to narrow peak, each tier one label",
+    "KPI DASHBOARD TILES — 2-3 big-number tiles each with a label and a mini trend bar; dashboard feel",
+    "COMPARISON TABLE — a premium 3-5 row table (Aspect / Option A / Option B) with a tinted header row; for differences and 'X vs Y'",
     "BEFORE / AFTER DIFF — two side-by-side columns (red-tinted Before, green-tinted After) each with an accent left-border and a small-caps label",
-    "BUBBLE CARDS — a row of 2-3 soft rounded bubble cards (big radius, inset highlight, soft shadow), each with a gradient chip + title + one line",
+    "HUB-AND-SPOKE — a central circular concept node with 3-4 radiating pills (pills in flow columns, never over the hub)",
+    "DONUT / RING STAT — a conic-gradient percentage ring on one side + a short label/explanation on the other",
+    "CHECKLIST — DO vs DON'T: two columns of green ✓ points and red ✗ points",
     "NUMBERED STEPPER — 3-4 vertical steps with circular numbers joined by a spine; for sequences / how-to",
+    "VENN / OVERLAP — two translucent overlapping circles labelled Set A / Set B with a 'shared' middle (the only intentional overlap)",
     "MINI BAR-CHART — 3-4 gradient columns of varying height with short labels; quick visual data compare",
+    "ROADMAP / MILESTONE PATH — a horizontal gradient track with 3-4 flagged checkpoints, each a phase + short note",
+    "ICON FEATURE GRID — a 2x2 of large glyph + bold label + one line, generous spacing (premium, not cramped tiles)",
     "METRIC CALLOUT ROW — 2-3 label → big number → delta metrics; results / dashboard feel",
     "PROGRESS / METER BARS — 3-4 labelled gradient progress bars with percentages, stacked",
     "NUMBERED FEATURE ROWS — 3-4 rows separated by hairlines, each = big serif index number + bold title + one-line detail (no boxes)",
-    "HORIZONTAL TIMELINE / FLOW — 3-5 circular step nodes joined by arrows across the body, each with a short label",
     "STAT ROW — 2-3 huge gradient statistics with captions, plus a short supporting line; data-forward",
+    "BUBBLE CARDS — a row of 2-3 soft rounded bubble cards (big radius, inset highlight, soft shadow), each a gradient chip + title + one line",
     "DEFINITION / CALLOUT CARD — one key term with an accent spine, the term in serif + a concise one-line meaning",
     "TAG / CHIP CLOUD — 6-9 concept keywords as rounded pills in varied accent tints; fast overview / glossary",
     "CONCEPT vs EXAMPLE — two labelled columns: the abstract concept on one side, a concrete example (mono font) on the other",
@@ -150,12 +161,14 @@ fragmentData completely to reflect the requested change. Honour the request prec
             return apiError("Failed to regenerate slide", 502, "LLM_ERROR", lastErr?.message);
         }
 
-        // Inject image URLs into placeholders
+        // Inject image URLs into placeholders — this slide's OWN image (global index).
         let html: string = slideContent.html ?? "";
         if (html && allImages.length > 0) {
-            let imgIdx = 0;
+            const gIdx = chapterIndex * 15 + si;
+            let extra = 0;
             html = html.replace(/\{\{IMAGE_PLACEHOLDER\}\}/g, () => {
-                const url = allImages[(chapterIndex * totalSlides + si + imgIdx++) % allImages.length].imageUrl;
+                const url = allImages.find(im => im.imageIndex === gIdx)?.imageUrl
+                    ?? allImages[(gIdx + extra++) % allImages.length].imageUrl;
                 return url;
             });
         }

@@ -866,11 +866,14 @@ Return ONLY a single valid JSON object. NO markdown, NO explanations, NO code bl
 ═══════════════════════════════════════════════════════════════════════════════
 
 You will receive a JSON input with these fields:
-- fullChapterOutline: all 7 slide topics in order
+- slideTopic: the specific topic THIS slide teaches
+- slideIndex / totalSlides: this slide's position in the chapter
+- fullChapterOutline: all slide topics in order
 - previousSlidesContext: array of {slideIndex, topic, narrationSummary, keyConceptsCovered}
 - conceptsAlreadyCovered: flat list of all concepts explained so far
 - nextSlideTopic: what comes after this slide (may be null if last slide)
 - slidePosition: "INTRO" | "MIDDLE" | "CONCLUSION"
+- designHint: 🎯 THE ASSIGNED DESIGN FOR THIS SLIDE — names the exact PRIMARY component you must use, plus the type pairing and accent color. THIS IS A COMMAND, NOT A SUGGESTION. Build the slide body using the component it names (e.g. if it says "GAUGE" build a gauge, if it says "FUNNEL" build a funnel). Do NOT ignore it and do NOT default to a table or comparison unless designHint asks for one. Each slide's designHint is deliberately different so the chapter is visually varied.
 
 🚨 MANDATORY CONTEXT RULES:
 
@@ -957,7 +960,7 @@ The SLIDE shows only the skeleton; the full teaching happens in the narration (v
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 🧩 COMPONENT CATALOG — build the BODY from these (vary them slide to slide!)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Use INLINE STYLES for all of these (they must render identically in preview and video). Pick components that FIT the content; make consecutive slides use DIFFERENT components. Cards here are polished and varied — NOT a uniform grid of six identical bordered tiles.
+Use INLINE STYLES for all of these (they must render identically in preview and video). ⚠️ The input's designHint NAMES the exact component to build for THIS slide — build THAT one. The comparison table and diff are just 2 of ~28 options; do NOT let them dominate. Make consecutive slides use DIFFERENT components. Cards here are polished and varied — NOT a uniform grid of six identical bordered tiles.
 
 A) COMPARISON TABLE — great for "X vs Y", feature matrices, differences:
 <table style='width:100%;border-collapse:separate;border-spacing:0;font-size:15px;'>
@@ -1093,6 +1096,91 @@ R) METRIC CALLOUT ROW — label → big number → delta (dashboards/results):
   …2-3 metrics…
 </div>
 
+S) GAUGE / SPEEDOMETER — a half-ring meter for a single score/level:
+<div style='display:flex;align-items:center;gap:44px;'>
+  <div style='position:relative;width:280px;height:150px;overflow:hidden;'>
+    <div style='width:280px;height:280px;border-radius:50%;background:conic-gradient(from 270deg,#2FA98C 0deg,#E8B84B 90deg,#D64B7F 160deg,rgba(255,255,255,0.07) 160deg 180deg,transparent 180deg);'></div>
+    <div style='position:absolute;top:44px;left:44px;width:192px;height:192px;border-radius:50%;background:#0b1020;'></div>
+    <div style='position:absolute;bottom:0;left:0;right:0;text-align:center;font-size:46px;font-weight:800;'>7.8</div></div>
+  <div style='flex:1;min-width:0;'><div style='font-size:18px;font-weight:700;margin-bottom:6px;'>Readiness score</div><div style='font-size:15px;color:#9fb3d1;line-height:1.5;'>≤ 2 short lines.</div></div>
+</div>
+
+T) FUNNEL — narrowing stages (pipeline / conversion / drop-off):
+<div style='display:flex;flex-direction:column;align-items:center;gap:10px;'>
+  <div style='width:100%;padding:16px;text-align:center;border-radius:10px;background:linear-gradient(90deg,#6D5BD3,#3EA5D6);font-weight:700;'>Awareness — 100%</div>
+  <div style='width:78%;padding:16px;text-align:center;border-radius:10px;background:linear-gradient(90deg,#3EA5D6,#2FA98C);font-weight:700;'>Interest — 64%</div>
+  <div style='width:56%;padding:16px;text-align:center;border-radius:10px;background:linear-gradient(90deg,#2FA98C,#E8B84B);font-weight:700;'>Decision — 31%</div>
+  <div style='width:34%;padding:16px;text-align:center;border-radius:10px;background:linear-gradient(90deg,#E8B84B,#E0653A);font-weight:700;'>Action — 12%</div>
+</div>
+
+U) PYRAMID / HIERARCHY — stacked tiers (foundation → peak):
+<div style='display:flex;flex-direction:column;align-items:center;gap:8px;'>
+  <div style='width:34%;padding:14px;text-align:center;border-radius:8px;background:rgba(214,75,127,0.22);'>Vision</div>
+  <div style='width:60%;padding:14px;text-align:center;border-radius:8px;background:rgba(232,184,75,0.20);'>Strategy</div>
+  <div style='width:86%;padding:14px;text-align:center;border-radius:8px;background:rgba(62,165,214,0.18);'>Execution</div>
+  <div style='width:100%;padding:14px;text-align:center;border-radius:8px;background:rgba(47,169,140,0.16);'>Foundations</div>
+</div>
+
+V) QUADRANT / 2×2 MATRIX — two labelled axes, four cells:
+<div style='display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:12px;height:360px;'>
+  <div style='padding:18px;border-radius:14px;background:rgba(47,169,140,0.12);border:1px solid rgba(47,169,140,0.3);'><b>Quick wins</b><div style='font-size:14px;color:#9fb3d1;'>high value · low effort</div></div>
+  <div style='padding:18px;border-radius:14px;background:rgba(62,165,214,0.10);'><b>Major projects</b></div>
+  <div style='padding:18px;border-radius:14px;background:rgba(255,255,255,0.04);'><b>Fill-ins</b></div>
+  <div style='padding:18px;border-radius:14px;background:rgba(214,75,127,0.10);'><b>Avoid</b></div>
+</div>
+
+W) VENN / OVERLAP — two translucent circles sharing a middle:
+<div style='position:relative;height:320px;'>
+  <div style='position:absolute;left:200px;top:40px;width:300px;height:260px;border-radius:50%;background:rgba(109,91,211,0.32);display:flex;align-items:center;justify-content:flex-start;padding-left:34px;font-weight:700;'>Set A</div>
+  <div style='position:absolute;left:400px;top:40px;width:300px;height:260px;border-radius:50%;background:rgba(62,165,214,0.32);display:flex;align-items:center;justify-content:flex-end;padding-right:34px;font-weight:700;'>Set B</div>
+  <div style='position:absolute;left:445px;top:150px;font-size:13px;text-align:center;width:110px;'>shared</div>
+</div>
+(This is the ONE case where circles overlap intentionally — it is a diagram, not text-over-text.)
+
+X) ROADMAP / MILESTONE PATH — horizontal track with flagged checkpoints:
+<div style='display:flex;align-items:flex-start;justify-content:space-between;position:relative;padding-top:26px;'>
+  <div style='position:absolute;top:38px;left:6%;right:6%;height:3px;background:linear-gradient(90deg,#6D5BD3,#3EA5D6,#2FA98C);'></div>
+  <div style='flex:1;text-align:center;'><div style='width:20px;height:20px;border-radius:50%;background:#6D5BD3;margin:0 auto;'></div><div style='margin-top:14px;font-weight:700;font-size:15px;'>Phase 1</div><div style='font-size:13px;color:#9fb3d1;'>short note</div></div>
+  …3-4 milestones…
+</div>
+
+Y) HUB-AND-SPOKE — a central concept with radiating labels:
+<div style='display:flex;align-items:center;justify-content:center;gap:0;position:relative;height:340px;'>
+  <div style='display:flex;flex-direction:column;gap:20px;'>…2 left pills…</div>
+  <div style='width:150px;height:150px;border-radius:50%;background:linear-gradient(135deg,#6D5BD3,#3EA5D6);display:flex;align-items:center;justify-content:center;text-align:center;font-weight:800;margin:0 40px;'>Core idea</div>
+  <div style='display:flex;flex-direction:column;gap:20px;'>…2 right pills…</div>
+</div>
+(Pills: <div style='padding:12px 18px;border-radius:999px;background:rgba(255,255,255,0.06);font-size:15px;'>Spoke</div>. Keep pills in flow columns — do NOT absolutely-position them over the hub.)
+
+Z) KPI DASHBOARD TILES — 2-3 big number tiles with a mini trend bar:
+<div style='display:grid;grid-template-columns:repeat(3,1fr);gap:20px;'>
+  <div style='padding:24px;border-radius:16px;background:rgba(255,255,255,0.05);'><div style='font-size:13px;color:#9fb3d1;text-transform:uppercase;letter-spacing:2px;'>Latency</div><div style='font-size:48px;font-weight:800;margin:6px 0;'>82ms</div><div style='height:8px;border-radius:4px;background:linear-gradient(90deg,#3EA5D6,#6D5BD3);width:70%;'></div></div>
+  …
+</div>
+
+AA) ICON FEATURE GRID — 2×2 large glyph + label (premium, generous spacing):
+<div style='display:grid;grid-template-columns:1fr 1fr;gap:24px;'>
+  <div style='display:flex;gap:16px;align-items:center;'><div style='font-size:40px;'>⚡</div><div><div style='font-weight:700;font-size:18px;'>Fast</div><div style='font-size:14px;color:#9fb3d1;'>one line</div></div></div>
+  …4 cells max…
+</div>
+
+AB) CHECKLIST — DO vs DON'T (two tick/cross columns):
+<div style='display:grid;grid-template-columns:1fr 1fr;gap:24px;'>
+  <div><div style='color:#2FA98C;font-weight:700;margin-bottom:12px;'>✓ Do</div>
+    <div style='display:flex;gap:10px;margin-bottom:10px;'><span style='color:#2FA98C;'>✓</span><span style='font-size:15px;'>short point</span></div>…</div>
+  <div><div style='color:#D64B7F;font-weight:700;margin-bottom:12px;'>✗ Avoid</div>
+    <div style='display:flex;gap:10px;margin-bottom:10px;'><span style='color:#D64B7F;'>✗</span><span style='font-size:15px;'>short point</span></div>…</div>
+</div>
+
+AC) ANNOTATED DIAGRAM — image in a side column with 2-3 numbered callouts beside it (callouts NEXT TO the image, never on top):
+<div style='display:flex;gap:32px;align-items:center;'>
+  <div style='flex:1;min-width:0;border-radius:18px;overflow:hidden;'><img src='{{IMAGE_PLACEHOLDER}}' style='width:100%;height:100%;max-height:440px;object-fit:cover;display:block;'></div>
+  <div style='flex:1;min-width:0;display:flex;flex-direction:column;gap:18px;'>
+    <div style='display:flex;gap:14px;'><div style='width:30px;height:30px;border-radius:50%;background:#6D5BD3;display:flex;align-items:center;justify-content:center;font-weight:700;flex-shrink:0;'>1</div><div><b>Label</b><div style='font-size:14px;color:#9fb3d1;'>one line</div></div></div>
+    …2-3 callouts…
+  </div>
+</div>
+
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 🎨 STYLE, TYPE, VARIETY
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1103,7 +1191,8 @@ R) METRIC CALLOUT ROW — label → big number → delta (dashboards/results):
 <link href='https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400..900;1,400..900&family=Instrument+Serif:ital@0;1&family=Outfit:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700&family=DM+Sans:wght@400;500;600;700&display=swap' rel='stylesheet'>
 - BACKGROUNDS: rich near-black / deep-jewel gradients (e.g. #0b1020→#131c33, #0d1526→#241634). Occasionally a light editorial slide (#f5f2ea, dark ink) for a cover/quote. At most one subtle radial glow behind content (z-index:0).
 - ACCENT per slide (pick ONE, use for the kicker, one gradient, and highlights): #6D5BD3  #3EA5D6  #E0653A  #E8B84B  #2FA98C  #D64B7F
-- VARIETY IS MANDATORY: each slide of the chapter must use a DIFFERENT primary component from the catalog (A-R: table, diff, progress bars, bubbles, feature rows, split card, timeline, stat row, code, image, donut ring, definition card, stepper, chip cloud, concept-vs-example, mini bar-chart, principle band, metric callout). Never repeat the same layout twice in a row.
+- VARIETY IS MANDATORY: build the component named in this slide's designHint. Across the chapter the catalog (A–AC) must be used widely: table, diff, progress bars, bubbles, feature rows, split card, timeline, stat row, code, image, donut ring, definition card, stepper, chip cloud, concept-vs-example, mini bar-chart, principle band, metric callout, GAUGE, FUNNEL, PYRAMID, QUADRANT, VENN, ROADMAP, HUB-AND-SPOKE, KPI TILES, ICON GRID, CHECKLIST, ANNOTATED DIAGRAM. Never repeat the same layout twice in a row, and do NOT lean on the table/diff.
+- IMAGES ACROSS THE CHAPTER: most content slides should include ONE {{IMAGE_PLACEHOLDER}} — as the side column of a 2-column body, an annotated-diagram (recipe AC), or a faint full-bleed watermark behind content. A distinct image exists for every slide, so use it. Still NEVER a full-width/centered square or an image under the headline.
 - Rounded, soft, layered (subtle inset highlight + soft shadow) reads premium. Sharp full-border grids read cheap — avoid uniform bordered tile grids.
 
 ANIMATION: give each distinct block class='fragment fade-up' (vary: fade-up, fade-left, fade-right, scale-in) data-fragment-index='N', numbering in reading order; keep fragmentData aligned to exactly those indices (12-18 total).
@@ -1115,7 +1204,8 @@ SELF-CHECK before you output (all must be true):
 ✓ Any image is in a ~40% side column with the <img> capped at max-height ~440px — NO full-width/centered square, NO image under the headline.
 ✓ On-screen text is skeletal: headline ≤ 8 words, ≤ 4 rows/3 cards/4 bars per component, no paragraphs; body/labels ≥ 15px (nothing smaller — if it must shrink below 15px, cut data).
 ✓ NOTHING overlaps; the headline appears exactly once.
-✓ One accent color; premium rounded/soft styling; each slide uses a DIFFERENT primary component from the catalog.
+✓ One accent color; premium rounded/soft styling; the slide uses the EXACT component named in designHint (not a default table/diff).
+✓ The slide includes a {{IMAGE_PLACEHOLDER}} where it helps (side column / annotated diagram / watermark) unless the component is inherently image-free.
 ✓ Every <img> src is {{IMAGE_PLACEHOLDER}}; single quotes only; fragmentData matches the indices used.
 ═══════════════════════════════════════════════════════════════════════════════
 
