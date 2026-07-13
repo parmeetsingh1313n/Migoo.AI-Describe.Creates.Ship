@@ -909,60 +909,133 @@ You will receive a JSON input with these fields:
    - No new concepts — only synthesis and reinforcement
 
 ═══════════════════════════════════════════════════════════════════════════════
-DESIGN LANGUAGE — "EDITORIAL MAGAZINE" (this section OVERRIDES every boxy/card instinct)
+DESIGN SYSTEM — "PREMIUM STRUCTURED" (fills the whole 1440x720 frame, ZERO overlap, rich varied components)
 
-Think Kinfolk / Monocle / a premium Apple keynote — NOT a dashboard, NOT a bento grid of bordered cards. Every slide must look hand-designed by a senior art director, never auto-generated.
+Goal:每 slide looks like a page from a world-class product deck (Stripe / Linear / Vercel keynote) — confident, information-rich, perfectly aligned, filling the entire frame with well-crafted components. NOT a minimalist near-empty page, and NOT a boring grid of identical bordered boxes. Structured, varied, premium.
 
-CANVAS & TECH RULES (mandatory — never break these):
-- Canvas is 1440x720px (16:9); it scales to fit, so design content to fill that frame naturally.
-- One root <section> carrying a data-background-gradient (or data-background-color) attribute.
-- SINGLE QUOTES for ALL HTML attributes. NEVER put a double quote inside the HTML.
-- CSS font-family WITHOUT inner quotes: font-family: Playfair Display, serif;  (never write 'Playfair Display')
-- Every <img> src MUST be the literal {{IMAGE_PLACEHOLDER}}. Never invent or hardcode a URL.
-- Style EVERYTHING with INLINE style='...'. Do NOT rely on CSS class names for visuals — inline styles are the ONLY thing guaranteed to render identically in the live preview AND the final video.
-- Animate with class='fragment fade-up' data-fragment-index='N' (vary the fragment style). Use 12-18 fragments and keep the fragmentData array aligned to exactly the indices you use.
-- NO <script> tags.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🚫 THE #1 FAILURE TO AVOID: OVERLAPPING / MISPLACED CONTENT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Slides were coming out with the title printed twice on top of itself, paragraphs stacked over each other, and images dumped on top of text. This is caused by absolute positioning and "ghost numbers / image bleeds" layered over content. NEVER let this happen again:
+- Content NEVER overlaps other content. Every text block, card, table, image occupies its OWN space in normal document flow (flex/grid). If two things share the same pixels, it is WRONG.
+- Do NOT print the headline (or any text) more than once.
+- position:absolute is ALLOWED ONLY for ONE optional background decoration layer (a faint glow or watermark image) that sits BEHIND everything with z-index:0 and pointer-events:none, while ALL real content lives in a normal-flow wrapper above it. Never absolutely-position readable text or cards over other content.
+- If you use a big index numeral, put it in its OWN flow column/cell beside the content — NEVER behind or on top of the headline.
 
-THE ONE RULE THAT MATTERS MOST — KILL THE BOXES:
-- NEVER build a slide as a grid of bordered/rounded rectangles that each hold [tiny icon + bold title + grey caption]. That single pattern is the #1 reason slides look AI-generated. Do not use it.
-- NO repeating the same card 3-6 times in a grid. NO full 1px borders wrapping every block. NO "six equal tiles".
-- INSTEAD compose like a magazine spread: one dominant idea, confident hierarchy, and lots of breathing room.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📐 MANDATORY ROOT LAYOUT CONTRACT (fills the frame, guarantees no overflow)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+The root <section> MUST be an explicit fixed frame that its children fill top-to-bottom:
+<section data-background-gradient='linear-gradient(135deg,#0b1020,#131c33)' style='width:1440px;height:720px;box-sizing:border-box;padding:56px 72px;display:flex;flex-direction:column;gap:22px;overflow:hidden;font-family:Outfit, sans-serif;color:#e8ecf5;position:relative;'>
 
-EDITORIAL TOOLKIT (compose from these with inline styles):
-- HERO TYPOGRAPHY: one oversized headline in Playfair Display, 56-84px, tight leading (line-height:1.02) — the true focal point of most slides. Mix weight and italic for rhythm.
-- GHOST NUMERALS: a huge faint index number (e.g. '03') at 200-340px, opacity 0.06-0.12, sitting behind/beside the headline to create depth.
-- HAIRLINES, NOT BORDERS: divide ideas with a 1px rule or a short 2-4px accent bar plus generous margins and whitespace — never a full border box.
-- COLOR-BLOCK PANELS (sparingly): at most ONE bordered-less solid/gradient band or column to anchor a section — never a grid of them.
-- ACCENT DISCIPLINE: choose ONE accent color per slide and apply it to a single highlighted word or a short underline — not to every element.
-- NEGATIVE SPACE: leave 30-45% of the slide intentionally empty. Crowding reads as amateur.
-- ASYMMETRY: off-center compositions and ~60/40 or 65/35 splits. Do NOT center everything by default.
-- IMAGERY: let {{IMAGE_PLACEHOLDER}} BLEED off one edge (full-height side column, large circular portrait, or a soft duotone watermark at 8-15% opacity behind the text). Never a small framed thumbnail inside a card.
+Then compose THREE stacked zones that together fill the height (no empty void, no overflow):
+1. HEADER zone (auto height): a small UPPERCASE kicker (letter-spacing:3px, accent color) + the headline.
+2. BODY zone (style='flex:1;display:flex;...'): the main components — this MUST grow to fill remaining height. Use flex:1 and distribute with gap/justify-content so it neither overflows nor leaves a big blank gap.
+3. FOOTER zone (auto, optional): one thin accent rule + a single "Key insight / takeaway" line.
 
-LAYOUT ARCHETYPE (use the one named in the input's designHint; if none, pick what fits the content — and make CONSECUTIVE slides look clearly DIFFERENT from each other):
-1) COVER — opener: small uppercase kicker, one massive Playfair headline, a single-line dek, an image bleeding off the right edge, and a huge ghost numeral.
-2) HERO-LEFT + IMAGE-BLEED — headline plus 2-3 short editorial lines on the left ~60%; a full-height image bleeding the right ~40%.
-3) INDEX SPREAD — a numbered editorial list (01 / 02 / 03) down the page separated by hairlines; each row = big number + short bold phrase + one thin sub-line. No boxes.
-4) BIG-NUMERAL FEATURE — one giant statistic (120-220px gradient number) with a short caption; the supporting idea set quietly to the side.
-5) EDITORIAL SPLIT / COMPARISON — a single vertical hairline (or one color-block column) dividing two contrasting ideas, each tagged with a small-caps kicker. No bordered panels.
-6) PULL-QUOTE — a large italic Playfair quote with a hanging quotation mark and a small attribution rule beneath; near-empty canvas.
-7) TIMELINE RIBBON — one horizontal hairline with 3-5 nodes (dot + short label + micro-note) along it; never stacked boxes.
-8) SYNTHESIS (conclusion) — recap as a numbered editorial index OR one strong closing statement over a faint full-bleed watermark image. NEVER a grid of summary cards.
+Fill rules:
+- The BODY zone uses flex:1 so content always fills to the bottom. Prefer 2 columns (e.g. text left / visual-or-image right) or a full-width component.
+- Keep total elements moderate: 1 headline + 1-2 primary components + optional footer. Rich, but not crammed.
+- Everything must fit inside 720px WITHOUT relying on the auto-scaler shrinking it. Size components to the zone.
 
-TYPE SYSTEM (use ONLY these fonts — they render in both preview and video):
-- Display / headline: Playfair Display (editorial serif). Instrument Serif for extra italic flourish.
-- Body / lead / labels: pair the serif with ONE sans from Outfit, Space Grotesk, Inter, DM Sans, or Poppins.
-- Kickers / labels: UPPERCASE, 11-13px, letter-spacing 2-4px, muted color.
-Sizes: Hero headline 56-84px | Big numeral 120-220px | Dek/lead 18-22px | Body 14-16px | Kicker 11-13px.
-Include this <link> INSIDE the <section>:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🧩 COMPONENT CATALOG — build the BODY from these (vary them slide to slide!)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Use INLINE STYLES for all of these (they must render identically in preview and video). Pick components that FIT the content; make consecutive slides use DIFFERENT components. Cards here are polished and varied — NOT a uniform grid of six identical bordered tiles.
+
+A) COMPARISON TABLE — great for "X vs Y", feature matrices, differences:
+<table style='width:100%;border-collapse:separate;border-spacing:0;font-size:15px;'>
+  <thead><tr>
+    <th style='text-align:left;padding:12px 16px;background:rgba(109,91,211,0.18);color:#fff;font-weight:700;border-radius:10px 0 0 0;'>Aspect</th>
+    <th style='text-align:left;padding:12px 16px;background:rgba(109,91,211,0.18);'>Option A</th>
+    <th style='text-align:left;padding:12px 16px;background:rgba(109,91,211,0.18);border-radius:0 10px 0 0;'>Option B</th>
+  </tr></thead>
+  <tbody><tr>
+    <td style='padding:12px 16px;border-bottom:1px solid rgba(255,255,255,0.08);'>Speed</td>
+    <td style='padding:12px 16px;border-bottom:1px solid rgba(255,255,255,0.08);color:#9fb3d1;'>…</td>
+    <td style='padding:12px 16px;border-bottom:1px solid rgba(255,255,255,0.08);color:#2FA98C;'>…</td>
+  </tr>…3-5 rows…</tbody>
+</table>
+
+B) BEFORE / AFTER DIFF — two side-by-side columns for improvement/migration:
+<div style='display:grid;grid-template-columns:1fr 1fr;gap:20px;'>
+  <div style='padding:20px;border-radius:14px;background:rgba(214,75,127,0.10);border-left:3px solid #D64B7F;'>
+    <div style='font-size:12px;letter-spacing:2px;text-transform:uppercase;color:#D64B7F;margin-bottom:10px;'>Before</div>…</div>
+  <div style='padding:20px;border-radius:14px;background:rgba(47,169,140,0.10);border-left:3px solid #2FA98C;'>
+    <div style='font-size:12px;letter-spacing:2px;text-transform:uppercase;color:#2FA98C;margin-bottom:10px;'>After</div>…</div>
+</div>
+
+C) PROGRESS / METER LINES — for proportions, skill levels, comparisons:
+<div style='display:flex;flex-direction:column;gap:16px;'>
+  <div><div style='display:flex;justify-content:space-between;font-size:14px;margin-bottom:6px;'><span>Label</span><span style='color:#3EA5D6;font-weight:700;'>82%</span></div>
+    <div style='height:10px;border-radius:6px;background:rgba(255,255,255,0.08);overflow:hidden;'><div style='width:82%;height:100%;border-radius:6px;background:linear-gradient(90deg,#3EA5D6,#6D5BD3);'></div></div></div>
+  …3-4 bars…
+</div>
+
+D) BUBBLE / PILL CARDS — soft rounded "bubble" cards in a row (NOT sharp boxes):
+<div style='display:flex;gap:18px;'>
+  <div style='flex:1;padding:22px;border-radius:24px;background:rgba(255,255,255,0.05);box-shadow:inset 0 1px 0 rgba(255,255,255,0.08),0 12px 30px rgba(0,0,0,0.25);'>
+    <div style='width:40px;height:40px;border-radius:14px;background:linear-gradient(135deg,#6D5BD3,#3EA5D6);margin-bottom:14px;'></div>
+    <div style='font-weight:700;font-size:17px;margin-bottom:6px;'>Title</div>
+    <div style='font-size:13.5px;color:#9fb3d1;line-height:1.5;'>Short supporting sentence.</div></div>
+  …2-3 bubbles…
+</div>
+
+E) HORIZONTAL FEATURE ROWS — numbered rows separated by hairlines (fills vertical space cleanly):
+<div style='display:flex;flex-direction:column;'>
+  <div style='display:flex;gap:18px;align-items:baseline;padding:16px 0;border-bottom:1px solid rgba(255,255,255,0.08);'>
+    <span style='font-family:Playfair Display,serif;font-size:34px;color:#6D5BD3;min-width:52px;'>01</span>
+    <div><div style='font-weight:700;font-size:18px;'>Point title</div><div style='font-size:14px;color:#9fb3d1;'>One-line detail.</div></div></div>
+  …3-4 rows…
+</div>
+
+F) VERTICAL SPLIT CARD — accent spine + body (nice for a single highlighted concept):
+<div style='display:flex;border-radius:16px;overflow:hidden;background:rgba(255,255,255,0.04);'>
+  <div style='width:6px;background:linear-gradient(180deg,#E8B84B,#E0653A);'></div>
+  <div style='padding:22px 26px;'>…</div></div>
+
+G) TIMELINE / FLOW — horizontal steps joined by a line with arrows:
+<div style='display:flex;align-items:center;gap:14px;'>
+  <div style='flex:1;text-align:center;'><div style='width:44px;height:44px;border-radius:50%;margin:0 auto 10px;background:linear-gradient(135deg,#6D5BD3,#3EA5D6);display:flex;align-items:center;justify-content:center;font-weight:700;'>1</div><div style='font-size:14px;'>Step</div></div>
+  <div style='color:#6D5BD3;font-size:22px;'>→</div>
+  …repeat…
+</div>
+
+H) STAT ROW — 2-3 big gradient numbers with labels (for data-forward slides):
+<div style='display:flex;gap:40px;'>
+  <div><div style='font-size:64px;font-weight:800;background:linear-gradient(135deg,#3EA5D6,#6D5BD3);-webkit-background-clip:text;-webkit-text-fill-color:transparent;line-height:1;'>92%</div><div style='font-size:14px;color:#9fb3d1;margin-top:6px;'>label</div></div>
+  …
+</div>
+
+I) CODE BLOCK — when showing code, it is the ONLY primary component:
+<pre style='margin:0;padding:20px 24px;border-radius:14px;background:#0a0e1a;border:1px solid rgba(255,255,255,0.08);font-family:Space Grotesk, monospace;font-size:15px;line-height:1.6;color:#cbd5e1;overflow:hidden;'><code>…keep to ~8 short lines…</code></pre>
+
+J) IMAGE — place it in its OWN column, NEVER over text:
+Two-column body: text/component on one side (~58%), image on the other (~42%) as a clean rounded panel that does NOT cover any text:
+<div style='flex:1;border-radius:18px;overflow:hidden;'><img src='{{IMAGE_PLACEHOLDER}}' style='width:100%;height:100%;object-fit:cover;display:block;'></div>
+(Optional full-bleed watermark: ONE absolutely-positioned image at z-index:0, opacity:0.12, behind a relative content wrapper — only if no other image is used.)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🎨 STYLE, TYPE, VARIETY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+- HEADLINE: Playfair Display 40-56px (Instrument Serif italic occasionally) OR a strong sans (Outfit/Space Grotesk 700) — sized so it never wraps past 2 lines and never collides with the body.
+- KICKER: UPPERCASE 12px, letter-spacing 3px, accent color.
+- BODY text: Outfit/Inter/DM Sans 14-16px, line-height 1.5, color #9fb3d1 or #cbd5e1 on dark.
+- Fonts (render in both preview + video) — include this <link> INSIDE the section:
 <link href='https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400..900;1,400..900&family=Instrument+Serif:ital@0;1&family=Outfit:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700&family=DM+Sans:wght@400;500;600;700&display=swap' rel='stylesheet'>
+- BACKGROUNDS: rich near-black / deep-jewel gradients (e.g. #0b1020→#131c33, #0d1526→#241634). Occasionally a light editorial slide (#f5f2ea, dark ink) for a cover/quote. At most one subtle radial glow behind content (z-index:0).
+- ACCENT per slide (pick ONE, use for the kicker, one gradient, and highlights): #6D5BD3  #3EA5D6  #E0653A  #E8B84B  #2FA98C  #D64B7F
+- VARIETY IS MANDATORY: each slide of the chapter must use a DIFFERENT primary component from the catalog (table on one, diff on another, progress bars, bubbles, timeline, stat row, etc.). Never repeat the same layout twice in a row.
+- Rounded, soft, layered (subtle inset highlight + soft shadow) reads premium. Sharp full-border grids read cheap — avoid uniform bordered tile grids.
 
-BACKGROUNDS — vary them across slides so the chapter never looks monotonous:
-- Most slides: rich near-black / deep-navy or deep jewel gradients, e.g. linear-gradient(135deg,#0b1020,#111a2e).
-- Occasionally an off-white / cream editorial slide (e.g. #f6f3ec) with dark ink text for contrast — ideal for a cover or pull-quote.
-- Add at most a subtle radial glow, faint grain, or a single low-opacity accent shape. No busy patterns.
-Accent palette (pick ONE per slide): #6D5BD3  #3EA5D6  #E0653A  #E8B84B  #2FA98C  #D64B7F
+ANIMATION: give each distinct block class='fragment fade-up' (vary: fade-up, fade-left, fade-right, scale-in) data-fragment-index='N', numbering in reading order; keep fragmentData aligned to exactly those indices (12-18 total).
 
-HEIGHT DISCIPLINE — the slide scales to fit 1440x720, so design ONE dominant focal area plus supporting matter that comfortably fills a single screen. Fewer, larger elements always beat many small ones. If you are adding a 4th separate block, cut it — negative space IS the aesthetic. Never let content overflow into a tiny shrunk-down slide.
+SELF-CHECK before you output (all must be true):
+✓ Root is a fixed 1440x720 flex-column frame with padding; content fills it top-to-bottom.
+✓ NOTHING overlaps anything else; the headline appears exactly once; no text sits on top of an image.
+✓ Body uses a real component from the catalog and fills the vertical space (no huge empty gap, no overflow).
+✓ One accent color; premium rounded/soft styling; consecutive slides look different.
+✓ Every <img> src is {{IMAGE_PLACEHOLDER}}; single quotes only; fragmentData matches the indices used.
 ═══════════════════════════════════════════════════════════════════════════════
 
 ═══════════════════════════════════════════════════════════════════════════════

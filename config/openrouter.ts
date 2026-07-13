@@ -182,21 +182,19 @@ class OpenRouterClient {
         if (modelsToTry.length === 0) throw new Error('No OpenRouter model configured');
         const allKeys = this.getAllKeys();
 
-        // Extra design mandate injected universally to guarantee editorial,
-        // magazine-grade, NON-boxy 16:9 slides that never look AI-generated.
+        // Extra design mandate injected universally to guarantee premium,
+        // structured, well-filled 16:9 slides with ZERO overlapping content.
         const designBooster = `
 
 CRITICAL STRUCTURAL & DESIGN MANDATES (override defaults):
 1. NO HARDCODED IMAGE URLS: You MUST use the literal string '{{IMAGE_PLACEHOLDER}}' in the src attribute of EVERY <img> tag. NEVER hallucinate or use any Appwrite URLs or HTTP/HTTPS URLs.
-2. STYLE WITH INLINE STYLES, NOT CLASSES: Style every element with an inline style='...' attribute. Do NOT depend on pre-named CSS classes for visuals — inline styles are the only thing that renders identically in the preview and the final video.
-3. PREMIUM FONT SELECTION & INNER QUOTES:
-   - Editorial pairing: a serif DISPLAY headline (Playfair Display, or Instrument Serif for italic flourish) paired with ONE sans (Outfit, Space Grotesk, Inter, DM Sans, or Poppins). Mix families across slides for a high-end, diverse feel.
-   - IMPORTANT: HTML style attributes are wrapped in single quotes (style='...'), so NEVER use single quotes inside style values. Write font stacks WITHOUT inner quotes: font-family: Playfair Display, serif; or font-family: Outfit, sans-serif;
-4. FRAGMENT DATA ALIGNMENT: The "fragmentData" JSON array must contain EXACTLY the sequence of indices present in the HTML data-fragment-index attributes (e.g. indices 0..9 → output [0,1,2,3,4,5,6,7,8,9]). Do NOT pad with unused indices.
-5. LAYOUT & 16:9 CANVAS: The slide is a fixed 1440x720px landscape frame that scales to fit. Design ONE dominant focal area (a hero headline or a giant numeral) plus a little supporting matter — fewer, larger elements. Leave 30-45% of the canvas as negative space. Use asymmetric ~60/40 compositions; do NOT center everything.
-   - If there is an image ({{IMAGE_PLACEHOLDER}}), let it BLEED off one edge (full-height side column, large circle, or a faint 8-15% watermark behind the text). NEVER a small framed thumbnail inside a card.
-6. KILL THE BOXES (most important): Do NOT build the slide as a grid of bordered/rounded rectangles, and do NOT repeat the same card 3-6 times. NO full borders wrapping every block, NO "six equal tiles", NO [tiny-icon + bold title + grey caption] rows. Separate ideas with generous whitespace, a 1px hairline, or a short accent bar — not boxes. Compose like a premium magazine spread.
-7. EDITORIAL, HIGH-CONTRAST AESTHETICS: Rich near-black / deep-jewel gradient backgrounds (occasionally a cream editorial slide with dark ink). ONE accent color per slide applied to a single highlighted word or underline. A huge faint ghost numeral behind the headline adds depth. Confident typographic hierarchy over decoration.
+2. STYLE WITH INLINE STYLES, NOT CLASSES: Style every element with an inline style='...' attribute. Inline styles are the only thing that renders identically in the preview and the final video.
+3. FONTS & INNER QUOTES: Pair a display headline font with ONE body sans. HTML style attributes use single quotes (style='...'), so NEVER put single quotes inside style values — write font stacks bare: font-family: Playfair Display, serif; or font-family: Outfit, sans-serif;
+4. FRAGMENT DATA ALIGNMENT: The "fragmentData" JSON array must contain EXACTLY the indices present in the HTML data-fragment-index attributes (indices 0..9 → [0,1,2,3,4,5,6,7,8,9]). Do NOT pad with unused indices.
+5. NO OVERLAP — THE #1 RULE: Content must NEVER overlap other content. Every text block, card, table and image sits in its OWN space in normal flex/grid flow. Print the headline exactly ONCE. position:absolute is allowed ONLY for a single decoration layer BEHIND everything (z-index:0, pointer-events:none) with all real content in a normal-flow wrapper above it. NEVER place a numeral or image on top of / behind readable text. Images go in their OWN column, never over text.
+6. FILL THE FRAME — ROOT CONTRACT: The root <section> MUST be a fixed frame its children fill: style='width:1440px;height:720px;box-sizing:border-box;padding:56px 72px;display:flex;flex-direction:column;gap:22px;overflow:hidden;'. Stack a header (kicker + headline), a BODY with style='flex:1;...' that grows to fill the remaining height, and an optional footer. No big empty gaps, no overflow.
+7. USE RICH VARIED COMPONENTS: Build the body from real, well-crafted components — comparison tables, before/after diff columns, progress/meter bars, soft rounded bubble cards, numbered hairline feature rows, vertical accent-spine cards, horizontal timelines with arrows, big-stat rows, or a single code block. Each slide should use a DIFFERENT primary component; make consecutive slides look distinct. Rounded, soft, layered styling reads premium. Avoid a uniform grid of identical bordered tiles.
+8. AESTHETICS: Rich near-black / deep-jewel gradient backgrounds (occasionally a light editorial slide). ONE accent color per slide for the kicker, one gradient and highlights. Confident hierarchy; readable contrast.
 `;
 
         let lastError: any;
@@ -214,7 +212,7 @@ CRITICAL STRUCTURAL & DESIGN MANDATES (override defaults):
    - CORRECT: style='font-size: 14px; opacity: 0;' class='fragment fade-in'
    - INCORRECT: style='font-size: 14px; opacity: 0; class='fragment fade-in' (MISSING the closing single quote for the style attribute before class!)
    Double-check every tag: ensure style='...' and class='...' are completely separate and each is enclosed in its own single quotes!
-2. HEIGHT BUDGET & NO OVERCROWDING: The 16:9 landscape canvas is fixed (720px height). Keep it airy — ONE dominant element (a big headline or giant numeral) plus at most 2 small supporting pieces. Fewer, larger elements; generous negative space. NEVER a grid of bordered cards. If there is a code block (<pre>), it MUST be the ONLY content element on the slide.
+2. NO OVERLAP + FILL THE FRAME: Content must NEVER overlap other content — every block sits in its own flex/grid space; print the headline once; images go in their own column, never over text. The root <section> is a fixed 1440x720 flex-column frame (padding:56px 72px; overflow:hidden) whose body uses flex:1 to fill the height. Use ONE clear primary component (table, diff, progress bars, bubble cards, feature rows, timeline, or stat row) plus a headline — filled but not crammed. If there is a code block (<pre>), it MUST be the ONLY primary component.
 3. VALID ESCAPED JSON: Every double quote (") inside the HTML string value MUST be escaped as \\" or removed. Never write a raw unescaped double quote (") inside any JSON string field.
 4. Keep paragraphs short (maximum 1-2 lines per paragraph).
 `;

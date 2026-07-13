@@ -538,25 +538,26 @@ export const generateCourseImagesFn = inngest.createFunction(
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SHARED — per-slide editorial design rotation (used by slide generation + regen)
-// Rotates through magazine-style archetypes, serif/sans pairings and accents so
-// every slide in a chapter looks distinct — NOT a grid of identical cards.
+// SHARED — per-slide component rotation (used by slide generation + regen)
+// Steers each slide toward a DIFFERENT primary component so a chapter is varied
+// and structured — never the same layout twice, never a uniform grid of tiles.
 // ─────────────────────────────────────────────────────────────────────────────
 const SLIDE_ARCHETYPES = [
-    "COVER — kicker + one massive Playfair headline + single-line dek + image bleeding off the right edge + huge ghost numeral",
-    "HERO-LEFT + IMAGE-BLEED — headline and 2-3 editorial lines on the left ~60%, full-height image bleeding the right ~40%",
-    "INDEX SPREAD — numbered editorial list (01/02/03) down the page separated by hairlines; big number + bold phrase + thin sub-line, no boxes",
-    "BIG-NUMERAL FEATURE — one giant statistic (120-220px gradient number) with a short caption, supporting idea set quietly aside",
-    "EDITORIAL SPLIT — one vertical hairline (or a single color-block column) dividing two contrasting ideas, each with a small-caps kicker",
-    "PULL-QUOTE — a large italic Playfair quote with a hanging quotation mark and a small attribution rule, near-empty canvas",
-    "TIMELINE RIBBON — one horizontal hairline with 3-5 nodes (dot + short label + micro-note) along it, never stacked boxes",
+    "COVER — kicker + one large headline + single-line dek in the header zone; body shows a clean image in its own full-height rounded panel (image never over text)",
+    "COMPARISON TABLE — the body is a premium 3-5 row table (Aspect / Option A / Option B) with a tinted header row; great for differences and 'X vs Y'",
+    "BEFORE / AFTER DIFF — two side-by-side columns (red-tinted Before, green-tinted After) each with an accent left-border and a small-caps label",
+    "PROGRESS / METER BARS — 3-4 labelled gradient progress bars with percentages, stacked and filling the body zone",
+    "BUBBLE CARDS — a row of 2-3 soft rounded bubble cards (big radius, inset highlight, soft shadow), each with a gradient chip + title + one line",
+    "NUMBERED FEATURE ROWS — 3-4 rows separated by hairlines, each = big serif index number + bold title + one-line detail (no boxes)",
+    "HORIZONTAL TIMELINE / FLOW — 3-5 circular step nodes joined by arrows across the body, each with a short label",
+    "STAT ROW — 2-3 huge gradient statistics with captions, plus a short supporting line; data-forward",
 ];
 const SLIDE_TYPE_PAIRS = [
     "Playfair Display headline + Outfit body",
+    "Space Grotesk headline + Inter body",
+    "Playfair Display headline + DM Sans body",
+    "Outfit bold headline + Inter body",
     "Instrument Serif italic headline + Space Grotesk body",
-    "Playfair Display headline + Inter body",
-    "Instrument Serif headline + DM Sans body",
-    "Playfair Display italic headline + Poppins body",
 ];
 const SLIDE_ACCENTS = ["#6D5BD3", "#3EA5D6", "#E0653A", "#E8B84B", "#2FA98C", "#D64B7F"];
 
