@@ -923,20 +923,32 @@ Slides were coming out with the title printed twice on top of itself, paragraphs
 - If you use a big index numeral, put it in its OWN flow column/cell beside the content — NEVER behind or on top of the headline.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-📐 MANDATORY ROOT LAYOUT CONTRACT (fills the frame, guarantees no overflow)
+📐 MANDATORY ROOT LAYOUT CONTRACT — FIT 720px AT NATURAL SIZE, NEVER GET ZOOMED OUT
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-The root <section> MUST be an explicit fixed frame that its children fill top-to-bottom:
-<section data-background-gradient='linear-gradient(135deg,#0b1020,#131c33)' style='width:1440px;height:720px;box-sizing:border-box;padding:56px 72px;display:flex;flex-direction:column;gap:22px;overflow:hidden;font-family:Outfit, sans-serif;color:#e8ecf5;position:relative;'>
+CRITICAL: the video renderer measures your slide's REAL height and, if it is taller than 720px, it SHRINKS THE WHOLE SLIDE DOWN to fit — which makes every font tiny and unreadable. This already happened (a big image + text overflowed and everything zoomed out). You MUST design so the content fits inside 720px at its natural size. Do NOT rely on the scaler. If content does not fit, REMOVE data — never let it overflow.
 
-Then compose THREE stacked zones that together fill the height (no empty void, no overflow):
-1. HEADER zone (auto height): a small UPPERCASE kicker (letter-spacing:3px, accent color) + the headline.
-2. BODY zone (style='flex:1;display:flex;...'): the main components — this MUST grow to fill remaining height. Use flex:1 and distribute with gap/justify-content so it neither overflows nor leaves a big blank gap.
-3. FOOTER zone (auto, optional): one thin accent rule + a single "Key insight / takeaway" line.
+The root <section> is a fixed frame:
+<section data-background-gradient='linear-gradient(135deg,#0b1020,#131c33)' style='width:1440px;height:720px;box-sizing:border-box;padding:44px 64px;display:flex;flex-direction:column;gap:20px;overflow:hidden;font-family:Outfit, sans-serif;color:#e8ecf5;position:relative;'>
 
-Fill rules:
-- The BODY zone uses flex:1 so content always fills to the bottom. Prefer 2 columns (e.g. text left / visual-or-image right) or a full-width component.
-- Keep total elements moderate: 1 headline + 1-2 primary components + optional footer. Rich, but not crammed.
-- Everything must fit inside 720px WITHOUT relying on the auto-scaler shrinking it. Size components to the zone.
+Compose THREE stacked zones with a STRICT HEIGHT BUDGET (they must sum to ≤ 632px so 44px top + 44px bottom padding = 720):
+1. HEADER zone (~120px max): UPPERCASE kicker (letter-spacing:3px, accent) + headline (≤ 2 lines).
+2. BODY zone (~450px max): style='flex:1;min-height:0;overflow:hidden;display:flex;...' — ONE primary component that fills this space. The 'min-height:0' is MANDATORY: without it a tall child (especially an image) expands the frame past 720 and the slide gets zoomed out.
+3. FOOTER zone (~42px, optional): a thin accent rule + one short "Key insight" line.
+
+HARD RULES that prevent the zoom-out:
+- Body MUST have min-height:0 and overflow:hidden. Any flex column holding an image/table MUST also have min-height:0 (and min-width:0) so it cannot push the height.
+- NEVER place a large standalone/centered image that stacks under the headline (that is exactly what got zoomed out). Images go ONLY in a bounded side column (see recipe J).
+- Keep it to 1 headline + 1 primary component (+ optional footer). Do NOT stack multiple big blocks vertically.
+- Everything sized so it visibly fits with a little breathing room — assume the scaler is OFF.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✍️ CONTENT DENSITY — skeletal on-screen text, depth lives in the narration
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+The SLIDE shows only the skeleton; the full teaching happens in the narration (voiceover). Keep on-screen text short so it always fits and stays readable:
+- Headline: ≤ 8 words. Kicker: 1-3 words. Dek/lead: ≤ 14 words, one line.
+- Any component: MAX ~4 rows / 3 cards / 4 bars / 4 steps. Each label ≤ 6-8 words. NO paragraphs on the slide (a single ≤14-word caption is fine).
+- Prefer numbers, short phrases, keywords — never sentences stacked into a wall of text.
+- READABLE FLOORS (never smaller): body/labels ≥ 15px, secondary captions ≥ 13px, footnote ≥ 12px. If text must shrink below these to fit, you have too much data — cut it.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 🧩 COMPONENT CATALOG — build the BODY from these (vary them slide to slide!)
@@ -1010,10 +1022,71 @@ H) STAT ROW — 2-3 big gradient numbers with labels (for data-forward slides):
 I) CODE BLOCK — when showing code, it is the ONLY primary component:
 <pre style='margin:0;padding:20px 24px;border-radius:14px;background:#0a0e1a;border:1px solid rgba(255,255,255,0.08);font-family:Space Grotesk, monospace;font-size:15px;line-height:1.6;color:#cbd5e1;overflow:hidden;'><code>…keep to ~8 short lines…</code></pre>
 
-J) IMAGE — place it in its OWN column, NEVER over text:
-Two-column body: text/component on one side (~58%), image on the other (~42%) as a clean rounded panel that does NOT cover any text:
-<div style='flex:1;border-radius:18px;overflow:hidden;'><img src='{{IMAGE_PLACEHOLDER}}' style='width:100%;height:100%;object-fit:cover;display:block;'></div>
-(Optional full-bleed watermark: ONE absolutely-positioned image at z-index:0, opacity:0.12, behind a relative content wrapper — only if no other image is used.)
+J) IMAGE — ONLY as a bounded side column, NEVER a big standalone square:
+The image MUST sit in one column of a 2-column body (text/component ~60% on one side, image ~40% on the other). The image column and the <img> are HEIGHT-BOUNDED so they can never blow up the slide:
+<div style='flex:1;display:flex;gap:32px;min-height:0;'>
+  <div style='flex:1.5;min-width:0;min-height:0;display:flex;flex-direction:column;justify-content:center;'>…text / a small component…</div>
+  <div style='flex:1;min-width:0;min-height:0;border-radius:18px;overflow:hidden;'>
+    <img src='{{IMAGE_PLACEHOLDER}}' style='width:100%;height:100%;max-height:440px;object-fit:cover;display:block;'>
+  </div>
+</div>
+NEVER: a full-width image, a centered square image, or an image stacked directly under the headline (that overflows and zooms the whole slide out). The image is a supporting side element, not the focus.
+(Optional instead: ONE full-bleed watermark image — position:absolute; inset:0; width:100%; height:100%; object-fit:cover; opacity:0.12; z-index:0; pointer-events:none — with all content in a position:relative; z-index:1 wrapper above it.)
+
+K) DONUT / RING STAT — a percentage ring via conic-gradient (great for "X% of…"):
+<div style='display:flex;align-items:center;gap:40px;'>
+  <div style='width:200px;height:200px;border-radius:50%;background:conic-gradient(#3EA5D6 0% 72%, rgba(255,255,255,0.08) 72% 100%);display:flex;align-items:center;justify-content:center;'>
+    <div style='width:150px;height:150px;border-radius:50%;background:#0b1020;display:flex;align-items:center;justify-content:center;font-size:44px;font-weight:800;'>72%</div></div>
+  <div style='flex:1;min-width:0;'><div style='font-size:18px;font-weight:700;margin-bottom:8px;'>What this measures</div><div style='font-size:15px;color:#9fb3d1;line-height:1.5;'>≤ 2 short lines.</div></div>
+</div>
+
+L) DEFINITION / CALLOUT CARD — one key term explained (accent spine):
+<div style='display:flex;gap:0;border-radius:16px;overflow:hidden;background:rgba(255,255,255,0.04);'>
+  <div style='width:6px;background:linear-gradient(180deg,#6D5BD3,#3EA5D6);'></div>
+  <div style='padding:26px 30px;'>
+    <div style='font-size:13px;letter-spacing:2px;text-transform:uppercase;color:#6D5BD3;margin-bottom:8px;'>Definition</div>
+    <div style='font-family:Playfair Display,serif;font-size:26px;margin-bottom:8px;'>The term</div>
+    <div style='font-size:16px;color:#c7d2e2;line-height:1.5;'>A concise one-line meaning.</div></div>
+</div>
+
+M) NUMBERED STEPPER — vertical steps joined by a spine (for sequences/how-to):
+<div style='display:flex;flex-direction:column;gap:18px;'>
+  <div style='display:flex;gap:18px;align-items:flex-start;'>
+    <div style='width:34px;height:34px;border-radius:50%;background:linear-gradient(135deg,#6D5BD3,#3EA5D6);display:flex;align-items:center;justify-content:center;font-weight:700;flex-shrink:0;'>1</div>
+    <div><div style='font-weight:700;font-size:17px;'>Step title</div><div style='font-size:14px;color:#9fb3d1;'>One-line detail.</div></div></div>
+  …3-4 steps…
+</div>
+
+N) TAG / CHIP CLOUD — key concepts as pills (fast overview / glossary):
+<div style='display:flex;flex-wrap:wrap;gap:12px;'>
+  <span style='padding:10px 18px;border-radius:999px;background:rgba(109,91,211,0.15);border:1px solid rgba(109,91,211,0.35);font-size:15px;font-weight:600;'>Concept</span>
+  …6-9 chips, vary accent tints…
+</div>
+
+O) CONCEPT vs EXAMPLE — two labelled columns (abstract | concrete):
+<div style='display:grid;grid-template-columns:1fr 1fr;gap:24px;'>
+  <div style='padding:22px;border-radius:14px;background:rgba(255,255,255,0.04);'><div style='font-size:12px;letter-spacing:2px;text-transform:uppercase;color:#3EA5D6;margin-bottom:10px;'>Concept</div><div style='font-size:16px;line-height:1.5;'>…</div></div>
+  <div style='padding:22px;border-radius:14px;background:rgba(62,165,214,0.10);'><div style='font-size:12px;letter-spacing:2px;text-transform:uppercase;color:#E8B84B;margin-bottom:10px;'>In practice</div><div style='font-family:Space Grotesk,monospace;font-size:15px;line-height:1.6;color:#cbd5e1;'>…</div></div>
+</div>
+
+P) MINI BAR-CHART — columns of varying height (quick data compare):
+<div style='display:flex;align-items:flex-end;gap:26px;height:300px;padding:0 10px;'>
+  <div style='flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;'>
+    <div style='width:100%;height:64%;border-radius:10px 10px 0 0;background:linear-gradient(180deg,#3EA5D6,#6D5BD3);'></div>
+    <div style='margin-top:10px;font-size:14px;'>Label</div></div>
+  …3-4 bars, vary heights…
+</div>
+
+Q) PRINCIPLE BAND — one strong statement in a tinted full-width band:
+<div style='padding:34px 40px;border-radius:18px;background:linear-gradient(135deg,rgba(109,91,211,0.16),rgba(62,165,214,0.10));border:1px solid rgba(255,255,255,0.08);'>
+  <div style='font-family:Playfair Display,serif;font-style:italic;font-size:30px;line-height:1.3;'>A single memorable principle, stated plainly.</div>
+</div>
+
+R) METRIC CALLOUT ROW — label → big number → delta (dashboards/results):
+<div style='display:flex;gap:44px;'>
+  <div><div style='font-size:13px;color:#9fb3d1;text-transform:uppercase;letter-spacing:2px;margin-bottom:8px;'>Renders</div><div style='font-size:56px;font-weight:800;line-height:1;'>1.2k</div><div style='font-size:14px;color:#2FA98C;margin-top:6px;'>▲ 38% faster</div></div>
+  …2-3 metrics…
+</div>
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 🎨 STYLE, TYPE, VARIETY
@@ -1025,16 +1098,18 @@ Two-column body: text/component on one side (~58%), image on the other (~42%) as
 <link href='https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400..900;1,400..900&family=Instrument+Serif:ital@0;1&family=Outfit:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700&family=DM+Sans:wght@400;500;600;700&display=swap' rel='stylesheet'>
 - BACKGROUNDS: rich near-black / deep-jewel gradients (e.g. #0b1020→#131c33, #0d1526→#241634). Occasionally a light editorial slide (#f5f2ea, dark ink) for a cover/quote. At most one subtle radial glow behind content (z-index:0).
 - ACCENT per slide (pick ONE, use for the kicker, one gradient, and highlights): #6D5BD3  #3EA5D6  #E0653A  #E8B84B  #2FA98C  #D64B7F
-- VARIETY IS MANDATORY: each slide of the chapter must use a DIFFERENT primary component from the catalog (table on one, diff on another, progress bars, bubbles, timeline, stat row, etc.). Never repeat the same layout twice in a row.
+- VARIETY IS MANDATORY: each slide of the chapter must use a DIFFERENT primary component from the catalog (A-R: table, diff, progress bars, bubbles, feature rows, split card, timeline, stat row, code, image, donut ring, definition card, stepper, chip cloud, concept-vs-example, mini bar-chart, principle band, metric callout). Never repeat the same layout twice in a row.
 - Rounded, soft, layered (subtle inset highlight + soft shadow) reads premium. Sharp full-border grids read cheap — avoid uniform bordered tile grids.
 
 ANIMATION: give each distinct block class='fragment fade-up' (vary: fade-up, fade-left, fade-right, scale-in) data-fragment-index='N', numbering in reading order; keep fragmentData aligned to exactly those indices (12-18 total).
 
 SELF-CHECK before you output (all must be true):
-✓ Root is a fixed 1440x720 flex-column frame with padding; content fills it top-to-bottom.
-✓ NOTHING overlaps anything else; the headline appears exactly once; no text sits on top of an image.
-✓ Body uses a real component from the catalog and fills the vertical space (no huge empty gap, no overflow).
-✓ One accent color; premium rounded/soft styling; consecutive slides look different.
+✓ Root is a fixed 1440x720 flex-column frame; Header+Body+Footer fit inside 720px AT NATURAL SIZE (do not rely on the scaler; fonts must not be shrunk to fit).
+✓ Body has flex:1;min-height:0;overflow:hidden; any image/table column also has min-height:0 so nothing pushes past 720px.
+✓ Any image is in a bounded ~40% side column with max-height ~440px — NO big standalone/centered square, NO image stacked under the headline.
+✓ On-screen text is skeletal: headline ≤ 8 words, ≤ 4 rows/3 cards/4 bars per component, no paragraphs; body/labels ≥ 15px.
+✓ NOTHING overlaps anything else; the headline appears exactly once.
+✓ One accent color; premium rounded/soft styling; each slide uses a DIFFERENT primary component from the catalog.
 ✓ Every <img> src is {{IMAGE_PLACEHOLDER}}; single quotes only; fragmentData matches the indices used.
 ═══════════════════════════════════════════════════════════════════════════════
 

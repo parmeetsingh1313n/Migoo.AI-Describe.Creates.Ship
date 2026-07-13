@@ -29,14 +29,22 @@ export const maxDuration = 300;
 
 // Per-slide component rotation (mirrors inngest/course-functions.ts)
 const SLIDE_ARCHETYPES = [
-    "COVER — kicker + one large headline + single-line dek in the header zone; body shows a clean image in its own full-height rounded panel (image never over text)",
+    "COVER — kicker + one large headline + single-line dek in the header zone; body shows a clean image in a bounded ~40% side column (image never full-width, never over text)",
     "COMPARISON TABLE — the body is a premium 3-5 row table (Aspect / Option A / Option B) with a tinted header row; great for differences and 'X vs Y'",
+    "DONUT / RING STAT — a conic-gradient percentage ring on one side + a short label/explanation on the other",
     "BEFORE / AFTER DIFF — two side-by-side columns (red-tinted Before, green-tinted After) each with an accent left-border and a small-caps label",
-    "PROGRESS / METER BARS — 3-4 labelled gradient progress bars with percentages, stacked and filling the body zone",
     "BUBBLE CARDS — a row of 2-3 soft rounded bubble cards (big radius, inset highlight, soft shadow), each with a gradient chip + title + one line",
+    "NUMBERED STEPPER — 3-4 vertical steps with circular numbers joined by a spine; for sequences / how-to",
+    "MINI BAR-CHART — 3-4 gradient columns of varying height with short labels; quick visual data compare",
+    "METRIC CALLOUT ROW — 2-3 label → big number → delta metrics; results / dashboard feel",
+    "PROGRESS / METER BARS — 3-4 labelled gradient progress bars with percentages, stacked",
     "NUMBERED FEATURE ROWS — 3-4 rows separated by hairlines, each = big serif index number + bold title + one-line detail (no boxes)",
     "HORIZONTAL TIMELINE / FLOW — 3-5 circular step nodes joined by arrows across the body, each with a short label",
     "STAT ROW — 2-3 huge gradient statistics with captions, plus a short supporting line; data-forward",
+    "DEFINITION / CALLOUT CARD — one key term with an accent spine, the term in serif + a concise one-line meaning",
+    "TAG / CHIP CLOUD — 6-9 concept keywords as rounded pills in varied accent tints; fast overview / glossary",
+    "CONCEPT vs EXAMPLE — two labelled columns: the abstract concept on one side, a concrete example (mono font) on the other",
+    "PRINCIPLE BAND — one strong italic serif statement in a tinted full-width band; a memorable takeaway",
 ];
 const SLIDE_TYPE_PAIRS = [
     "Playfair Display headline + Outfit body",
