@@ -18,6 +18,8 @@ import { db } from "@/config/db";
 import { openrouter } from "@/config/openrouter";
 import { chapterContentSlides, courseImages, coursesTable } from "@/config/schema";
 import { GENERATE_SINGLE_SLIDE_PROMPT } from "@/data/Prompt";
+import { SLIDE_TYPE_PAIRS, SLIDE_ACCENTS, pickArchetype, componentName, isCodeArchetype } from "@/data/slide-design";
+import { fetchSlideResearch } from "@/lib/tavily";
 import { apiError, apiSuccess, apiOptions } from "@/lib/api-helpers";
 import { validateInput, regenerateSlideSchema } from "@/lib/validations";
 import { currentUser } from "@clerk/nextjs/server";
@@ -26,45 +28,6 @@ import { NextRequest } from "next/server";
 
 // Slide LLM generation is token-heavy — give it the full serverless budget.
 export const maxDuration = 300;
-
-// Per-slide component rotation (mirrors inngest/course-functions.ts)
-const SLIDE_ARCHETYPES = [
-    "COVER — kicker + one large headline + single-line dek; body shows a relevant image in a bounded ~40% side column (never full-width, never under the headline)",
-    "GAUGE / SPEEDOMETER — a half-ring conic meter showing one score/level on the left + a short explanation on the right",
-    "ANNOTATED DIAGRAM — a relevant image in a ~50% side column with 2-3 numbered callout labels beside it (labels NEXT TO the image, never on top)",
-    "FUNNEL — 4 narrowing gradient stage bars (e.g. pipeline / conversion / drop-off) with a percentage each",
-    "QUADRANT / 2x2 MATRIX — two labelled axes and four tinted cells (e.g. value vs effort); each cell one short label",
-    "HORIZONTAL TIMELINE / FLOW — 3-5 circular step nodes joined by a gradient line/arrows, each with a short label",
-    "PYRAMID / HIERARCHY — 3-4 stacked tiers from wide foundation to narrow peak, each tier one label",
-    "KPI DASHBOARD TILES — 2-3 big-number tiles each with a label and a mini trend bar; dashboard feel",
-    "COMPARISON TABLE — a premium 3-5 row table (Aspect / Option A / Option B) with a tinted header row; for differences and 'X vs Y'",
-    "BEFORE / AFTER DIFF — two side-by-side columns (red-tinted Before, green-tinted After) each with an accent left-border and a small-caps label",
-    "HUB-AND-SPOKE — a central circular concept node with 3-4 radiating pills (pills in flow columns, never over the hub)",
-    "DONUT / RING STAT — a conic-gradient percentage ring on one side + a short label/explanation on the other",
-    "CHECKLIST — DO vs DON'T: two columns of green ✓ points and red ✗ points",
-    "NUMBERED STEPPER — 3-4 vertical steps with circular numbers joined by a spine; for sequences / how-to",
-    "VENN / OVERLAP — two translucent overlapping circles labelled Set A / Set B with a 'shared' middle (the only intentional overlap)",
-    "MINI BAR-CHART — 3-4 gradient columns of varying height with short labels; quick visual data compare",
-    "ROADMAP / MILESTONE PATH — a horizontal gradient track with 3-4 flagged checkpoints, each a phase + short note",
-    "ICON FEATURE GRID — a 2x2 of large glyph + bold label + one line, generous spacing (premium, not cramped tiles)",
-    "METRIC CALLOUT ROW — 2-3 label → big number → delta metrics; results / dashboard feel",
-    "PROGRESS / METER BARS — 3-4 labelled gradient progress bars with percentages, stacked",
-    "NUMBERED FEATURE ROWS — 3-4 rows separated by hairlines, each = big serif index number + bold title + one-line detail (no boxes)",
-    "STAT ROW — 2-3 huge gradient statistics with captions, plus a short supporting line; data-forward",
-    "BUBBLE CARDS — a row of 2-3 soft rounded bubble cards (big radius, inset highlight, soft shadow), each a gradient chip + title + one line",
-    "DEFINITION / CALLOUT CARD — one key term with an accent spine, the term in serif + a concise one-line meaning",
-    "TAG / CHIP CLOUD — 6-9 concept keywords as rounded pills in varied accent tints; fast overview / glossary",
-    "CONCEPT vs EXAMPLE — two labelled columns: the abstract concept on one side, a concrete example (mono font) on the other",
-    "PRINCIPLE BAND — one strong italic serif statement in a tinted full-width band; a memorable takeaway",
-];
-const SLIDE_TYPE_PAIRS = [
-    "Playfair Display headline + Outfit body",
-    "Space Grotesk headline + Inter body",
-    "Playfair Display headline + DM Sans body",
-    "Outfit bold headline + Inter body",
-    "Instrument Serif italic headline + Space Grotesk body",
-];
-const SLIDE_ACCENTS = ["#6D5BD3", "#3EA5D6", "#E0653A", "#E8B84B", "#2FA98C", "#D64B7F"];
 
 export async function POST(req: NextRequest) {
     try {
@@ -117,6 +80,15 @@ export async function POST(req: NextRequest) {
                 narrationSummary: ((s.narration as any)?.fullText ?? "").substring(0, 500) + "...",
             }));
 
+        // Same deterministic component assignment the bulk pipeline uses, so a
+        // regenerated slide keeps this chapter's varied, non-repeating design.
+        const archetype = pickArchetype(chapterIndex, si);
+        const primaryComponent = componentName(archetype);
+        const isCodeSlide = isCodeArchetype(archetype);
+
+        // Tavily RAG — ground the regenerated narration in accurate, current facts.
+        const researchContext = await fetchSlideResearch(slideTopic, `${course.courseName} · ${chapter.chapterTitle}`);
+
         const slideInput = JSON.stringify({
             chapterTitle: chapter.chapterTitle,
             chapterOverview: chapter.chapterDescription ?? `This chapter covers ${chapter.chapterTitle} comprehensively.`,
@@ -128,7 +100,16 @@ export async function POST(req: NextRequest) {
             slidePosition: si === 0 ? "INTRO" : si === totalSlides - 1 ? "CONCLUSION" : "MIDDLE",
             previousSlidesContext: previousContext,
             nextSlideTopic: si + 1 < totalSlides ? subTopics[si + 1] : null,
-            designHint: `Layout archetype: ${si === 0 ? SLIDE_ARCHETYPES[0] : SLIDE_ARCHETYPES[si % SLIDE_ARCHETYPES.length]}. Type pairing: ${SLIDE_TYPE_PAIRS[si % SLIDE_TYPE_PAIRS.length]}. Accent color: ${SLIDE_ACCENTS[si % SLIDE_ACCENTS.length]}.`,
+            mandatoryComponent: primaryComponent,
+            mandatoryComponentSpec: archetype,
+            isCodeSlide,
+            imageAllowed: !isCodeSlide,
+            researchContext: researchContext || null,
+            designHint: `🎯 BUILD THIS EXACT COMPONENT unless the user's change request below asks for a different one: ${archetype}. `
+                + (isCodeSlide
+                    ? `CODE slide: the body is ONE .code-card (≤ 8 short lines, ≤ ~54 chars each); NO {{IMAGE_PLACEHOLDER}} / <img>. `
+                    : `Include ONE {{IMAGE_PLACEHOLDER}} where it helps unless the component is image-free. `)
+                + `Type pairing: ${SLIDE_TYPE_PAIRS[si % SLIDE_TYPE_PAIRS.length]}. Accent color: ${SLIDE_ACCENTS[si % SLIDE_ACCENTS.length]}.`,
             // ── The user's requested change — the whole point of this endpoint ──
             userChangeRequest: instruction,
         });

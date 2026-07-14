@@ -214,8 +214,12 @@ function buildRevealHtml(html: string, interval: RevealInterval, baseUrl: string
 
         var scaleY = VIEWPORT_H / Math.max(measureH, 1);
         var scaleX = VIEWPORT_W / Math.max(measureW, 1);
+        // Height is the real constraint. Clamp width's influence so a stray-wide
+        // element (e.g. a long code line) can never collapse the whole slide into
+        // a tiny column — content is forced to wrap so real width ≈ 1440.
+        scaleX = Math.max(scaleX, 0.82);
         var scale = Math.min(scaleX, scaleY);
-        
+
         scale = Math.min(scale, 1.0);
         scale = Math.max(scale, MIN_SCALE);
 
@@ -284,6 +288,20 @@ ${baseHref}${headContent}
 *{box-sizing:border-box;margin:0;padding:0;}
 *::-webkit-scrollbar{display:none;width:0;height:0;}
 *{scrollbar-width:none;-ms-overflow-style:none;}
+/* NEVER overflow horizontally: wide content (long code, unbreakable tokens, wide tables) must wrap, not force scrollWidth that shrinks the whole slide. */
+pre,code,p,h1,h2,h3,h4,span,div,li,td,th,blockquote{overflow-wrap:anywhere;}
+pre,code,table,img,.code-card{max-width:100%!important;}
+pre,code{white-space:pre-wrap!important;word-break:break-word!important;}
+table{table-layout:fixed!important;}
+/* .code-card — real syntax-highlighted snippet card (parity with the live preview). */
+.code-card{border-radius:14px!important;border:1px solid rgba(255,255,255,0.10)!important;background:#0b1020!important;overflow:hidden!important;box-shadow:0 18px 44px rgba(0,0,0,0.45)!important;width:100%!important;}
+.code-card-header{display:flex!important;align-items:center!important;gap:8px!important;padding:11px 16px!important;background:rgba(255,255,255,0.04)!important;border-bottom:1px solid rgba(255,255,255,0.07)!important;}
+.code-card-dot{width:11px!important;height:11px!important;border-radius:50%!important;flex-shrink:0!important;}
+.code-card-dot.r{background:#ff5f56!important;}.code-card-dot.y{background:#ffbd2e!important;}.code-card-dot.g{background:#27c93f!important;}
+.code-card-name{margin-left:8px!important;font-family:'Space Grotesk',monospace!important;font-size:13px!important;color:#9fb3d1!important;letter-spacing:0.3px!important;}
+.code-card pre,.code-card-body{margin:0!important;padding:18px 22px!important;font-family:'Space Grotesk','Space Mono',ui-monospace,monospace!important;font-size:16px!important;line-height:1.6!important;color:#e6edf7!important;white-space:pre-wrap!important;overflow-wrap:anywhere!important;word-break:break-word!important;overflow:visible!important;tab-size:2!important;max-width:100%!important;}
+.code-card code{font-family:inherit!important;background:none!important;}
+.tok-kw{color:#c792ea!important;font-weight:600!important;}.tok-str{color:#c3e88d!important;}.tok-num{color:#f78c6c!important;}.tok-com{color:#6b7a99!important;font-style:italic!important;}.tok-fn{color:#82aaff!important;}.tok-punct{color:#89ddff!important;}
 body{width:1440px;height:720px;overflow:hidden;background:#0f172a;}
 [data-reveal]{opacity:0;transition:none;}[data-reveal].active{opacity:1!important;transform:none!important;}
 [data-fragment-index]{opacity:0;transition:none;}[data-fragment-index].visible{opacity:1!important;transform:none!important;filter:none!important;}

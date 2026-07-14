@@ -129,8 +129,17 @@ const AUTO_SCALE_SCRIPT = `
 
     var scaleY = VIEWPORT_H / Math.max(measureH, 1);
     var scaleX = VIEWPORT_W / Math.max(measureW, 1);
-    scale = Math.min(scaleX, scaleY);
-    
+
+    // ── HEIGHT IS THE REAL CONSTRAINT ─────────────────────────────────────────
+    // A single wide element (e.g. a long, unwrapped code line) used to blow up
+    // scrollWidth to ~3000px, which made scaleX tiny and collapsed the WHOLE
+    // slide into a microscopic unreadable column. Content is now forced to wrap
+    // (see .code-card / global wrap rules), so real width ≈ 1440. As a belt-and-
+    // suspenders guard, clamp the width's influence so a stray-wide element can
+    // only ever reduce the scale slightly — it must NEVER nuke the whole slide.
+    scaleX = Math.max(scaleX, 0.82);
+    var scale = Math.min(scaleX, scaleY);
+
     // We want to scale DOWN overflowing content, but NEVER scale UP sparse content beyond 1.0
     // to keep layout clean and readable.
     scale = Math.min(scale, 1.0);
@@ -303,7 +312,48 @@ const FRAGMENT_RUNTIME_SCRIPT = `
 </script>
 `;
 
-/* ---------------------- Inject Runtime into HTML ---------------------- */
+/* ---------------------- Syntax Highlighter (iframe) ---------------------- */
+
+/**
+ * Zero-dependency syntax highlighter for `.code-card code` blocks.
+ * Runs inside the iframe (and the Puppeteer render doc) so code is colored
+ * identically in preview and final video — no CDN, no build step. It tokenizes
+ * the raw text content once and wraps keywords / strings / numbers / comments /
+ * function-calls / punctuation in `.tok-*` spans styled by the stylesheet.
+ * Language-agnostic (covers JS/TS/Python/common C-like syntax).
+ */
+const CODE_HIGHLIGHT_SCRIPT = `
+<script>
+(function () {
+  var KW = /\\b(function|return|if|else|for|while|const|let|var|def|class|import|from|export|new|await|async|try|catch|finally|throw|in|of|is|not|and|or|None|True|False|null|true|false|undefined|this|self|public|private|static|void|int|float|str|bool|print|lambda|yield|with|as|pass|break|continue|switch|case|default|typeof|instanceof)\\b/;
+  function esc(s){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function hl(raw){
+    // Token order matters: comments & strings first so their contents aren't re-tokenized.
+    var re = /(\\/\\/[^\\n]*|#[^\\n]*)|("(?:[^"\\\\]|\\\\.)*"|'(?:[^'\\\\]|\\\\.)*'|\\\`(?:[^\\\`\\\\]|\\\\.)*\\\`)|(\\b\\d+(?:\\.\\d+)?\\b)|([A-Za-z_$][\\w$]*)(\\s*\\()|([A-Za-z_$][\\w$]*)|([{}()\\[\\].,;:=+\\-*\\/<>!&|?%]+)/g;
+    var out = '', m;
+    while ((m = re.exec(raw)) !== null) {
+      if (m[1])      out += '<span class="tok-com">'   + esc(m[1]) + '</span>';
+      else if (m[2]) out += '<span class="tok-str">'   + esc(m[2]) + '</span>';
+      else if (m[3]) out += '<span class="tok-num">'   + esc(m[3]) + '</span>';
+      else if (m[4]) out += '<span class="tok-fn">'    + esc(m[4]) + '</span>' + esc(m[5]);
+      else if (m[6]) out += KW.test(m[6]) ? '<span class="tok-kw">' + esc(m[6]) + '</span>' : esc(m[6]);
+      else if (m[7]) out += '<span class="tok-punct">' + esc(m[7]) + '</span>';
+    }
+    return out;
+  }
+  function run(){
+    document.querySelectorAll('.code-card code, code.code-hl').forEach(function(el){
+      if (el.getAttribute('data-hl') === '1') return;
+      el.getAttribute('data-hl'); // no-op guard
+      el.innerHTML = hl(el.textContent || '');
+      el.setAttribute('data-hl','1');
+    });
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', run);
+  else run();
+})();
+</script>
+`;
 
 /**
  * Build a clean HTML document from the LLM's slide HTML.
@@ -355,6 +405,15 @@ export const injectRuntime = (html: string): string => {
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Outfit:wght@300;400;500;600;700;800;900&family=Poppins:wght@300;400;500;600;700;800;900&family=Space+Grotesk:wght@400;500;600;700&family=Playfair+Display:ital,wght@0,400..900;1,400..900&family=Instrument+Serif:ital@0;1&family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&display=swap');
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    /* ── NEVER OVERFLOW HORIZONTALLY ──────────────────────────────────────────
+       A single wide element (long code line, unbreakable token, over-wide table)
+       used to explode the slide's scrollWidth and force the auto-scaler to shrink
+       the WHOLE slide into a tiny column. These guards make wide content wrap /
+       stay bounded so width ≈ 1440 and only height drives any scaling. */
+    pre, code, p, h1, h2, h3, h4, span, div, li, td, th, blockquote { overflow-wrap: anywhere; }
+    pre, code, table, img, .code-card { max-width: 100% !important; }
+    table { table-layout: fixed !important; }
 
     /* ---- HIDE SCROLLBAR APPEARANCE (cosmetic only) ---- */
     *::-webkit-scrollbar { display: none; width: 0; height: 0; }
@@ -768,6 +827,54 @@ export const injectRuntime = (html: string): string => {
       padding: 14px !important;
       box-shadow: inset 0 2px 8px rgba(0,0,0,0.8) !important;
     }
+
+    /* ── CODE CARD — real, readable, syntax-highlighted code snippet ──────────
+       This is the ONLY correct way to show code. Readable font (never clipped),
+       an IDE-style header with traffic-light dots + a filename/language chip,
+       and tokens colored by the injected highlighter (.tok-* classes below).
+       NO max-height/overflow:hidden here — the prompt caps code at ≤ 9 short
+       lines so it fits the 720px budget without shrinking. */
+    .code-card {
+      border-radius: 14px !important;
+      border: 1px solid rgba(255,255,255,0.10) !important;
+      background: #0b1020 !important;
+      overflow: hidden !important;
+      box-shadow: 0 18px 44px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.05) !important;
+      width: 100% !important;
+    }
+    .code-card-header {
+      display: flex !important; align-items: center !important; gap: 8px !important;
+      padding: 11px 16px !important;
+      background: rgba(255,255,255,0.04) !important;
+      border-bottom: 1px solid rgba(255,255,255,0.07) !important;
+    }
+    .code-card-dot { width: 11px !important; height: 11px !important; border-radius: 50% !important; flex-shrink: 0 !important; }
+    .code-card-dot.r { background: #ff5f56 !important; }
+    .code-card-dot.y { background: #ffbd2e !important; }
+    .code-card-dot.g { background: #27c93f !important; }
+    .code-card-name {
+      margin-left: 8px !important; font-family: 'Space Grotesk', monospace !important;
+      font-size: 13px !important; color: #9fb3d1 !important; letter-spacing: 0.3px !important;
+    }
+    .code-card pre, .code-card-body {
+      margin: 0 !important; padding: 18px 22px !important;
+      font-family: 'Space Grotesk','Space Mono', ui-monospace, monospace !important;
+      font-size: 16px !important; line-height: 1.6 !important;
+      color: #e6edf7 !important;
+      /* WRAP, don't scroll: a long line must fold onto the next line instead of
+         forcing horizontal overflow (which used to shrink the entire slide). */
+      white-space: pre-wrap !important;
+      overflow-wrap: anywhere !important; word-break: break-word !important;
+      overflow: visible !important; tab-size: 2 !important; max-width: 100% !important;
+    }
+    .code-card code { font-family: inherit !important; background: none !important; }
+    /* Syntax tokens (set by the injected highlighter) */
+    .tok-kw   { color: #c792ea !important; font-weight: 600 !important; }
+    .tok-str  { color: #c3e88d !important; }
+    .tok-num  { color: #f78c6c !important; }
+    .tok-com  { color: #6b7a99 !important; font-style: italic !important; }
+    .tok-fn   { color: #82aaff !important; }
+    .tok-punct{ color: #89ddff !important; }
 
     /* ── NEW PREMIUM VISUAL COMPONENTS ─────────────────────────────────────── */
 

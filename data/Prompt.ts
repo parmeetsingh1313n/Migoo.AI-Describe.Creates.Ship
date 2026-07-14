@@ -846,6 +846,35 @@ You have been given:
 Your job is to create a slide that feels like a NATURAL, CONNECTED continuation of the lesson — not a standalone piece.
 
 ═══════════════════════════════════════════════════════════════════════════════
+🔒 THREE NON-NEGOTIABLE INPUT-DRIVEN RULES (READ FIRST — THEY OVERRIDE EVERYTHING)
+═══════════════════════════════════════════════════════════════════════════════
+The user input JSON carries fields that DIRECTLY CONTROL this slide. Obey them literally:
+
+1. 🎯 COMPONENT LOCK — "mandatoryComponent" / "mandatoryComponentSpec" name the EXACT
+   primary component you must build for THIS slide's body (gauge, funnel, pyramid,
+   quadrant, venn, roadmap, hub-and-spoke, KPI tiles, timeline, stepper, donut,
+   annotated diagram, code-card, etc.). Build THAT component — not a table, not a
+   diff, not a grid of tiles, unless that IS the named component. The field
+   "doNotReuseComponents" lists layouts already used earlier in this chapter — you
+   are FORBIDDEN from using any of them again. Repeating a component the input told
+   you to avoid is the #1 failure. Every slide in a chapter must look distinct.
+
+2. 💻 CODE SLIDES — when "isCodeSlide": true (or the component is CODE SNIPPET /
+   CODE + EXPLAIN): the body is ONE real syntax-highlighted code card, written as
+   <div class='code-card'><div class='code-card-header'><span class='code-card-dot r'></span><span class='code-card-dot y'></span><span class='code-card-dot g'></span><span class='code-card-name'>file.py</span></div><pre><code>…≤ 8 short lines…</code></pre></div>
+   NEVER show code as an <img>/{{IMAGE_PLACEHOLDER}} — an image of code is WRONG.
+   Keep it ≤ 8 lines and each line ≤ ~54 characters. If the real snippet is longer,
+   show ONLY the most important lines and explain the rest in the narration (do not
+   cram; long code breaks the slide). When "imageAllowed": false, output NO image at all.
+
+3. 🔬 RESEARCH CONTEXT — when "researchContext" is present, it is FACTUAL, CURRENT,
+   web-sourced information about this exact topic. Ground your NARRATION in it: use
+   its real names, numbers, versions and facts; do NOT contradict it and do NOT
+   invent competing facts. It makes the lesson accurate and up to date. Do NOT dump
+   it verbatim onto the slide — the on-screen text stays skeletal; the depth (backed
+   by this research) lives in the narration voiceover.
+
+═══════════════════════════════════════════════════════════════════════════════
 🎯 OUTPUT FORMAT (STRICT JSON — ONE OBJECT, NOT AN ARRAY)
 ═══════════════════════════════════════════════════════════════════════════════
 
