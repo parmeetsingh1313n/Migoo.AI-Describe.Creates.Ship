@@ -18,7 +18,7 @@ import { db } from "@/config/db";
 import { openrouter } from "@/config/openrouter";
 import { chapterContentSlides, courseImages, coursesTable } from "@/config/schema";
 import { GENERATE_SINGLE_SLIDE_PROMPT } from "@/data/Prompt";
-import { SLIDE_TYPE_PAIRS, SLIDE_ACCENTS, pickArchetype, componentName, isCodeArchetype } from "@/data/slide-design";
+import { SLIDE_TYPE_PAIRS, SLIDE_ACCENTS, SLIDE_ARCHETYPES, pickArchetype, componentName, isCodeArchetype, isLikelyCodeTopic } from "@/data/slide-design";
 import { fetchSlideResearch } from "@/lib/tavily";
 import { apiError, apiSuccess, apiOptions } from "@/lib/api-helpers";
 import { validateInput, regenerateSlideSchema } from "@/lib/validations";
@@ -81,8 +81,14 @@ export async function POST(req: NextRequest) {
             }));
 
         // Same deterministic component assignment the bulk pipeline uses, so a
-        // regenerated slide keeps this chapter's varied, non-repeating design.
-        const archetype = pickArchetype(chapterIndex, si);
+        // regenerated slide keeps this chapter's varied, non-repeating design —
+        // topic-aware override too, so regenerating a code-y slide doesn't lose
+        // its code-card just because the rotation landed elsewhere.
+        const naturalArchetype = pickArchetype(chapterIndex, si);
+        const wantsCode = isLikelyCodeTopic(slideTopic);
+        const archetype = (wantsCode && !isCodeArchetype(naturalArchetype))
+            ? (SLIDE_ARCHETYPES.filter(isCodeArchetype)[si % 2] ?? naturalArchetype)
+            : naturalArchetype;
         const primaryComponent = componentName(archetype);
         const isCodeSlide = isCodeArchetype(archetype);
 
@@ -107,8 +113,8 @@ export async function POST(req: NextRequest) {
             researchContext: researchContext || null,
             designHint: `🎯 BUILD THIS EXACT COMPONENT unless the user's change request below asks for a different one: ${archetype}. `
                 + (isCodeSlide
-                    ? `CODE slide: the body is ONE .code-card (≤ 8 short lines, ≤ ~54 chars each); NO {{IMAGE_PLACEHOLDER}} / <img>. `
-                    : `Include ONE {{IMAGE_PLACEHOLDER}} where it helps unless the component is image-free. `)
+                    ? `CODE slide: the ENTIRE body is ONE .code-card (header + <pre><code>, real line breaks) — NEVER a table cell or plain text. A REAL, COMPLETE, working snippet up to ~50 lines is fine (it auto-scrolls in sync with narration — never fake-truncate it). NO {{IMAGE_PLACEHOLDER}} / <img>. `
+                    : `Include ONE {{IMAGE_PLACEHOLDER}} where it genuinely helps, kept SMALL (~28-30% side column, max-height 300px) unless the component is image-free. `)
                 + `Type pairing: ${SLIDE_TYPE_PAIRS[si % SLIDE_TYPE_PAIRS.length]}. Accent color: ${SLIDE_ACCENTS[si % SLIDE_ACCENTS.length]}.`,
             // ── The user's requested change — the whole point of this endpoint ──
             userChangeRequest: instruction,
@@ -125,7 +131,7 @@ the slide coherent with the rest of the chapter. Regenerate the slide's html, na
 fragmentData completely to reflect the requested change. Honour the request precisely.`;
 
         let slideContent: any = null;
-        const MODEL = "nvidia/nemotron-3-ultra-550b-a55b";
+        const MODEL = "z-ai/glm-5.2";
         let lastErr: any = null;
         for (let attempt = 1; attempt <= 3; attempt++) {
             try {

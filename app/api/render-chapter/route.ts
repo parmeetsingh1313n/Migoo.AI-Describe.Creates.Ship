@@ -395,7 +395,16 @@ function buildRevealDeckHtml(html: string, baseUrl: string): string {
   const initScript = `
     (function () {
       function runCompanionLibs() {
-        if (window.mermaid) { try { window.mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'loose' }); window.mermaid.run({ querySelector: '.mermaid' }); } catch (e) {} }
+        if (window.mermaid) {
+          try { window.mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'loose' }); } catch (e) { console.error('[mermaid] initialize failed:', e); }
+          document.querySelectorAll('pre.mermaid, .mermaid').forEach(function (el, i) {
+            if (el.getAttribute('data-mermaid-done')) return;
+            var src = (el.textContent || '').trim(); if (!src) return;
+            var id = 'mmd-' + i + '-' + src.length;
+            var fail = function (err) { console.error('[mermaid] render failed:', err, '\\nsource:\\n', src); el.innerHTML = "<div style='padding:20px;border:1px solid rgba(214,75,127,0.4);border-radius:12px;background:rgba(214,75,127,0.08);color:#e6b3c6;font-size:14px;'>Diagram could not be rendered.</div>"; el.setAttribute('data-mermaid-done','1'); };
+            try { Promise.resolve(window.mermaid.render(id, src)).then(function (out) { el.innerHTML = (out && out.svg) ? out.svg : String(out); el.setAttribute('data-mermaid-done','1'); }).catch(fail); } catch (err) { fail(err); }
+          });
+        }
         if (window.katex) { document.querySelectorAll('[data-katex]').forEach(function (el) { try { window.katex.render(el.getAttribute('data-katex') || '', el, { throwOnError: false }); } catch (e) {} }); }
         if (window.Chart) { document.querySelectorAll('canvas[data-chart-type]').forEach(function (el) { try {
           var type=el.getAttribute('data-chart-type')||'bar', labels=(el.getAttribute('data-chart-labels')||'').split('|').filter(Boolean), values=(el.getAttribute('data-chart-values')||'').split('|').map(Number).filter(function(n){return !isNaN(n);}), color=el.getAttribute('data-chart-color')||'#6D5BD3';
@@ -527,6 +536,11 @@ async function screenshotRevealDeckSequence(
     // Poll for the deck's own init flag rather than a fixed sleep — reveal.js
     // init + our companion-lib bootstrap (Mermaid/KaTeX/Chart/mark.js) is async.
     await page.waitForFunction('window.__deckReady === true', { timeout: 15000 }).catch(() => {});
+    // Wait for any Mermaid diagrams to finish rendering (async in v11) before capture.
+    await page.waitForFunction(
+      "Array.from(document.querySelectorAll('pre.mermaid, .mermaid')).every(function(el){return el.getAttribute('data-mermaid-done');})",
+      { timeout: 8000 }
+    ).catch(() => {});
     await new Promise(r => setTimeout(r, 400));
 
     for (let j = 0; j < intervals.length; j++) {

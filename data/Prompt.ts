@@ -94,12 +94,17 @@ RULES:
   version of the point). Never force 2-3 when 1 is honestly enough.
 - The TOTAL number of slide topics across the whole chapter must not exceed 25. If naturally expanding every
   point would exceed 25, prioritize depth for the most substantial/complex points and keep simple points at 1.
+- "needsCode": set true ONLY when this specific slide topic is best taught by showing an actual code example
+  (a function, syntax pattern, algorithm, API call, command, config file, etc.) — i.e. the topic IS something
+  you'd write or read real code for. Set false for conceptual/definitional/comparison topics that don't need
+  a code example. If the chapter is a programming course, expect a meaningful share of topics to be true —
+  but never mark a purely conceptual topic true just because the course is about programming.
 
 OUTPUT FORMAT (STRICT JSON — ONLY this array, no markdown, no explanation):
 [
-  { "sourceIndex": 0, "topic": "First granular slide topic for subContent[0]" },
-  { "sourceIndex": 0, "topic": "Second granular slide topic for subContent[0] (only if subContent[0] truly needs 2+)" },
-  { "sourceIndex": 1, "topic": "Slide topic for subContent[1]" }
+  { "sourceIndex": 0, "topic": "First granular slide topic for subContent[0]", "needsCode": false },
+  { "sourceIndex": 0, "topic": "Second granular slide topic for subContent[0] (only if subContent[0] truly needs 2+)", "needsCode": true },
+  { "sourceIndex": 1, "topic": "Slide topic for subContent[1]", "needsCode": false }
 ]
 
 "sourceIndex" is the zero-based index into the input subContent array this slide topic came from.
@@ -892,10 +897,13 @@ The user input JSON carries fields that DIRECTLY CONTROL this slide. Obey them l
    <div class='code-card'><div class='code-card-header'><span class='code-card-dot r'></span><span class='code-card-dot y'></span><span class='code-card-dot g'></span><span class='code-card-name'>file.py</span></div><pre><code>…lines…</code></pre></div>
    NEVER show code as an <img>/{{IMAGE_PLACEHOLDER}} — an image of code is WRONG.
    The code card auto-scrolls in sync with narration, so a REAL, COMPLETE snippet
-   (up to ~30 lines) is fine — do NOT truncate a genuinely useful example just to
-   hit a short line count. Keep each line ≤ ~60 characters (wrap logically, don't
-   cram). Only trim if the snippet is truly excessive (>30 lines) — then show the
-   most important lines and explain the rest in the narration. When "imageAllowed":
+   (up to ~50 lines) is fine — do NOT truncate a genuinely useful example just to
+   hit a short line count, and NEVER fake-truncate with "..." / "// rest omitted" /
+   "# and so on". Show the ACTUAL working code end to end. Keep each line ≤ ~60
+   characters (wrap logically, don't cram). Only trim if the snippet is truly
+   excessive (>50 lines) — then show a smaller but STILL COMPLETE and runnable
+   example and explain the rest in the narration. Code NEVER goes inside a table
+   cell — always the .code-card. When "imageAllowed":
    false, output NO image at all.
 
 3. 🔬 RESEARCH CONTEXT — when "researchContext" is present, it is FACTUAL, CURRENT,
@@ -1087,18 +1095,18 @@ H) STAT ROW — 2-3 big gradient numbers with labels (for data-forward slides):
 </div>
 
 I) CODE BLOCK — ONE snippet only, and it is the ENTIRE body of the slide. ALWAYS use the .code-card structure (NOT a bare <pre>) — it auto-scrolls when the snippet is long:
-<div class='code-card'><div class='code-card-header'><span class='code-card-dot r'></span><span class='code-card-dot y'></span><span class='code-card-dot g'></span><span class='code-card-name'>file.py</span></div><pre><code>…real, complete snippet, up to ~30 lines, ≤ ~60 chars wide…</code></pre></div>
+<div class='code-card'><div class='code-card-header'><span class='code-card-dot r'></span><span class='code-card-dot y'></span><span class='code-card-dot g'></span><span class='code-card-name'>file.py</span></div><pre><code>…real, complete, working snippet, up to ~50 lines, ≤ ~60 chars wide — never fake-truncated…</code></pre></div>
 NEVER two code blocks, and NEVER code next to another panel (output/problem). If you must contrast two versions, pick the ONE that matters and explain the rest in narration — do not put both on one slide.
 
-J) IMAGE — ONLY as a bounded side column, NEVER a big standalone square:
-The image MUST sit in one column of a 2-column body (text/component ~60% on one side, image ~40% on the other). The image column and the <img> are HEIGHT-BOUNDED so they can never blow up the slide:
+J) IMAGE — ONLY as a SMALL bounded side column, NEVER a big standalone square. Real content always gets more room than the image:
+The image sits in one column of a 2-column body (text/component ~70% on one side, image ~30% on the other — content is the priority, the image is decoration). The image column and the <img> are HEIGHT-BOUNDED so they can never blow up the slide:
 <div style='flex:1;display:flex;gap:32px;min-height:0;'>
-  <div style='flex:1.5;min-width:0;min-height:0;display:flex;flex-direction:column;justify-content:center;'>…text / a small component…</div>
+  <div style='flex:2;min-width:0;min-height:0;display:flex;flex-direction:column;justify-content:center;'>…text / a small component…</div>
   <div style='flex:1;min-width:0;min-height:0;border-radius:18px;overflow:hidden;'>
-    <img src='{{IMAGE_PLACEHOLDER}}' style='width:100%;height:100%;max-height:440px;object-fit:cover;display:block;'>
+    <img src='{{IMAGE_PLACEHOLDER}}' style='width:100%;height:100%;max-height:300px;object-fit:cover;display:block;'>
   </div>
 </div>
-NEVER: a full-width image, a centered square image, or an image stacked directly under the headline (that overflows and zooms the whole slide out). The image is a supporting side element, not the focus.
+NEVER: a full-width image, a centered square image, or an image stacked directly under the headline (that overflows and zooms the whole slide out). The image is a small supporting side element, not the focus — if it would crowd out real content, skip it entirely.
 (Optional instead: ONE full-bleed watermark image — position:absolute; inset:0; width:100%; height:100%; object-fit:cover; opacity:0.12; z-index:0; pointer-events:none — with all content in a position:relative; z-index:1 wrapper above it.)
 
 K) DONUT / RING STAT — a percentage ring via conic-gradient (great for "X% of…"):
@@ -1232,10 +1240,10 @@ AB) CHECKLIST — DO vs DON'T (two tick/cross columns):
     <div style='display:flex;gap:10px;margin-bottom:10px;'><span style='color:#D64B7F;'>✗</span><span style='font-size:15px;'>short point</span></div>…</div>
 </div>
 
-AC) ANNOTATED DIAGRAM — image in a side column with 2-3 numbered callouts beside it (callouts NEXT TO the image, never on top):
+AC) ANNOTATED DIAGRAM — image in a SMALL side column with 2-3 numbered callouts beside it (callouts NEXT TO the image, never on top). The callouts are the content and get MORE room than the image:
 <div style='display:flex;gap:32px;align-items:center;'>
-  <div style='flex:1;min-width:0;border-radius:18px;overflow:hidden;'><img src='{{IMAGE_PLACEHOLDER}}' style='width:100%;height:100%;max-height:440px;object-fit:cover;display:block;'></div>
-  <div style='flex:1;min-width:0;display:flex;flex-direction:column;gap:18px;'>
+  <div style='flex:1;min-width:0;border-radius:18px;overflow:hidden;'><img src='{{IMAGE_PLACEHOLDER}}' style='width:100%;height:100%;max-height:300px;object-fit:cover;display:block;'></div>
+  <div style='flex:1.4;min-width:0;display:flex;flex-direction:column;gap:18px;'>
     <div style='display:flex;gap:14px;'><div style='width:30px;height:30px;border-radius:50%;background:#6D5BD3;display:flex;align-items:center;justify-content:center;font-weight:700;flex-shrink:0;'>1</div><div><b>Label</b><div style='font-size:14px;color:#9fb3d1;'>one line</div></div></div>
     …2-3 callouts…
   </div>
@@ -1282,8 +1290,10 @@ ANIMATION: give each distinct block class='fragment fade-up' (vary: fade-up, fad
 SELF-CHECK before you output (all must be true):
 ✓ Root <section> uses min-height:720px with NO height:720px and NO overflow:hidden (so data is never clipped); no content wrapper uses overflow:hidden or a fixed height either.
 ✓ Content is light enough to sit close to one 720px screen at readable sizes — not so much that it must heavily shrink, not so little it looks empty.
-✓ ONE headline + ONE primary component. No two big blocks side by side; at most one code block (auto-scrolls, up to ~30 lines) and it is the whole body.
-✓ Any image is in a ~40% side column with the <img> capped at max-height ~440px — NO full-width/centered square, NO image under the headline.
+✓ ONE headline + ONE primary component. No two big blocks side by side; at most one code block (auto-scrolls, up to ~50 lines) and it is the whole body — real, complete, working code, NEVER fake-truncated with "..." or "rest omitted".
+✓ Code is NEVER placed inside a table cell — code always uses the .code-card structure and is the whole body.
+✓ Any image is in a small ~30% side column with the <img> capped at max-height ~300px — NO full-width/centered square, NO image under the headline. Real content always gets more room than the image.
+✓ ALL on-screen text and narration is in ENGLISH ONLY — no Chinese/CJK or other non-English scripts anywhere.
 ✓ On-screen text is skeletal: headline ≤ 8 words, ≤ 4 rows/3 cards/4 bars per component, no paragraphs; body/labels ≥ 15px (nothing smaller — if it must shrink below 15px, cut data).
 ✓ NOTHING overlaps; the headline appears exactly once.
 ✓ One accent color; premium rounded/soft styling; the slide uses the EXACT component named in designHint (not a default table/diff).

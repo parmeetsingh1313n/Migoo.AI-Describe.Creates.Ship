@@ -79,12 +79,33 @@ export const REVEAL_INIT_SCRIPT = `
 <script>
 (function () {
   function runCompanionLibs() {
-    // Mermaid — render any <pre class="mermaid"> blocks.
+    // Mermaid — render each <pre class="mermaid"> block individually so one bad
+    // diagram can't leave raw syntax text on screen (the old silent catch did).
     if (window.mermaid) {
       try {
         window.mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'loose' });
-        window.mermaid.run({ querySelector: '.mermaid' });
-      } catch (e) {}
+      } catch (e) { console.error('[mermaid] initialize failed:', e); }
+      var mnodes = document.querySelectorAll('pre.mermaid, .mermaid');
+      mnodes.forEach(function (el, i) {
+        if (el.getAttribute('data-mermaid-done')) return;
+        var src = (el.textContent || '').trim();
+        if (!src) return;
+        var id = 'mmd-' + i + '-' + src.length;
+        try {
+          Promise.resolve(window.mermaid.render(id, src)).then(function (out) {
+            el.innerHTML = (out && out.svg) ? out.svg : String(out);
+            el.setAttribute('data-mermaid-done', '1');
+          }).catch(function (err) {
+            console.error('[mermaid] render failed:', err, '\\nsource:\\n', src);
+            el.innerHTML = "<div style='padding:20px;border:1px solid rgba(214,75,127,0.4);border-radius:12px;background:rgba(214,75,127,0.08);color:#e6b3c6;font-size:14px;'>Diagram could not be rendered.</div>";
+            el.setAttribute('data-mermaid-done', '1');
+          });
+        } catch (err) {
+          console.error('[mermaid] render threw:', err, '\\nsource:\\n', src);
+          el.innerHTML = "<div style='padding:20px;border:1px solid rgba(214,75,127,0.4);border-radius:12px;background:rgba(214,75,127,0.08);color:#e6b3c6;font-size:14px;'>Diagram could not be rendered.</div>";
+          el.setAttribute('data-mermaid-done', '1');
+        }
+      });
     }
     // KaTeX — render any [data-katex] elements (LaTeX source in data-katex attr).
     if (window.katex) {

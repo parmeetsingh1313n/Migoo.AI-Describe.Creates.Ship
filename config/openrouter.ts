@@ -1,8 +1,8 @@
 /**
  * NVIDIA NIM API Configuration
- * Primary: nvidia/nemotron-3-ultra-550b-a55b
- * Fallback1: openai/gpt-oss-120b
- * Fallback2: mistralai/mistral-large-3-675b-instruct-2512
+ * Primary: z-ai/glm-5.2
+ * Fallback1: nvidia/nemotron-3-ultra-550b-a55b
+ * Fallback2: openai/gpt-oss-120b
  * Enhanced JSON parsing with HTML quote handling
  */
 
@@ -23,9 +23,9 @@ interface OpenRouterResponse {
 
 class OpenRouterClient {
     private baseUrl: string = 'https://integrate.api.nvidia.com/v1';
-    private model: string = 'nvidia/nemotron-3-ultra-550b-a55b';
-    private fallbackModel: string = 'openai/gpt-oss-120b';
-    private lastFallbackModel: string = 'mistralai/mistral-large-3-675b-instruct-2512';
+    private model: string = 'z-ai/glm-5.2';
+    private fallbackModel: string = 'nvidia/nemotron-3-ultra-550b-a55b';
+    private lastFallbackModel: string = 'openai/gpt-oss-120b';
 
     // Key rotation state (in-memory for this server session)
     private currentKeyIndex: number = 0;
@@ -90,7 +90,9 @@ class OpenRouterClient {
     ): Promise<{ rawText: string; finishReason: string | undefined }> {
         const url = `${this.baseUrl}/chat/completions`;
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 5 * 60 * 1000);
+        // GLM-5.2 at high reasoning effort can genuinely take longer than 5 min —
+        // give it a fairer chance to answer before falling back.
+        const timeout = setTimeout(() => controller.abort(), 7 * 60 * 1000);
 
         const response = await fetch(url, {
             method: 'POST',
@@ -193,11 +195,12 @@ CRITICAL STRUCTURAL & DESIGN MANDATES (override defaults):
 4. FRAGMENT DATA ALIGNMENT: The "fragmentData" JSON array must contain EXACTLY the indices present in the HTML data-fragment-index attributes (indices 0..9 → [0,1,2,3,4,5,6,7,8,9]). Do NOT pad with unused indices.
 5. NO OVERLAP — THE #1 RULE: Content must NEVER overlap other content. Every text block, card, table and image sits in its OWN space in normal flex/grid flow. Print the headline exactly ONCE. position:absolute is allowed ONLY for a single decoration layer BEHIND everything (z-index:0, pointer-events:none) with all real content in a normal-flow wrapper above it. NEVER place a numeral or image on top of / behind readable text. Images go in their OWN column, never over text.
 6. NEVER CLIP, NEVER HEAVILY ZOOM OUT (critical): The renderer gently scales a slightly-tall slide down proportionally — that is fine. What is NOT fine: (a) CLIPPING — do NOT put overflow:hidden or height:720px on the root or any content wrapper; that chops the edges of code/tables/cards. (b) HEAVY SHRINK — do NOT cram so much that the slide is far taller than 720px. Root <section> uses NATURAL height, no clipping: style='width:1440px;min-height:720px;box-sizing:border-box;padding:56px 72px;display:flex;flex-direction:column;gap:22px;'. The body is just style='flex:1;display:flex;...' with NO overflow and NO fixed height. Keep content light so it sits near one 720px screen at readable sizes; if it wouldn't fit, REMOVE data (never clip or heavily shrink).
-7. IMAGES ON MOST SLIDES: A distinct image exists for every slide — USE IT. Put ONE {{IMAGE_PLACEHOLDER}} on most content slides, as the ~40% side column of a 2-column body OR an annotated-diagram (image + numbered callouts beside it) OR a faint full-bleed watermark behind content. The <img> is width:100%;height:100%;max-height:440px;object-fit:cover (that max-height is the ONLY height cap allowed). NEVER a full-width/centered square, and NEVER an image stacked under the headline.
-8. CONCISE ON-SCREEN DATA: On-screen text is skeletal — headline ≤ 8 words, max ~4 rows / 3 cards / 4 bars per component, no paragraphs; the depth lives in the narration. At most ONE code block (≤8 lines) and it is the whole body — never two code blocks or code beside another panel. Keep body/label text ≥ 15px.
-9. OBEY designHint + USE THE FULL CATALOG: The input's designHint NAMES the exact component to build for THIS slide (gauge, funnel, pyramid, quadrant, venn, roadmap, hub-and-spoke, KPI tiles, timeline, annotated diagram, checklist, etc.) — build THAT one. Do NOT keep defaulting to the comparison table or the diff; they are only 2 of ~28 options. Each slide must use a DIFFERENT component; consecutive slides look distinct. Rounded, soft, layered styling reads premium; avoid uniform bordered tile grids.
-10. AESTHETICS: Rich near-black / deep-jewel gradient backgrounds (occasionally a light editorial slide). ONE accent color per slide for the kicker, one gradient and highlights. Confident hierarchy; readable contrast.
-10. AESTHETICS: Rich near-black / deep-jewel gradient backgrounds (occasionally a light editorial slide). ONE accent color per slide for the kicker, one gradient and highlights. Confident hierarchy; readable contrast.
+7. IMAGES ARE SECONDARY DECORATION, NOT THE POINT — KEEP THEM SMALL: when an image helps, put ONE {{IMAGE_PLACEHOLDER}} in a NARROW ~28-30% side column (never wider), or as a small annotated-diagram callout, or a faint full-bleed watermark BEHIND content (never competing with it). The <img> is width:100%;height:100%;max-height:300px;object-fit:cover (that max-height is the ONLY height cap allowed). Real content — data, code, explanations — always gets MORE space than the image. Skip the image entirely on any slide where it would push out real content. NEVER a full-width/centered square, and NEVER an image stacked under the headline.
+8. CODE IS NEVER A TABLE CELL OR INLINE PARAGRAPH: code ALWAYS lives in the full .code-card structure (header + <pre><code>) with real line breaks preserved, never flattened into a single wrapped line inside a <table>/<td> or a plain paragraph. A real, COMPLETE snippet (up to ~50 lines) is fine — the code-card auto-scrolls in sync with narration, so never fake-truncate with "// rest omitted" or "..." — show the whole thing or split it across two slides. On-screen text elsewhere stays skeletal — headline ≤ 8 words, max ~4 rows/3 cards/4 bars per non-code component, no paragraphs; the narration carries the depth.
+9. OBEY designHint + USE THE FULL CATALOG: The input's designHint NAMES the exact component to build for THIS slide (gauge, funnel, pyramid, quadrant, venn, roadmap, hub-and-spoke, KPI tiles, timeline, annotated diagram, checklist, mermaid diagram, live chart, formula callout, etc.) — build THAT one. Do NOT keep defaulting to the comparison table or the diff; they are only 2 of ~30+ options. Each slide must use a DIFFERENT component (code slides are the one exception — a programming chapter may repeat CODE SNIPPET / CODE + EXPLAIN across several slides). Rounded, soft, layered styling reads premium; avoid uniform bordered tile grids.
+10. MERMAID DIAGRAMS MUST BE REAL, RENDERED DIAGRAMS: if the component is a Mermaid diagram, the Mermaid syntax goes INSIDE a literal <pre class='mermaid'>...</pre> tag and NOTHING ELSE — never describe or narrate the diagram as plain text/paragraph content, and never put it in a <div> or <p>. The renderer executes real Mermaid syntax found inside that exact tag.
+11. ENGLISH ONLY, NO EXCEPTIONS: every character you output — html, narration, comments, labels — MUST be English (Latin script) plus ordinary numerals/punctuation/code syntax. NEVER output Chinese, Japanese, Korean, Cyrillic, or any other non-Latin script anywhere, under any circumstance. A response containing such characters is invalid and will be discarded.
+12. AESTHETICS: Rich near-black / deep-jewel gradient backgrounds (occasionally a light editorial slide). ONE accent color per slide for the kicker, one gradient and highlights. Confident hierarchy; readable contrast.
 `;
 
         let lastError: any;
@@ -215,9 +218,10 @@ CRITICAL STRUCTURAL & DESIGN MANDATES (override defaults):
    - CORRECT: style='font-size: 14px; opacity: 0;' class='fragment fade-in'
    - INCORRECT: style='font-size: 14px; opacity: 0; class='fragment fade-in' (MISSING the closing single quote for the style attribute before class!)
    Double-check every tag: ensure style='...' and class='...' are completely separate and each is enclosed in its own single quotes!
-2. NO OVERLAP, NO CLIPPING, NO HEAVY ZOOM: Content never overlaps — each block in its own flex/grid space; headline once; images ONLY in a bounded ~40% side column (img max-height:440px), never a big square/under-headline. Root <section> uses width:1440px;min-height:720px;padding:56px 72px with NO overflow:hidden and NO fixed height (those clip data); the body is flex:1;display:flex with no overflow/height caps. Keep content light so it sits near one screen — one headline + ONE primary component (table, diff, progress bars, bubbles, feature rows, timeline, stat row, donut, definition, stepper, chips, bar-chart, metric callout). At most ONE code block (≤8 lines) as the whole body — NEVER two code blocks or code+output on one slide. On-screen text skeletal (≤4 rows, no paragraphs, ≥15px). If it wouldn't fit, remove data.
+2. NO OVERLAP, NO CLIPPING, NO HEAVY ZOOM: Content never overlaps — each block in its own flex/grid space; headline once; images ONLY in a small ~28-30% side column (img max-height:300px), never a big square/under-headline, and skip the image if it would crowd out real content. Root <section> uses width:1440px;min-height:720px;padding:56px 72px with NO overflow:hidden and NO fixed height (those clip data); the body is flex:1;display:flex with no overflow/height caps. Keep content light so it sits near one screen — one headline + ONE primary component (table, diff, progress bars, bubbles, feature rows, timeline, stat row, donut, definition, stepper, chips, bar-chart, metric callout). At most ONE code block (a real, complete snippet, up to ~50 lines — it auto-scrolls, never fake-truncate it) as the whole body, ALWAYS in the full .code-card structure (never a table cell or plain paragraph) — NEVER two code blocks or code+output on one slide. On-screen text elsewhere is skeletal (≤4 rows, no paragraphs, ≥15px). If it wouldn't fit, remove data.
 3. VALID ESCAPED JSON: Every double quote (") inside the HTML string value MUST be escaped as \\" or removed. Never write a raw unescaped double quote (") inside any JSON string field.
 4. Keep paragraphs short (maximum 1-2 lines per paragraph).
+5. ENGLISH ONLY: every character — html, narration, comments — must be English/Latin script. NEVER output Chinese, Japanese, Korean, or Cyrillic characters anywhere.
 `;
                 activeSystemPrompt += fallbackBooster;
             }
@@ -231,7 +235,7 @@ CRITICAL STRUCTURAL & DESIGN MANDATES (override defaults):
                     : model.includes('gpt-oss-20b')
                         ? 32768
                         : model.includes('nemotron-3-ultra') || model.includes('glm-5.2') || model.includes('deepseek-v4-pro')
-                            ? 65536
+                            ? 100000
                             : maxTokens;
                 console.log(`🔑 NvidiaAPI: model=${model}, key=${keyAttempt + 1}/${allKeys.length}, maxTokens=${modelMaxTokens}`);
 
@@ -250,7 +254,14 @@ CRITICAL STRUCTURAL & DESIGN MANDATES (override defaults):
                     } else if (silentTruncation) {
                         console.warn('⚠️ Response SILENTLY TRUNCATED (finishReason=' + finishReason + ' but JSON unclosed) — will attempt repair...');
                     }
-                    return this.extractAndParseJSON(rawText, wasTruncated);
+                    const parsed = this.extractAndParseJSON(rawText, wasTruncated);
+                    const foreignScriptField = this.findForeignScript(parsed);
+                    if (foreignScriptField) {
+                        console.warn(`⚠️ NvidiaAPI [${model}] leaked non-English script into "${foreignScriptField}" — treating as a bad response, moving to next model...`);
+                        const err: any = new Error(`Foreign-script leakage from ${model} in field "${foreignScriptField}"`);
+                        throw err;
+                    }
+                    return parsed;
                 } catch (error: any) {
                     lastError = error;
                     if (error.isRateLimit) {
@@ -733,6 +744,37 @@ CRITICAL STRUCTURAL & DESIGN MANDATES (override defaults):
 
         console.log(`✅ Manually extracted ${slides.length} slides`);
         return slides;
+    }
+
+    /**
+     * GLM-5.2 (and other multilingual models) occasionally leak CJK/Cyrillic
+     * characters into an otherwise-English response ("language leakage").
+     * Scans every string field of a parsed slide object/array for non-Latin
+     * script and returns the field name it found it in, or null if clean.
+     */
+    private findForeignScript(parsed: any): string | null {
+        // CJK Unified Ideographs, Hiragana/Katakana, Hangul, Cyrillic.
+        const foreignScript = /[一-鿿぀-ヿ가-힯Ѐ-ӿ]/;
+        const scan = (value: any, path: string): string | null => {
+            if (typeof value === 'string') {
+                return foreignScript.test(value) ? path : null;
+            }
+            if (Array.isArray(value)) {
+                for (let i = 0; i < value.length; i++) {
+                    const hit = scan(value[i], `${path}[${i}]`);
+                    if (hit) return hit;
+                }
+                return null;
+            }
+            if (value && typeof value === 'object') {
+                for (const key of Object.keys(value)) {
+                    const hit = scan(value[key], path ? `${path}.${key}` : key);
+                    if (hit) return hit;
+                }
+            }
+            return null;
+        };
+        return scan(parsed, '');
     }
 
     /**

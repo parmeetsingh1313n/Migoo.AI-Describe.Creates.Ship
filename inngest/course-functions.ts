@@ -20,7 +20,7 @@ import { GENERATE_SINGLE_SLIDE_PROMPT, EXPAND_CHAPTER_TOPICS_PROMPT } from "@/da
 import { putWithRotation } from "@/lib/blob";
 import { generateNanoBananaImage, generateNanoBananaImagesParallel } from "@/lib/apify-image";
 import { fetchSlideResearch } from "@/lib/tavily";
-import { SLIDE_TYPE_PAIRS, SLIDE_ACCENTS, pickArchetype, componentName, isCodeArchetype } from "@/data/slide-design";
+import { SLIDE_TYPE_PAIRS, SLIDE_ACCENTS, SLIDE_ARCHETYPES, pickArchetype, componentName, isCodeArchetype, isLikelyCodeTopic } from "@/data/slide-design";
 import { eq } from "drizzle-orm";
 import { inngest } from "./client";
 
@@ -30,38 +30,49 @@ import { inngest } from "./client";
 
 const MAX_SLIDES_PER_CHAPTER = 25;
 
+export type ChapterTopic = { topic: string; needsCode: boolean };
+
 /**
  * Expands a chapter's subContent points (broad learning objectives) into
  * granular, slide-sized topics — 1-3 per point depending on how much depth
- * that point actually needs, capped at MAX_SLIDES_PER_CHAPTER total. Replaces
- * the old fixed "1 subContent point = 1 slide" mapping so simple topics stay
- * short and rich topics get the multiple slides they need. Falls back to the
- * raw subContent list (1:1) on any failure — expansion is an enhancement,
- * never a blocker for chapter generation.
+ * that point actually needs, capped at MAX_SLIDES_PER_CHAPTER total, each
+ * flagged with whether it needs a real code example. Replaces the old fixed
+ * "1 subContent point = 1 slide" mapping so simple topics stay short and rich
+ * topics get the multiple slides they need. Falls back to the raw subContent
+ * list (1:1, needsCode via keyword heuristic) on any failure — expansion is
+ * an enhancement, never a blocker for chapter generation.
  */
-async function expandChapterTopics(chapterTitle: string, subContent: string[]): Promise<string[]> {
-    if (subContent.length === 0) return [chapterTitle];
+async function expandChapterTopics(chapterTitle: string, subContent: string[]): Promise<ChapterTopic[]> {
+    if (subContent.length === 0) return [{ topic: chapterTitle, needsCode: false }];
     try {
         const input = JSON.stringify({ chapterTitle, subContent });
         const result = await openrouter.json(EXPAND_CHAPTER_TOPICS_PROMPT, input, {
-            model: "nvidia/nemotron-3-ultra-550b-a55b",
-            temperature: 0.5,
+            model: "z-ai/glm-5.2",
+            // Low temperature: this call runs independently from BOTH the images
+            // function and the slides function for the same chapter — keeping it
+            // as deterministic as possible minimizes drift between the two, so
+            // the image-per-slide index alignment (see generateCourseImagesFn)
+            // stays correct more often.
+            temperature: 0.1,
             maxTokens: 4000,
         });
-        const entries: Array<{ sourceIndex: number; topic: string }> = Array.isArray(result) ? result : [];
+        const entries: Array<{ sourceIndex: number; topic: string; needsCode?: boolean }> = Array.isArray(result) ? result : [];
         const topics = entries
             .filter(e => e && typeof e.topic === "string" && e.topic.trim() && Number.isInteger(e.sourceIndex) && e.sourceIndex >= 0 && e.sourceIndex < subContent.length)
             .sort((a, b) => a.sourceIndex - b.sourceIndex)
-            .map(e => e.topic.trim())
+            .map(e => ({
+                topic: e.topic.trim(),
+                needsCode: typeof e.needsCode === "boolean" ? e.needsCode : isLikelyCodeTopic(e.topic),
+            }))
             .slice(0, MAX_SLIDES_PER_CHAPTER);
         if (topics.length > 0) {
-            console.log(`📐 Expanded ${subContent.length} subContent points → ${topics.length} slide topics for "${chapterTitle}"`);
+            console.log(`📐 Expanded ${subContent.length} subContent points → ${topics.length} slide topics (${topics.filter(t => t.needsCode).length} code) for "${chapterTitle}"`);
             return topics;
         }
     } catch (e: any) {
         console.warn(`⚠️ Topic expansion failed for "${chapterTitle}": ${e.message?.substring(0, 120)} — falling back to 1:1 mapping`);
     }
-    return subContent.slice(0, MAX_SLIDES_PER_CHAPTER);
+    return subContent.slice(0, MAX_SLIDES_PER_CHAPTER).map(topic => ({ topic, needsCode: isLikelyCodeTopic(topic) }));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -508,8 +519,8 @@ export const generateCourseImagesFn = inngest.createFunction(
             const chapter = chapters[chIdx];
             const chapterTitle = chapter.chapterTitle || `Chapter ${chIdx + 1}`;
             const rawSubContent: string[] = chapter.subContent?.slice(0, MAX_SLIDES_PER_CHAPTER) || [chapterTitle];
-            const subTopics: string[] = await step.run(`expand-topics-for-images-${chIdx}`, () => expandChapterTopics(chapterTitle, rawSubContent));
-            subTopics.forEach((topic, slideIdx) => {
+            const chapterTopics: ChapterTopic[] = await step.run(`expand-topics-for-images-${chIdx}`, () => expandChapterTopics(chapterTitle, rawSubContent));
+            chapterTopics.forEach(({ topic }, slideIdx) => {
                 const globalIdx = chIdx * MAX_SLIDES_PER_CHAPTER + slideIdx;
                 imageJobs.push({
                     globalIdx, chIdx, slideIdx, chapterTitle,
@@ -708,9 +719,10 @@ export const generateCourseSlidesFn = inngest.createFunction(
         // prior run) keep their original 1:1 mapping so slideIndex continuity
         // with existing rows isn't broken — only fresh chapters get expansion.
         const rawSubContent: string[] = chapter.subContent?.slice(0, MAX_SLIDES_PER_CHAPTER) || [chapter.chapterTitle];
-        const subTopics = existingSlides.length > 0
-            ? rawSubContent
+        const chapterTopics: ChapterTopic[] = existingSlides.length > 0
+            ? rawSubContent.map(topic => ({ topic, needsCode: isLikelyCodeTopic(topic) }))
             : await step.run("expand-chapter-topics", () => expandChapterTopics(chapter.chapterTitle, rawSubContent));
+        const subTopics = chapterTopics.map(t => t.topic);
         const totalSlides = subTopics.length;
 
         // If audio already exists for every slide, the chapter is fully done.
@@ -784,7 +796,10 @@ export const generateCourseSlidesFn = inngest.createFunction(
                         revealData: existing.revealData,
                         audioUrl: existing.audioUrl,
                         captions: existing.captions,
-                        audioDuration: existing.audioDuration
+                        audioDuration: existing.audioDuration,
+                        // Not persisted in the DB — best-effort approximation for
+                        // usedComponents tracking on a resumed run (see below).
+                        archetype: pickArchetype(chapterIndex, si),
                     };
                 }
 
@@ -806,13 +821,35 @@ export const generateCourseSlidesFn = inngest.createFunction(
                 );
 
                 // ── Assign the EXACT primary component for this slide + forbid repeats ──
-                const archetype = pickArchetype(chapterIndex, si);
+                // Topic-aware override: if THIS slide's topic actually needs a code
+                // example (flagged by expandChapterTopics, LLM or keyword-heuristic),
+                // force a code archetype regardless of where the position-based
+                // rotation naturally landed — the rotation alone was letting
+                // programming chapters go whole chapters without a single code slide.
+                const naturalArchetype = pickArchetype(chapterIndex, si);
+                const wantsCode = chapterTopics[si]?.needsCode ?? false;
+                let archetype = naturalArchetype;
+                if (wantsCode && !isCodeArchetype(naturalArchetype)) {
+                    // Alternate between the two code archetypes based on how many
+                    // code slides precede this one, so consecutive code slides in a
+                    // programming chapter don't all look identical.
+                    const codeSlidesSoFar = chapterTopics.slice(0, si).filter(t => t.needsCode).length;
+                    const codeArchetypes = SLIDE_ARCHETYPES.filter(isCodeArchetype);
+                    archetype = codeArchetypes[codeSlidesSoFar % codeArchetypes.length] ?? naturalArchetype;
+                }
                 const primaryComponent = componentName(archetype);           // e.g. "CODE SNIPPET"
                 const isCodeSlide = isCodeArchetype(archetype);
-                // Components already assigned to earlier slides in THIS chapter — the
-                // model must not fall back onto any of them again.
+                // Components ACTUALLY used by earlier slides in THIS chapter (not the
+                // natural rotation — a prior slide may itself have been code-overridden)
+                // — the model must not fall back onto any of them again. Code archetypes
+                // are exempt: a programming chapter legitimately needs several code
+                // slides, and forcing visual variety there fights that goal.
                 const usedComponents = Array.from(
-                    new Set(Array.from({ length: si }, (_, p) => componentName(pickArchetype(chapterIndex, p))))
+                    new Set(
+                        slidesData
+                            .map(s => componentName(s.archetype ?? ""))
+                            .filter(c => c && !isCodeArchetype(c))
+                    )
                 );
 
                 const slideInput = JSON.stringify({
@@ -838,15 +875,15 @@ export const generateCourseSlidesFn = inngest.createFunction(
                     designHint: `🎯 BUILD THIS EXACT COMPONENT (non-negotiable): ${archetype}. `
                         + `Do NOT substitute a table/diff/tiles or any of these already-used layouts: [${usedComponents.join(", ") || "none yet"}]. `
                         + (isCodeSlide
-                            ? `This is a CODE slide: the ENTIRE body is ONE syntax-highlighted .code-card with ≤ 8 short lines (≤ ~54 chars each; if the snippet is longer, show only the most important lines and explain the rest in narration). Do NOT output {{IMAGE_PLACEHOLDER}} or any <img> on this slide. `
-                            : `Include ONE {{IMAGE_PLACEHOLDER}} where it helps (side column / annotated diagram / faint watermark) unless the component is inherently image-free. `)
-                        + `Type pairing: ${SLIDE_TYPE_PAIRS[(chapterIndex + si) % SLIDE_TYPE_PAIRS.length]}. Accent color: ${SLIDE_ACCENTS[(chapterIndex * 2 + si) % SLIDE_ACCENTS.length]}. Make this slide look clearly different from the previous one.`,
+                            ? `This slide's topic genuinely needs a real code example. The ENTIRE body is ONE syntax-highlighted .code-card (header + <pre><code>, real line breaks preserved) — NEVER inline text, NEVER a <table> cell, NEVER an image of code. Write a REAL, COMPLETE, working snippet (up to ~50 lines for a full CODE SNIPPET slide, ~20 for CODE + EXPLAIN) — it auto-scrolls in sync with narration, so never fake-truncate with "// rest omitted" or "...". Do NOT output {{IMAGE_PLACEHOLDER}} or any <img> on this slide. `
+                            : `Include ONE {{IMAGE_PLACEHOLDER}} where it genuinely helps, kept SMALL (~28-30% side column, max-height 300px) so it never crowds out real content — or skip it entirely if this component doesn't need one. `)
+                        + `Type pairing: ${SLIDE_TYPE_PAIRS[(chapterIndex + si) % SLIDE_TYPE_PAIRS.length]}. Accent color: ${SLIDE_ACCENTS[(chapterIndex * 2 + si) % SLIDE_ACCENTS.length]}. Make this slide look clearly different from the previous one (except code slides, which may share a look with earlier code slides in this chapter).`,
                 });
 
                 let slideContent: any = null;
                 let slideError: any = null;
                 const MAX_RETRIES = 3;
-                const MODEL = "nvidia/nemotron-3-ultra-550b-a55b";
+                const MODEL = "z-ai/glm-5.2";
                 for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
                     try {
                         console.log(`🎬 ${TAG} Slide ${si + 1}/${totalSlides} via ${MODEL} (attempt ${attempt}/${MAX_RETRIES})...`);
@@ -869,6 +906,7 @@ export const generateCourseSlidesFn = inngest.createFunction(
 
                 slideContent.slideIndex = si + 1;
                 slideContent.slideId = slideContent.slideId || `${chapterId}-slide-${si + 1}`;
+                slideContent.archetype = archetype;
 
                 // Inject image URLs into placeholders — each slide gets its OWN image (global index).
                 if (slideContent.html && allImages.length > 0) {

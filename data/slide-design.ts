@@ -44,8 +44,8 @@ export const SLIDE_ARCHETYPES = [
     "TAG / CHIP CLOUD — 6-9 concept keywords as rounded pills in varied accent tints; fast overview / glossary",
     "CONCEPT vs EXAMPLE — two labelled columns: the abstract concept on one side, a concrete example (mono font) on the other",
     "PRINCIPLE BAND — one strong italic serif statement in a tinted full-width band; a memorable takeaway",
-    "CODE SNIPPET — ONE syntax-highlighted code card (use the .code-card component), a real complete snippet up to ~30 lines (it auto-scrolls in sync with narration), a filename/language chip in the header, and it is the ENTIRE body; NEVER an image of code",
-    "CODE + EXPLAIN — a 2-column body: a syntax-highlighted .code-card (up to ~15 lines, auto-scrolls) on one side and 2-3 short numbered takeaways on the other; for explaining what a snippet does",
+    "CODE SNIPPET — ONE syntax-highlighted code card (use the .code-card component), a REAL, COMPLETE, working snippet up to ~50 lines (it auto-scrolls in sync with narration — never fake-truncate it), a filename/language chip in the header, and it is the ENTIRE body; NEVER an image of code, NEVER a table cell",
+    "CODE + EXPLAIN — a 2-column body: a syntax-highlighted .code-card (a real complete snippet, up to ~20 lines, auto-scrolls) on one side and 2-3 short numbered takeaways on the other; for explaining what a snippet does",
     "MERMAID DIAGRAM — a REAL rendered Mermaid flowchart/sequence/state diagram (diagram-as-code, never hand-drawn boxes) for processes, algorithms, state machines, or architecture; ≤ 3 words per node label",
     "LIVE CHART — a REAL Chart.js bar/line/pie/doughnut chart (never a hand-CSS'd bar approximation) for genuine numeric/statistical comparisons; 3-6 data points",
     "FORMULA / MATH CALLOUT — one REAL KaTeX-rendered formula or equation, large and centered, with a short one-line explanation beneath; for math, algorithm complexity, or scientific notation",
@@ -88,4 +88,14 @@ export function componentName(archetype: string): string {
 /** Whether an archetype is a code slide (must be a .code-card, never an image). */
 export function isCodeArchetype(archetype: string): boolean {
     return /^CODE/i.test(componentName(archetype));
+}
+
+/**
+ * Cheap keyword heuristic for "does this topic warrant a real code example?" —
+ * used as a fallback signal when a per-topic LLM needsCode classification is
+ * unavailable/unreliable, so a chapter never loses all its code slides just
+ * because one upstream call had a bad response.
+ */
+export function isLikelyCodeTopic(topic: string): boolean {
+    return /\b(function|method|class|api|loop|for loop|while loop|syntax|algorithm|implement|debug|compile|library|framework|module|snippet|code|variable|array|list|dictionary|string method|regex|query|sql|command|script|constructor|inheritance|recursion|exception|try\/?except|try\/?catch|async|await|callback|closure|pointer|struct|interface)\b/i.test(topic);
 }
