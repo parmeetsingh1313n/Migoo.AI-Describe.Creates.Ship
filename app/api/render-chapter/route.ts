@@ -6,6 +6,7 @@ import { promisify } from 'util';
 import { db } from '@/config/db';
 import { chapterGenerationStatus, chapterContentSlides } from '@/config/schema';
 import { eq } from 'drizzle-orm';
+import { revealAssetTags, wrapInRevealDeck, REVEAL_CUSTOM_FRAGMENT_STYLES, COMPONENT_STYLESHEET } from '@/lib/reveal-doc';
 
 const execAsync = promisify(exec);
 
@@ -364,6 +365,102 @@ ${content}
 </body></html>`;
 }
 
+/**
+ * Build ONE reveal.js document for a new-fragment-system slide (NOT one per
+ * interval — real reveal.js is loaded once, then fragment state is driven by
+ * calling `window.Reveal.slide(0, 0, index)` inside the already-open page).
+ * Legacy (`data-reveal`) slides keep going through buildRevealHtml below.
+ */
+function buildRevealDeckHtml(html: string, baseUrl: string): string {
+  let content = html
+    .replace(/<!DOCTYPE[^>]*>/gi, '')
+    .replace(/<\/?html[^>]*>/gi, '');
+  const headMatch   = content.match(/<head[^>]*>([\s\S]*?)<\/head>/i);
+  const headContent = headMatch ? headMatch[1] : '';
+  content = content.replace(/<head[^>]*>[\s\S]*?<\/head>/i, '');
+  const bodyMatch = content.match(/<body([^>]*)>([\s\S]*)<\/body>/i);
+  content = bodyMatch ? bodyMatch[2] : content.replace(/<\/?body[^>]*>/gi, '');
+
+  const baseHref = baseUrl ? `<base href="${baseUrl.replace(/\/$/, '')}/">` : '';
+
+  const bgScript = `
+    document.querySelectorAll('[data-background-gradient]').forEach(function(el){var g=el.getAttribute('data-background-gradient');if(g){el.style.background=g;el.style.minHeight='720px';el.style.minWidth='1440px';}});
+    document.querySelectorAll('[data-background-color]').forEach(function(el){var c=el.getAttribute('data-background-color');if(c){el.style.backgroundColor=c;el.style.minHeight='720px';}});
+    var fb=document.querySelector('[data-background-gradient]');if(fb){document.body.style.background=fb.getAttribute('data-background-gradient')||'';
+    }else{var fc=document.querySelector('[data-background-color]');if(fc){document.body.style.backgroundColor=fc.getAttribute('data-background-color')||'';}else{document.body.style.background='linear-gradient(135deg,#0f172a 0%,#1e293b 100%)';}}`;
+
+  // Headless-capture init: same reveal.js core as the live preview, but WITHOUT
+  // the postMessage bridge (nothing is listening in a headless page) — Puppeteer
+  // drives fragments directly via window.__deck.slide(0,0,index) once ready.
+  const initScript = `
+    (function () {
+      function runCompanionLibs() {
+        if (window.mermaid) { try { window.mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'loose' }); window.mermaid.run({ querySelector: '.mermaid' }); } catch (e) {} }
+        if (window.katex) { document.querySelectorAll('[data-katex]').forEach(function (el) { try { window.katex.render(el.getAttribute('data-katex') || '', el, { throwOnError: false }); } catch (e) {} }); }
+        if (window.Chart) { document.querySelectorAll('canvas[data-chart-type]').forEach(function (el) { try {
+          var type=el.getAttribute('data-chart-type')||'bar', labels=(el.getAttribute('data-chart-labels')||'').split('|').filter(Boolean), values=(el.getAttribute('data-chart-values')||'').split('|').map(Number).filter(function(n){return !isNaN(n);}), color=el.getAttribute('data-chart-color')||'#6D5BD3';
+          new window.Chart(el, { type: type, data: { labels: labels, datasets: [{ data: values, backgroundColor: color, borderColor: color, borderWidth: 1 }] }, options: { responsive: true, maintainAspectRatio: false, animation: false, plugins: { legend: { display: type==='pie'||type==='doughnut', labels: { color: '#e2e8f0' } } }, scales: (type==='pie'||type==='doughnut') ? {} : { x: { ticks: { color: '#9fb3d1' }, grid: { color: 'rgba(255,255,255,0.08)' } }, y: { ticks: { color: '#9fb3d1' }, grid: { color: 'rgba(255,255,255,0.08)' } } } } });
+        } catch (e) {} }); }
+        if (window.Mark) { document.querySelectorAll('[data-mark]').forEach(function (el) { try { var terms=(el.getAttribute('data-mark')||'').split('|').filter(Boolean); if (terms.length) new window.Mark(el).mark(terms,{className:'mark-hl'}); } catch (e) {} }); }
+      }
+      function boot() {
+        var deck = new Reveal({
+          embedded: true, width: 1440, height: 720, margin: 0,
+          minScale: 0.2, maxScale: 1, center: true,
+          controls: false, progress: false, hash: false, keyboard: false,
+          transition: 'none',
+          plugins: (window.RevealMath && window.RevealMath.KaTeX) ? [window.RevealMath.KaTeX] : [],
+        });
+        window.__deck = deck;
+        window.__deckReady = false;
+        deck.initialize().then(function () {
+          runCompanionLibs();
+          deck.slide(0, 0, -1);
+          window.__deckReady = true;
+        });
+      }
+      if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
+      else boot();
+      // Same scroll-sync contract as the live-preview REVEAL_INIT_SCRIPT — driven
+      // directly via page.evaluate here instead of postMessage (headless page).
+      window.__scrollCodeToProgress = function (progress) {
+        var body = document.querySelector('.code-card-body, .code-card pre');
+        if (!body) return;
+        var maxScroll = body.scrollHeight - body.clientHeight;
+        if (maxScroll <= 0) return;
+        var p = Math.max(0, Math.min(1, progress));
+        body.scrollTop = maxScroll * p;
+      };
+    })();
+  `;
+
+  return `<!DOCTYPE html><html><head><meta charset="UTF-8">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+${baseHref}${headContent}
+${revealAssetTags(baseUrl)}
+${REVEAL_CUSTOM_FRAGMENT_STYLES}
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Outfit:wght@300;400;500;600;700;800;900&family=Poppins:wght@300;400;500;600;700;800;900&family=Space+Grotesk:wght@400;500;600;700&family=Playfair+Display:ital,wght@0,400..900;1,400..900&family=Instrument+Serif:ital@0;1&family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&display=swap');
+*{box-sizing:border-box;margin:0;padding:0;}
+*::-webkit-scrollbar{display:none;width:0;height:0;}
+*{scrollbar-width:none;-ms-overflow-style:none;}
+pre,code,p,h1,h2,h3,h4,span,div,li,td,th,blockquote{overflow-wrap:anywhere;}
+pre,code,table,img,.code-card{max-width:100%!important;}
+pre,code{white-space:pre-wrap!important;word-break:break-word!important;}
+table{table-layout:fixed!important;}
+body{width:1440px;height:720px;overflow:hidden;background:#0f172a;}
+section{width:1440px!important;box-sizing:border-box!important;}
+img{max-width:100%;}
+${COMPONENT_STYLESHEET}
+</style></head>
+<body style="margin:0;padding:0;width:1440px;height:720px;overflow:hidden;background:#0f172a;">
+${wrapInRevealDeck(content)}
+<script>(function(){${bgScript}})();</script>
+<script>${initScript}</script>
+</body></html>`;
+}
+
 async function screenshot(html: string, outPath: string): Promise<void> {
   const pkg = 'puppeteer';
   const puppeteer = require(pkg);
@@ -390,6 +487,70 @@ async function screenshot(html: string, outPath: string): Promise<void> {
     await new Promise(r => setTimeout(r, 800));
     await page.screenshot({ path: outPath as `${string}.png`, type: 'png', clip: { x: 0, y: 0, width: 1440, height: 720 } });
   } finally { await browser.close(); }
+}
+
+/**
+ * Capture a WHOLE slide's fragment sequence through real reveal.js in ONE
+ * page load — instead of building/loading a brand-new document per fragment
+ * interval (the old approach). For each interval we call
+ * window.__deck.slide(0,0,fragmentIndex) inside the already-open page, wait a
+ * couple of settle frames, then screenshot. One screenshot() per slide's
+ * fragment count worth of page loads becomes one page load total.
+ */
+async function screenshotRevealDeckSequence(
+  html: string,
+  baseUrl: string,
+  intervals: RevealInterval[],
+  totalSec: number,
+  imgPathForInterval: (j: number) => string,
+): Promise<void> {
+  const pkg = 'puppeteer';
+  const puppeteer = require(pkg);
+  const browser = await puppeteer.launch({
+    headless: true,
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-gpu',
+      '--disable-dev-shm-usage',
+      '--window-size=1440,720',
+      '--font-render-hinting=none',
+      '--disable-font-subpixel-positioning',
+    ],
+  });
+  try {
+    const page = await browser.newPage();
+    await page.setViewport({ width: 1440, height: 720, deviceScaleFactor: 1 });
+    const deckHtml = buildRevealDeckHtml(html, baseUrl);
+    await page.setContent(deckHtml, { waitUntil: 'networkidle0', timeout: 20000 });
+    await page.evaluateHandle(() => document.fonts.ready);
+    // Poll for the deck's own init flag rather than a fixed sleep — reveal.js
+    // init + our companion-lib bootstrap (Mermaid/KaTeX/Chart/mark.js) is async.
+    await page.waitForFunction('window.__deckReady === true', { timeout: 15000 }).catch(() => {});
+    await new Promise(r => setTimeout(r, 400));
+
+    for (let j = 0; j < intervals.length; j++) {
+      const iv = intervals[j];
+      await page.evaluate((idx: number) => {
+        // @ts-ignore — injected by buildRevealDeckHtml's init script
+        window.__deck.slide(0, 0, idx);
+      }, iv.fragmentIndex);
+      // Sync any long code card's scroll position to how far into the slide's
+      // total on-screen duration this interval starts — same 0..1 progress
+      // convention as the live-preview's SCROLL_CODE postMessage.
+      const scrollProgress = totalSec > 0 ? iv.startSec / totalSec : 0;
+      await page.evaluate((p: number) => {
+        // @ts-ignore — injected by buildRevealDeckHtml's init script
+        if (window.__scrollCodeToProgress) window.__scrollCodeToProgress(p);
+      }, scrollProgress);
+      // Settle: reveal.js has transition:'none' but layout/companion-lib
+      // re-renders (e.g. Chart.js redraw) can still land a frame late.
+      await new Promise(r => setTimeout(r, 150));
+      await page.screenshot({ path: imgPathForInterval(j) as `${string}.png`, type: 'png', clip: { x: 0, y: 0, width: 1440, height: 720 } });
+    }
+  } finally {
+    await browser.close();
+  }
 }
 
 async function makeClip(imgPath: string, audioPath: string, audioStart: number, duration: number, out: string, prevImgPath?: string): Promise<void> {
@@ -455,25 +616,55 @@ async function startLocalRender(chapterId: string, slides: any[], durationsBySli
     const intervals = buildRevealIntervals(slide, totalSec);
     log(chapterId, `  🎞 ${intervals.length} reveal state(s)`);
 
+    const revealDataArr: string[] = slide.revealData ?? [];
+    const isLegacySlide = revealDataArr.length > 0 && String(revealDataArr[0]).startsWith('r');
+
+    const validIntervals = intervals
+      .map((iv, j) => ({ iv, j }))
+      .filter(({ iv }) => (iv.endSec - iv.startSec) >= 0.05);
+
     const intervalClips: string[] = [];
-    for (let j = 0; j < intervals.length; j++) {
-      const iv      = intervals[j];
-      const clipDur = iv.endSec - iv.startSec;
-      if (clipDur < 0.05) continue;
 
-      const imgPath = path.join(workDir, `s${i}-state${j}.png`);
+    if (!isLegacySlide) {
+      // ── Real reveal.js path: ONE page load for the whole slide ────────────
+      const imgPathFor = (k: number) => path.join(workDir, `s${i}-state${validIntervals[k].j}.png`);
       try {
-        const revealHtml = buildRevealHtml(slide.html, iv, baseUrl);
-        await screenshot(revealHtml, imgPath);
+        await screenshotRevealDeckSequence(slide.html, baseUrl, validIntervals.map(v => v.iv), totalSec, imgPathFor);
       } catch (e: any) {
-        log(chapterId, `  ⚠️ Screenshot failed: ${e.message} — black frame`);
-        await execAsync(`"${getFFmpeg()}" -y -f lavfi -i color=c=black:s=1440x720:r=1:d=1 -frames:v 1 "${imgPath}"`).catch(() => {});
+        log(chapterId, `  ⚠️ Reveal deck capture failed: ${e.message} — black frames`);
+        for (let k = 0; k < validIntervals.length; k++) {
+          await execAsync(`"${getFFmpeg()}" -y -f lavfi -i color=c=black:s=1440x720:r=1:d=1 -frames:v 1 "${imgPathFor(k)}"`).catch(() => {});
+        }
       }
+      for (let k = 0; k < validIntervals.length; k++) {
+        const { iv } = validIntervals[k];
+        const clipDur = iv.endSec - iv.startSec;
+        const clipPath = path.join(workDir, `s${i}-clip${k}.mp4`);
+        const prevImgPath = k > 0 ? imgPathFor(k - 1) : undefined;
+        await makeClip(imgPathFor(k), audioPath, iv.startSec, clipDur, clipPath, prevImgPath);
+        intervalClips.push(clipPath);
+      }
+    } else {
+      // ── Legacy path: unchanged — one full page reload per interval ────────
+      for (let j = 0; j < intervals.length; j++) {
+        const iv      = intervals[j];
+        const clipDur = iv.endSec - iv.startSec;
+        if (clipDur < 0.05) continue;
 
-      const clipPath    = path.join(workDir, `s${i}-clip${j}.mp4`);
-      const prevImgPath = j > 0 ? path.join(workDir, `s${i}-state${j - 1}.png`) : undefined;
-      await makeClip(imgPath, audioPath, iv.startSec, clipDur, clipPath, prevImgPath);
-      intervalClips.push(clipPath);
+        const imgPath = path.join(workDir, `s${i}-state${j}.png`);
+        try {
+          const revealHtml = buildRevealHtml(slide.html, iv, baseUrl);
+          await screenshot(revealHtml, imgPath);
+        } catch (e: any) {
+          log(chapterId, `  ⚠️ Screenshot failed: ${e.message} — black frame`);
+          await execAsync(`"${getFFmpeg()}" -y -f lavfi -i color=c=black:s=1440x720:r=1:d=1 -frames:v 1 "${imgPath}"`).catch(() => {});
+        }
+
+        const clipPath    = path.join(workDir, `s${i}-clip${j}.mp4`);
+        const prevImgPath = j > 0 ? path.join(workDir, `s${i}-state${j - 1}.png`) : undefined;
+        await makeClip(imgPath, audioPath, iv.startSec, clipDur, clipPath, prevImgPath);
+        intervalClips.push(clipPath);
+      }
     }
 
     const slideClip = path.join(workDir, `slide-${i}.mp4`);

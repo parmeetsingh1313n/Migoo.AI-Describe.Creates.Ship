@@ -16,13 +16,53 @@
 import { db } from "@/config/db";
 import { openrouter } from "@/config/openrouter";
 import { chapterContentSlides, chapterGenerationStatus, courseImages, coursesTable } from "@/config/schema";
-import { GENERATE_SINGLE_SLIDE_PROMPT } from "@/data/Prompt";
+import { GENERATE_SINGLE_SLIDE_PROMPT, EXPAND_CHAPTER_TOPICS_PROMPT } from "@/data/Prompt";
 import { putWithRotation } from "@/lib/blob";
 import { generateNanoBananaImage, generateNanoBananaImagesParallel } from "@/lib/apify-image";
 import { fetchSlideResearch } from "@/lib/tavily";
 import { SLIDE_TYPE_PAIRS, SLIDE_ACCENTS, pickArchetype, componentName, isCodeArchetype } from "@/data/slide-design";
 import { eq } from "drizzle-orm";
 import { inngest } from "./client";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HELPERS — Dynamic per-chapter slide topic expansion
+// ─────────────────────────────────────────────────────────────────────────────
+
+const MAX_SLIDES_PER_CHAPTER = 25;
+
+/**
+ * Expands a chapter's subContent points (broad learning objectives) into
+ * granular, slide-sized topics — 1-3 per point depending on how much depth
+ * that point actually needs, capped at MAX_SLIDES_PER_CHAPTER total. Replaces
+ * the old fixed "1 subContent point = 1 slide" mapping so simple topics stay
+ * short and rich topics get the multiple slides they need. Falls back to the
+ * raw subContent list (1:1) on any failure — expansion is an enhancement,
+ * never a blocker for chapter generation.
+ */
+async function expandChapterTopics(chapterTitle: string, subContent: string[]): Promise<string[]> {
+    if (subContent.length === 0) return [chapterTitle];
+    try {
+        const input = JSON.stringify({ chapterTitle, subContent });
+        const result = await openrouter.json(EXPAND_CHAPTER_TOPICS_PROMPT, input, {
+            model: "nvidia/nemotron-3-ultra-550b-a55b",
+            temperature: 0.5,
+            maxTokens: 4000,
+        });
+        const entries: Array<{ sourceIndex: number; topic: string }> = Array.isArray(result) ? result : [];
+        const topics = entries
+            .filter(e => e && typeof e.topic === "string" && e.topic.trim() && Number.isInteger(e.sourceIndex) && e.sourceIndex >= 0 && e.sourceIndex < subContent.length)
+            .sort((a, b) => a.sourceIndex - b.sourceIndex)
+            .map(e => e.topic.trim())
+            .slice(0, MAX_SLIDES_PER_CHAPTER);
+        if (topics.length > 0) {
+            console.log(`📐 Expanded ${subContent.length} subContent points → ${topics.length} slide topics for "${chapterTitle}"`);
+            return topics;
+        }
+    } catch (e: any) {
+        console.warn(`⚠️ Topic expansion failed for "${chapterTitle}": ${e.message?.substring(0, 120)} — falling back to 1:1 mapping`);
+    }
+    return subContent.slice(0, MAX_SLIDES_PER_CHAPTER);
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // HELPERS — Thumbnail prompts
@@ -457,18 +497,20 @@ export const generateCourseImagesFn = inngest.createFunction(
         });
 
         // We now generate ONE image per SLIDE (not per chapter). Images are keyed by a
-        // GLOBAL slide index = chapterIndex * IMG_STRIDE + slideIdx, so each slide maps
-        // 1:1 to its own image at injection time. IMG_STRIDE must match the slide cap.
-        const IMG_STRIDE = 15;
-
-        // Build the full per-slide job list up front.
+        // GLOBAL slide index = chapterIndex * MAX_SLIDES_PER_CHAPTER + slideIdx, so each
+        // slide maps 1:1 to its own image at injection time. The per-chapter slide list
+        // here is expanded the SAME way generateCourseSlidesFn expands it (1-3 slides per
+        // subContent point) so slide counts line up — if the two independent expansions
+        // ever drift slightly, the injection lookup already falls back to round-robin
+        // cycling through the course's image pool rather than failing.
         const imageJobs: { globalIdx: number; chIdx: number; slideIdx: number; chapterTitle: string; topic: string; prompt: string }[] = [];
         for (let chIdx = 0; chIdx < chapters.length; chIdx++) {
             const chapter = chapters[chIdx];
             const chapterTitle = chapter.chapterTitle || `Chapter ${chIdx + 1}`;
-            const subTopics: string[] = (chapter.subContent?.slice(0, IMG_STRIDE)) || [chapterTitle];
+            const rawSubContent: string[] = chapter.subContent?.slice(0, MAX_SLIDES_PER_CHAPTER) || [chapterTitle];
+            const subTopics: string[] = await step.run(`expand-topics-for-images-${chIdx}`, () => expandChapterTopics(chapterTitle, rawSubContent));
             subTopics.forEach((topic, slideIdx) => {
-                const globalIdx = chIdx * IMG_STRIDE + slideIdx;
+                const globalIdx = chIdx * MAX_SLIDES_PER_CHAPTER + slideIdx;
                 imageJobs.push({
                     globalIdx, chIdx, slideIdx, chapterTitle,
                     topic: topic || chapterTitle,
@@ -557,7 +599,7 @@ export const generateCourseImagesFn = inngest.createFunction(
 
                 const chPos = chapterPos.get(slide.chapterId) ?? 0;
                 const slideNum = (slide.slideIndex ?? 1) - 1;
-                const globalIdx = chPos * IMG_STRIDE + slideNum;
+                const globalIdx = chPos * MAX_SLIDES_PER_CHAPTER + slideNum;
                 let extra = 0;
                 const newHtml = slide.html.replace(/\{\{IMAGE_PLACEHOLDER\}\}/g, () => {
                     // Exact per-slide image first; if missing, fall back to a nearby one.
@@ -659,10 +701,17 @@ export const generateCourseSlidesFn = inngest.createFunction(
             return await db.select().from(chapterContentSlides).where(eq(chapterContentSlides.chapterId, chapterId));
         });
 
-        // Up to 15 slides — one per outline point. Every point the user keeps
-        // becomes its own slide (they explicitly curated them in the cockpit).
-        const subTopics = chapter.subContent?.slice(0, 15) || [chapter.chapterTitle];
-        const totalSlides = Math.min(15, subTopics.length);
+        // Dynamic slide count: each subContent point becomes 1-3 slide-sized
+        // topics depending on how much depth it needs (capped at
+        // MAX_SLIDES_PER_CHAPTER total), instead of the old fixed 1:1 mapping.
+        // Chapters that already have slides in the DB (partial/complete from a
+        // prior run) keep their original 1:1 mapping so slideIndex continuity
+        // with existing rows isn't broken — only fresh chapters get expansion.
+        const rawSubContent: string[] = chapter.subContent?.slice(0, MAX_SLIDES_PER_CHAPTER) || [chapter.chapterTitle];
+        const subTopics = existingSlides.length > 0
+            ? rawSubContent
+            : await step.run("expand-chapter-topics", () => expandChapterTopics(chapter.chapterTitle, rawSubContent));
+        const totalSlides = subTopics.length;
 
         // If audio already exists for every slide, the chapter is fully done.
         const isChapterComplete = existingSlides.length >= totalSlides && existingSlides.every(s => s.audioUrl);
@@ -714,7 +763,7 @@ export const generateCourseSlidesFn = inngest.createFunction(
                     let existingHtml = existing.html ?? null;
                     if (existingHtml && allImages.length > 0 && existingHtml.includes('{{IMAGE_PLACEHOLDER}}')) {
                         // Each slide maps to its own image by global index (chapterIndex*15 + si).
-                        const gIdx = chapterIndex * 15 + si;
+                        const gIdx = chapterIndex * MAX_SLIDES_PER_CHAPTER + si;
                         let extra = 0;
                         existingHtml = existingHtml.replace(/\{\{IMAGE_PLACEHOLDER\}\}/g, () => {
                             const url = allImages.find(im => im.imageIndex === gIdx)?.imageUrl
@@ -797,7 +846,7 @@ export const generateCourseSlidesFn = inngest.createFunction(
                 let slideContent: any = null;
                 let slideError: any = null;
                 const MAX_RETRIES = 3;
-                const MODEL = "mistralai/mistral-large-3-675b-instruct-2512";
+                const MODEL = "nvidia/nemotron-3-ultra-550b-a55b";
                 for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
                     try {
                         console.log(`🎬 ${TAG} Slide ${si + 1}/${totalSlides} via ${MODEL} (attempt ${attempt}/${MAX_RETRIES})...`);
@@ -823,7 +872,7 @@ export const generateCourseSlidesFn = inngest.createFunction(
 
                 // Inject image URLs into placeholders — each slide gets its OWN image (global index).
                 if (slideContent.html && allImages.length > 0) {
-                    const gIdx = chapterIndex * 15 + si;
+                    const gIdx = chapterIndex * MAX_SLIDES_PER_CHAPTER + si;
                     let extra = 0;
                     slideContent.html = slideContent.html.replace(/\{\{IMAGE_PLACEHOLDER\}\}/g, () => {
                         const url = allImages.find(im => im.imageIndex === gIdx)?.imageUrl
@@ -891,7 +940,7 @@ export const generateCourseSlidesFn = inngest.createFunction(
             for (const slide of chapterSlides) {
                 if (!slide.html || !slide.html.includes('{{IMAGE_PLACEHOLDER}}')) continue;
                 const slideNum = (slide.slideIndex ?? 1) - 1;
-                const gIdx = chapterIndex * 15 + slideNum;
+                const gIdx = chapterIndex * MAX_SLIDES_PER_CHAPTER + slideNum;
                 let extra = 0;
                 const newHtml = slide.html.replace(/\{\{IMAGE_PLACEHOLDER\}\}/g, () => {
                     const url = finalImages.find(im => im.imageIndex === gIdx)?.imageUrl

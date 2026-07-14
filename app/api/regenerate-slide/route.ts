@@ -125,7 +125,7 @@ the slide coherent with the rest of the chapter. Regenerate the slide's html, na
 fragmentData completely to reflect the requested change. Honour the request precisely.`;
 
         let slideContent: any = null;
-        const MODEL = "mistralai/mistral-large-3-675b-instruct-2512";
+        const MODEL = "nvidia/nemotron-3-ultra-550b-a55b";
         let lastErr: any = null;
         for (let attempt = 1; attempt <= 3; attempt++) {
             try {

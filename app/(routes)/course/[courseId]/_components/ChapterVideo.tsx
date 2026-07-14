@@ -8,6 +8,7 @@ import {
   useCurrentFrame,
   useVideoConfig,
 } from "remotion";
+import { revealAssetTags, wrapInRevealDeck, REVEAL_INIT_SCRIPT, REVEAL_CUSTOM_FRAGMENT_STYLES, COMPONENT_STYLESHEET } from "@/lib/reveal-doc";
 
 /* -------------------------------- Types -------------------------------- */
 
@@ -498,559 +499,7 @@ export const injectRuntime = (html: string): string => {
     /* Ensure images behave */
     img { max-width: 100%; }
 
-    /* ── HALLUCINATION RECOVERY ────────────────────────────────────────────────
-     * owl-alpha sometimes generates CSS class names instead of inline styles.
-     * These rules ensure those class names always render correctly,
-     * fixing all existing slides in the DB without re-generation.
-     * ──────────────────────────────────────────────────────────────────────── */
-
-    /* Glassmorphism cards */
-    .glassmorphism-card, .glassmorphism, .glass-card, .glass {
-      background: rgba(255,255,255,0.07) !important;
-      backdrop-filter: blur(16px) !important;
-      -webkit-backdrop-filter: blur(16px) !important;
-      border: 1px solid rgba(255,255,255,0.13) !important;
-      border-radius: 14px !important;
-      padding: 12px 16px !important;
-      color: #e2e8f0;
-    }
-
-    /* Gradient border / glowing edge cards */
-    .gradient-border-card, .gradient-border, .glowing-card, .glow-card {
-      background: #0f172a !important;
-      box-shadow: 0 0 0 2px rgba(139,92,246,0.55) !important;
-      border-radius: 12px !important;
-      padding: 12px 16px !important;
-      color: #e2e8f0;
-    }
-
-    /* Outlined / minimal cards */
-    .outlined-card, .outlined, .border-card, .minimal-card {
-      background: transparent !important;
-      border: 1.5px solid rgba(255,255,255,0.22) !important;
-      border-radius: 10px !important;
-      padding: 12px 16px !important;
-      color: #e2e8f0;
-    }
-
-    /* Neumorphic dark cards */
-    .neumorphic-card, .neumorphic, .neu-card {
-      background: #1e293b !important;
-      box-shadow: 6px 6px 12px rgba(0,0,0,0.45), -4px -4px 10px rgba(255,255,255,0.04) !important;
-      border-radius: 16px !important;
-      padding: 12px 16px !important;
-      color: #e2e8f0;
-    }
-
-    /* Gradient fill cards */
-    .gradient-fill-card, .gradient-card, .gradient-fill {
-      background: linear-gradient(135deg, rgba(59,130,246,0.18), rgba(139,92,246,0.18)) !important;
-      border: 1px solid rgba(255,255,255,0.09) !important;
-      border-radius: 12px !important;
-      padding: 12px 16px !important;
-      color: #e2e8f0;
-    }
-
-    /* Minimal tag / pill */
-    .minimal-tag, .tag-card, .pill-card, .chip {
-      background: rgba(255,255,255,0.09) !important;
-      border-radius: 24px !important;
-      padding: 6px 16px !important;
-      display: inline-flex !important;
-      align-items: center !important;
-      gap: 8px !important;
-      color: #e2e8f0;
-    }
-
-    /* Generic card / box fallback */
-    .card, .box, .content-box, .info-card, .feature-card, .stat-card {
-      background: rgba(255,255,255,0.07) !important;
-      border: 1px solid rgba(255,255,255,0.12) !important;
-      border-radius: 12px !important;
-      padding: 12px 16px !important;
-      color: #e2e8f0;
-    }
-
-    /* Badge / chip */
-    .badge, .label-badge, .status-badge {
-      display: inline-flex !important;
-      align-items: center !important;
-      padding: 4px 12px !important;
-      border-radius: 20px !important;
-      font-size: 11px !important;
-      font-weight: 600 !important;
-      background: rgba(139,92,246,0.2) !important;
-      border: 1px solid rgba(139,92,246,0.4) !important;
-      color: #c4b5fd !important;
-    }
-
-    /* Divider line */
-    .divider { height: 1px; background: rgba(255,255,255,0.12); margin: 8px 0; }
-    .divider-vertical { width: 1px; background: rgba(255,255,255,0.12); margin: 0 8px; align-self: stretch; }
-
-    /* Accent text colors the model might use by class */
-    .accent { color: #8b5cf6 !important; }
-    .accent-blue { color: #3b82f6 !important; }
-    .accent-pink { color: #ec4899 !important; }
-    .accent-green { color: #10b981 !important; }
-    .accent-cyan { color: #06b6d4 !important; }
-    .accent-orange { color: #f59e0b !important; }
-    .text-muted { color: #94a3b8 !important; }
-    .text-light { color: #cbd5e1 !important; }
-
-    /* Progress bars the model generates as class-based */
-    .progress-bar-container {
-      width: 100%; height: 10px;
-      background: rgba(255,255,255,0.06);
-      border-radius: 5px; overflow: hidden;
-    }
-    .progress-bar-fill {
-      height: 100%;
-      background: linear-gradient(90deg, #3b82f6, #8b5cf6);
-      border-radius: 5px;
-    }
-
-    /* ── PREMIUM LAYOUT UTILITIES (PREVENTS OVERFLOW) ────────────────────────── */
-    .grid-2-col {
-      display: grid !important;
-      grid-template-columns: repeat(2, 1fr) !important;
-      gap: 16px !important;
-      width: 100% !important;
-    }
-    .grid-3-col {
-      display: grid !important;
-      grid-template-columns: repeat(3, 1fr) !important;
-      gap: 16px !important;
-      width: 100% !important;
-    }
-    .grid-4-col {
-      display: grid !important;
-      grid-template-columns: repeat(4, 1fr) !important;
-      gap: 12px !important;
-      width: 100% !important;
-    }
-    .flex-row-layout {
-      display: flex !important;
-      flex-direction: row !important;
-      gap: 16px !important;
-      align-items: stretch !important;
-      width: 100% !important;
-    }
-    .flex-col-layout {
-      display: flex !important;
-      flex-direction: column !important;
-      gap: 12px !important;
-      width: 100% !important;
-    }
-
-    /* Premium Tables */
-    .premium-table {
-      width: 100% !important;
-      border-collapse: collapse !important;
-      border-radius: 12px !important;
-      overflow: hidden !important;
-      background: rgba(255, 255, 255, 0.03) !important;
-      border: 1px solid rgba(255, 255, 255, 0.08) !important;
-      margin: 4px 0 !important;
-    }
-    .premium-table th {
-      background: linear-gradient(90deg, rgba(59, 130, 246, 0.15), rgba(139, 92, 246, 0.15)) !important;
-      color: #ffffff !important;
-      font-weight: 700 !important;
-      text-align: left !important;
-      padding: 10px 14px !important;
-      font-size: 13px !important;
-      border-bottom: 1.5px solid rgba(255, 255, 255, 0.15) !important;
-    }
-    .premium-table td {
-      padding: 8px 14px !important;
-      font-size: 11px !important;
-      color: #cbd5e1 !important;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important;
-    }
-    .premium-table tr:last-child td {
-      border-bottom: none !important;
-    }
-
-    /* Bento Grid System */
-    .bento-grid {
-      display: grid !important;
-      grid-template-columns: repeat(3, 1fr) !important;
-      gap: 14px !important;
-      width: 100% !important;
-    }
-    .bento-span-2 {
-      grid-column: span 2 !important;
-    }
-    .bento-span-3 {
-      grid-column: span 3 !important;
-    }
-
-    /* Process Flow System */
-    .process-row {
-      display: flex !important;
-      flex-direction: row !important;
-      justify-content: space-between !important;
-      width: 100% !important;
-      gap: 12px !important;
-      margin: 4px 0 !important;
-    }
-    .process-step {
-      flex: 1 !important;
-      background: rgba(255, 255, 255, 0.05) !important;
-      border: 1px solid rgba(255, 255, 255, 0.08) !important;
-      border-radius: 12px !important;
-      padding: 12px !important;
-      text-align: center !important;
-      position: relative !important;
-      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15) !important;
-    }
-    .process-step-number {
-      width: 26px !important;
-      height: 26px !important;
-      border-radius: 50% !important;
-      background: linear-gradient(135deg, #3b82f6, #8b5cf6) !important;
-      display: flex !important;
-      align-items: center !important;
-      justify-content: center !important;
-      margin: 0 auto 8px auto !important;
-      font-size: 11px !important;
-      font-weight: 800 !important;
-      color: #ffffff !important;
-      box-shadow: 0 0 10px rgba(139, 92, 246, 0.4) !important;
-    }
-
-    /* Horizontal Timelines */
-    .timeline-row {
-      display: flex !important;
-      flex-direction: row !important;
-      justify-content: space-between !important;
-      align-items: flex-start !important;
-      width: 100% !important;
-      position: relative !important;
-      padding-top: 24px !important;
-      margin-top: 10px !important;
-    }
-    .timeline-bar {
-      position: absolute !important;
-      top: 6px !important;
-      left: 10% !important;
-      right: 10% !important;
-      height: 3px !important;
-      background: linear-gradient(90deg, #3b82f6, #8b5cf6, #ec4899) !important;
-      border-radius: 2px !important;
-      z-index: 0 !important;
-    }
-    .timeline-node {
-      display: flex !important;
-      flex-direction: column !important;
-      align-items: center !important;
-      text-align: center !important;
-      flex: 1 !important;
-      position: relative !important;
-      z-index: 1 !important;
-    }
-    .timeline-dot {
-      width: 14px !important;
-      height: 14px !important;
-      border-radius: 50% !important;
-      background: #ffffff !important;
-      border: 3px solid #8b5cf6 !important;
-      box-shadow: 0 0 8px #8b5cf6 !important;
-      margin-bottom: 8px !important;
-    }
-
-    /* Alert / Callout / Highlight Boxes */
-    .alert-box {
-      background: rgba(245, 158, 11, 0.08) !important;
-      border-left: 4px solid #f59e0b !important;
-      border-radius: 8px !important;
-      padding: 10px 14px !important;
-      color: #fef08a !important;
-      font-size: 12px !important;
-    }
-    .info-box {
-      background: rgba(59, 130, 246, 0.08) !important;
-      border-left: 4px solid #3b82f6 !important;
-      border-radius: 8px !important;
-      padding: 10px 14px !important;
-      color: #93c5fd !important;
-      font-size: 12px !important;
-    }
-    .success-box {
-      background: rgba(16, 185, 129, 0.08) !important;
-      border-left: 4px solid #10b981 !important;
-      border-radius: 8px !important;
-      padding: 10px 14px !important;
-      color: #a7f3d0 !important;
-      font-size: 12px !important;
-    }
-    .gradient-box {
-      background: linear-gradient(135deg, rgba(59, 130, 246, 0.1), rgba(139, 92, 246, 0.1)) !important;
-      border: 1px solid rgba(255, 255, 255, 0.08) !important;
-      border-left: 4px solid #8b5cf6 !important;
-      border-radius: 8px !important;
-      padding: 10px 14px !important;
-      color: #e9d5ff !important;
-      font-size: 12px !important;
-    }
-
-    /* Premium Lists */
-    .premium-list {
-      display: flex !important;
-      flex-direction: column !important;
-      gap: 8px !important;
-      width: 100% !important;
-      list-style: none !important;
-    }
-    .premium-list-item {
-      display: flex !important;
-      align-items: center !important;
-      gap: 10px !important;
-      padding: 6px 10px !important;
-      background: rgba(255, 255, 255, 0.03) !important;
-      border-radius: 8px !important;
-      font-size: 12px !important;
-      color: #cbd5e1 !important;
-    }
-
-    /* Code Block Premium */
-    .code-block-premium {
-      font-family: 'Space Mono', monospace !important;
-      font-size: 11px !important;
-      line-height: 1.4 !important;
-      max-height: 350px !important;
-      overflow: hidden !important;
-      border-radius: 12px !important;
-      border: 1px solid rgba(255, 255, 255, 0.08) !important;
-      background: #090d16 !important;
-      padding: 14px !important;
-      box-shadow: inset 0 2px 8px rgba(0,0,0,0.8) !important;
-    }
-
-    /* ── CODE CARD — real, readable, syntax-highlighted code snippet ──────────
-       This is the ONLY correct way to show code. Readable font (never clipped),
-       an IDE-style header with traffic-light dots + a filename/language chip,
-       and tokens colored by the injected highlighter (.tok-* classes below).
-       NO max-height/overflow:hidden here — the prompt caps code at ≤ 9 short
-       lines so it fits the 720px budget without shrinking. */
-    .code-card {
-      border-radius: 14px !important;
-      border: 1px solid rgba(255,255,255,0.10) !important;
-      background: #0b1020 !important;
-      overflow: hidden !important;
-      box-shadow: 0 18px 44px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.05) !important;
-      width: 100% !important;
-    }
-    .code-card-header {
-      display: flex !important; align-items: center !important; gap: 8px !important;
-      padding: 11px 16px !important;
-      background: rgba(255,255,255,0.04) !important;
-      border-bottom: 1px solid rgba(255,255,255,0.07) !important;
-    }
-    .code-card-dot { width: 11px !important; height: 11px !important; border-radius: 50% !important; flex-shrink: 0 !important; }
-    .code-card-dot.r { background: #ff5f56 !important; }
-    .code-card-dot.y { background: #ffbd2e !important; }
-    .code-card-dot.g { background: #27c93f !important; }
-    .code-card-name {
-      margin-left: 8px !important; font-family: 'Space Grotesk', monospace !important;
-      font-size: 13px !important; color: #9fb3d1 !important; letter-spacing: 0.3px !important;
-    }
-    .code-card pre, .code-card-body {
-      margin: 0 !important; padding: 18px 22px !important;
-      font-family: 'Space Grotesk','Space Mono', ui-monospace, monospace !important;
-      font-size: 16px !important; line-height: 1.6 !important;
-      color: #e6edf7 !important;
-      /* WRAP, don't scroll: a long line must fold onto the next line instead of
-         forcing horizontal overflow (which used to shrink the entire slide). */
-      white-space: pre-wrap !important;
-      overflow-wrap: anywhere !important; word-break: break-word !important;
-      overflow: visible !important; tab-size: 2 !important; max-width: 100% !important;
-    }
-    .code-card code { font-family: inherit !important; background: none !important; }
-    /* Syntax tokens (set by the injected highlighter) */
-    .tok-kw   { color: #c792ea !important; font-weight: 600 !important; }
-    .tok-str  { color: #c3e88d !important; }
-    .tok-num  { color: #f78c6c !important; }
-    .tok-com  { color: #6b7a99 !important; font-style: italic !important; }
-    .tok-fn   { color: #82aaff !important; }
-    .tok-punct{ color: #89ddff !important; }
-
-    /* ── NEW PREMIUM VISUAL COMPONENTS ─────────────────────────────────────── */
-
-    /* 1. Stat / Metric Display */
-    .stat-block {
-      display: flex !important; flex-direction: column !important;
-      align-items: center !important; text-align: center !important;
-      padding: 14px 10px !important;
-      background: rgba(255,255,255,0.05) !important;
-      border-radius: 14px !important; border: 1px solid rgba(255,255,255,0.09) !important;
-    }
-    .stat-number {
-      font-size: 34px !important; font-weight: 900 !important; line-height: 1 !important;
-      background: linear-gradient(135deg, #3b82f6, #8b5cf6) !important;
-      -webkit-background-clip: text !important; -webkit-text-fill-color: transparent !important;
-    }
-    .stat-label {
-      font-size: 11px !important; color: #94a3b8 !important; margin-top: 5px !important;
-    }
-
-    /* 2. Two-Tone Split Card */
-    .split-card {
-      display: flex !important; border-radius: 12px !important;
-      overflow: hidden !important; border: 1px solid rgba(255,255,255,0.08) !important;
-    }
-    .split-card-accent {
-      width: 5px !important; flex-shrink: 0 !important;
-      background: linear-gradient(180deg, #3b82f6, #8b5cf6) !important;
-    }
-    .split-card-body {
-      flex: 1 !important; padding: 10px 14px !important;
-      background: rgba(255,255,255,0.04) !important;
-    }
-
-    /* 3. Terminal / Console Style Card */
-    .terminal-card {
-      background: #0a0f1a !important; border-radius: 10px !important;
-      border: 1px solid rgba(255,255,255,0.09) !important; overflow: hidden !important;
-    }
-    .terminal-header {
-      background: #111827 !important; padding: 7px 12px !important;
-      display: flex !important; align-items: center !important; gap: 6px !important;
-      border-bottom: 1px solid rgba(255,255,255,0.07) !important;
-    }
-    .terminal-dot {
-      width: 9px !important; height: 9px !important; border-radius: 50% !important;
-    }
-    .terminal-body {
-      padding: 10px 14px !important; font-family: 'Space Mono', monospace !important;
-      font-size: 11px !important; line-height: 1.6 !important; color: #a3e635 !important;
-    }
-
-    /* 4. Kanban-style 3-Column Board */
-    .kanban-board {
-      display: grid !important; grid-template-columns: repeat(3, 1fr) !important;
-      gap: 10px !important; width: 100% !important;
-    }
-    .kanban-column {
-      background: rgba(255,255,255,0.03) !important; border-radius: 10px !important;
-      border: 1px solid rgba(255,255,255,0.07) !important; overflow: hidden !important;
-    }
-    .kanban-header {
-      padding: 7px 10px !important; font-size: 11px !important; font-weight: 700 !important;
-      text-transform: uppercase !important; letter-spacing: 0.5px !important;
-    }
-    .kanban-item {
-      margin: 5px 7px !important; padding: 7px 9px !important;
-      background: rgba(255,255,255,0.05) !important; border-radius: 7px !important;
-      font-size: 11px !important; color: #cbd5e1 !important; border-left: 3px solid !important;
-    }
-
-    /* 5. Quote / Blockquote Card */
-    .quote-card {
-      border-left: 4px solid #8b5cf6 !important;
-      background: rgba(139,92,246,0.07) !important;
-      border-radius: 0 10px 10px 0 !important;
-      padding: 11px 16px !important; font-style: italic !important;
-      font-size: 13px !important; color: #e2e8f0 !important;
-    }
-    .quote-attribution {
-      font-size: 11px !important; color: #8b5cf6 !important;
-      margin-top: 6px !important; font-style: normal !important; font-weight: 600 !important;
-      display: block !important;
-    }
-
-    /* 6. Feature Matrix (4-col icon + label grid) */
-    .feature-matrix {
-      display: grid !important; grid-template-columns: repeat(4, 1fr) !important;
-      gap: 10px !important; width: 100% !important;
-    }
-    .feature-matrix-cell {
-      display: flex !important; flex-direction: column !important;
-      align-items: center !important; padding: 11px 8px !important;
-      background: rgba(255,255,255,0.04) !important; border-radius: 10px !important;
-      border: 1px solid rgba(255,255,255,0.07) !important; text-align: center !important;
-      font-size: 11px !important; color: #cbd5e1 !important; gap: 6px !important;
-    }
-
-    /* 7. Hotspot / Glow-Indicator Card */
-    .hotspot-card {
-      position: relative !important; padding: 11px 14px !important;
-      background: rgba(255,255,255,0.05) !important; border-radius: 12px !important;
-      border: 1px solid rgba(255,255,255,0.10) !important;
-    }
-    .hotspot-dot {
-      position: absolute !important; top: -4px !important; right: -4px !important;
-      width: 11px !important; height: 11px !important; border-radius: 50% !important;
-      background: #10b981 !important; box-shadow: 0 0 8px #10b981 !important;
-    }
-
-    /* 8. Alternating Row List */
-    .row-list {
-      display: flex !important; flex-direction: column !important;
-      width: 100% !important; border-radius: 10px !important; overflow: hidden !important;
-    }
-    .row-list-item {
-      display: flex !important; align-items: center !important; gap: 12px !important;
-      padding: 9px 14px !important; font-size: 12px !important; color: #cbd5e1 !important;
-    }
-    .row-list-item:nth-child(odd) { background: rgba(255,255,255,0.04) !important; }
-    .row-list-item:nth-child(even) { background: rgba(255,255,255,0.02) !important; }
-    .row-list-icon {
-      font-size: 16px !important; flex-shrink: 0 !important;
-      width: 24px !important; text-align: center !important;
-    }
-
-    /* 9. Before / After Diff Panel */
-    .diff-panel {
-      display: grid !important; grid-template-columns: 1fr 1fr !important;
-      gap: 3px !important; width: 100% !important;
-    }
-    .diff-panel-left {
-      background: rgba(244,63,94,0.07) !important;
-      border: 1px solid rgba(244,63,94,0.22) !important;
-      padding: 11px 14px !important; border-radius: 10px 0 0 10px !important;
-    }
-    .diff-panel-right {
-      background: rgba(16,185,129,0.07) !important;
-      border: 1px solid rgba(16,185,129,0.22) !important;
-      padding: 11px 14px !important; border-radius: 0 10px 10px 0 !important;
-    }
-    .diff-label {
-      font-size: 10px !important; font-weight: 700 !important;
-      text-transform: uppercase !important; letter-spacing: 0.6px !important;
-      margin-bottom: 8px !important; display: block !important;
-    }
-
-    /* ── DYNAMIC HEIGHT FOR MEASUREMENT & DYNAMIC AUTO-SCALE ────────────────── */
-    /* We remove hard height/max-height clamps so the script can measure the     */
-    /* natural height of overflowing slides. The transform fits content in        */
-    /* 1440×720.                                                                  */
-    section {
-      width: 1440px !important;
-      box-sizing: border-box !important;
-    }
-    /*
-     * DO NOT set height: 100% on all section > div children.
-     * Slides can have multiple sibling divs directly inside <section>
-     * (decorative circles, badge fragments, main layout, footer, etc.).
-     * Forcing height: 100% on ALL of them makes fragment wrapper divs
-     * (e.g. the badges div with data-fragment-index='0') expand to 720px,
-     * pushing the title, subtitle and all main content below the fold.
-     *
-     * Only ensure width is 100% here; individual slides that need their
-     * inner wrapper to be 720px tall already declare that in inline styles.
-     */
-    section > div {
-      width: 100% !important;
-      box-sizing: border-box !important;
-    }
-    /* Full-bleed / watermark absolute containers must respect 720px */
-    div[style*='height: 720px'],
-    div[style*='height:720px'] {
-      overflow: hidden !important;
-      max-height: 720px !important;
-    }
+    ${COMPONENT_STYLESHEET}
   </style>
 </head>
 <body${bodyAttrs} style="margin:0; padding:0; width:1440px; height:720px; overflow:hidden;">
@@ -1061,6 +510,66 @@ export const injectRuntime = (html: string): string => {
 </html>`;
 
   return fullHtml;
+};
+
+/**
+ * Build the iframe document using REAL reveal.js as the layout/fragment engine
+ * (instead of the AUTO_SCALE_SCRIPT/FRAGMENT_RUNTIME_SCRIPT approximation
+ * `injectRuntime` uses) — for slides on the numeric `fragmentData` system only.
+ * Legacy `revealData` (string-ID) slides keep using `injectRuntime` above.
+ */
+export const injectRevealDeckRuntime = (html: string): string => {
+  let content = html;
+
+  content = content.replace(/(\w+)='([^']*?)"/g, "$1='$2'");
+  content = content.replace(/(\w+)="([^"]*?)'/g, "$1=\"$2\"");
+  content = content.replace(/<!DOCTYPE[^>]*>/gi, '');
+  content = content.replace(/<\/?html[^>]*>/gi, '');
+
+  let headContent = '';
+  const headMatch = content.match(/<head[^>]*>([\s\S]*?)<\/head>/i);
+  if (headMatch) {
+    headContent = headMatch[1];
+    content = content.replace(/<head[^>]*>[\s\S]*?<\/head>/i, '');
+  }
+
+  const bodyMatch = content.match(/<body([^>]*)>([\s\S]*)<\/body>/i);
+  if (bodyMatch) {
+    content = bodyMatch[2];
+  } else {
+    content = content.replace(/<\/?body[^>]*>/gi, '');
+  }
+  content = content.replace(/<script[^>]*tailwindcss[^>]*><\/script>/gi, '');
+
+  const origin = typeof window !== 'undefined' ? window.location.origin : '';
+
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <base href="${origin}/">
+  ${headContent}
+  ${revealAssetTags('')}
+  ${REVEAL_CUSTOM_FRAGMENT_STYLES}
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Outfit:wght@300;400;500;600;700;800;900&family=Poppins:wght@300;400;500;600;700;800;900&family=Space+Grotesk:wght@400;500;600;700&family=Playfair+Display:ital,wght@0,400..900;1,400..900&family=Instrument+Serif:ital@0;1&family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&display=swap');
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    pre, code, p, h1, h2, h3, h4, span, div, li, td, th, blockquote { overflow-wrap: anywhere; }
+    pre, code, table, img, .code-card { max-width: 100% !important; }
+    table { table-layout: fixed !important; }
+    *::-webkit-scrollbar { display: none; width: 0; height: 0; }
+    * { scrollbar-width: none; -ms-overflow-style: none; }
+    img { max-width: 100%; }
+    section { box-sizing: border-box !important; }
+    body { background: #0f172a; }
+    ${COMPONENT_STYLESHEET}
+  </style>
+</head>
+<body style="margin:0; padding:0; width:1440px; height:720px; overflow:hidden;">
+  ${wrapInRevealDeck(content)}
+  ${REVEAL_INIT_SCRIPT}
+</body>
+</html>`;
 };
 
 /* ------------------- Isolated Static Slide IFrame ------------------- */
@@ -1074,13 +583,18 @@ export const injectRuntime = (html: string): string => {
 const StaticSlideIFrame = memo(({
   html,
   iframeRef,
-  onLoad
+  onLoad,
+  useReveal,
 }: {
   html: string;
   iframeRef: React.RefObject<HTMLIFrameElement | null>;
   onLoad: () => void;
+  useReveal: boolean;
 }) => {
-  const srcDoc = useMemo(() => injectRuntime(html), [html]);
+  const srcDoc = useMemo(
+    () => (useReveal ? injectRevealDeckRuntime(html) : injectRuntime(html)),
+    [html, useReveal]
+  );
 
   return (
     <iframe
@@ -1245,6 +759,17 @@ const SlideIFrameWithReveal = ({ slide }: { slide: Slide }) => {
     }
   }, [time, ready, revealPlan]);
 
+  // Auto-scroll long code cards in sync with narration progress across the
+  // slide's whole on-screen duration (independent of fragment reveal state).
+  // No-op inside the iframe if the code fits without scrolling.
+  useEffect(() => {
+    if (!ready || isLegacy) return;
+    const win = iframeRef.current?.contentWindow;
+    if (!win) return;
+    const progress = durationInFrames > 0 ? frame / durationInFrames : 0;
+    win.postMessage({ type: 'SCROLL_CODE', progress }, '*');
+  }, [frame, ready, isLegacy, durationInFrames]);
+
   // Soft audio fade-out in final 8 frames to prevent hard audio cuts between slides
   const FADE_OUT_FRAMES = 8;
   const audioVolume = interpolate(
@@ -1260,6 +785,7 @@ const SlideIFrameWithReveal = ({ slide }: { slide: Slide }) => {
         html={slide.html}
         iframeRef={iframeRef}
         onLoad={handleLoad}
+        useReveal={!isLegacy}
       />
       <Audio src={slide.audioFileUrl} volume={audioVolume} pauseWhenBuffering />
     </AbsoluteFill>

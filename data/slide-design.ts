@@ -13,7 +13,9 @@
 // Each entry names the PRIMARY component a slide must be built around. The text
 // before the em-dash is the component name; the rest is its build spec.
 export const SLIDE_ARCHETYPES = [
-    // First 8 are what an 8-slide chapter uses — deliberately diverse + image-rich, NOT table/diff.
+    // First 8 are the highest-priority/most-common picks — deliberately diverse + image-rich, NOT table/diff.
+    // Chapters are no longer fixed-length (see expandChapterTopics in inngest/course-functions.ts):
+    // each subContent point becomes 1-3 slides depending on depth, capped at MAX_SLIDES_PER_CHAPTER (25).
     "COVER — kicker + one large headline + single-line dek; body shows a relevant image in a bounded ~40% side column (never full-width, never under the headline)",
     "GAUGE / SPEEDOMETER — a half-ring conic meter showing one score/level on the left + a short explanation on the right",
     "ANNOTATED DIAGRAM — a relevant image in a ~50% side column with 2-3 numbered callout labels beside it (labels NEXT TO the image, never on top)",
@@ -42,8 +44,11 @@ export const SLIDE_ARCHETYPES = [
     "TAG / CHIP CLOUD — 6-9 concept keywords as rounded pills in varied accent tints; fast overview / glossary",
     "CONCEPT vs EXAMPLE — two labelled columns: the abstract concept on one side, a concrete example (mono font) on the other",
     "PRINCIPLE BAND — one strong italic serif statement in a tinted full-width band; a memorable takeaway",
-    "CODE SNIPPET — ONE syntax-highlighted code card (use the .code-card component) with ≤ 9 short lines, a filename/language chip in the header, and it is the ENTIRE body; NEVER an image of code",
-    "CODE + EXPLAIN — a 2-column body: a small syntax-highlighted .code-card (≤ 8 lines) on one side and 2-3 short numbered takeaways on the other; for explaining what a snippet does",
+    "CODE SNIPPET — ONE syntax-highlighted code card (use the .code-card component), a real complete snippet up to ~30 lines (it auto-scrolls in sync with narration), a filename/language chip in the header, and it is the ENTIRE body; NEVER an image of code",
+    "CODE + EXPLAIN — a 2-column body: a syntax-highlighted .code-card (up to ~15 lines, auto-scrolls) on one side and 2-3 short numbered takeaways on the other; for explaining what a snippet does",
+    "MERMAID DIAGRAM — a REAL rendered Mermaid flowchart/sequence/state diagram (diagram-as-code, never hand-drawn boxes) for processes, algorithms, state machines, or architecture; ≤ 3 words per node label",
+    "LIVE CHART — a REAL Chart.js bar/line/pie/doughnut chart (never a hand-CSS'd bar approximation) for genuine numeric/statistical comparisons; 3-6 data points",
+    "FORMULA / MATH CALLOUT — one REAL KaTeX-rendered formula or equation, large and centered, with a short one-line explanation beneath; for math, algorithm complexity, or scientific notation",
 ];
 
 export const SLIDE_TYPE_PAIRS = [

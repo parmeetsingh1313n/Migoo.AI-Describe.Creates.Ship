@@ -1,8 +1,8 @@
 /**
  * NVIDIA NIM API Configuration
- * Primary: mistralai/mistral-large-3-675b-instruct-2512
+ * Primary: nvidia/nemotron-3-ultra-550b-a55b
  * Fallback1: openai/gpt-oss-120b
- * Fallback2: meta/llama-3.3-70b-instruct
+ * Fallback2: mistralai/mistral-large-3-675b-instruct-2512
  * Enhanced JSON parsing with HTML quote handling
  */
 
@@ -23,9 +23,9 @@ interface OpenRouterResponse {
 
 class OpenRouterClient {
     private baseUrl: string = 'https://integrate.api.nvidia.com/v1';
-    private model: string = 'mistralai/mistral-large-3-675b-instruct-2512';
+    private model: string = 'nvidia/nemotron-3-ultra-550b-a55b';
     private fallbackModel: string = 'openai/gpt-oss-120b';
-    private lastFallbackModel: string = 'meta/llama-3.3-70b-instruct';
+    private lastFallbackModel: string = 'mistralai/mistral-large-3-675b-instruct-2512';
 
     // Key rotation state (in-memory for this server session)
     private currentKeyIndex: number = 0;
@@ -230,7 +230,9 @@ CRITICAL STRUCTURAL & DESIGN MANDATES (override defaults):
                     ? 65536
                     : model.includes('gpt-oss-20b')
                         ? 32768
-                        : maxTokens;
+                        : model.includes('nemotron-3-ultra') || model.includes('glm-5.2') || model.includes('deepseek-v4-pro')
+                            ? 65536
+                            : maxTokens;
                 console.log(`🔑 NvidiaAPI: model=${model}, key=${keyAttempt + 1}/${allKeys.length}, maxTokens=${modelMaxTokens}`);
 
                 try {

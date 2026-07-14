@@ -9,15 +9,16 @@
  * Design goals:
  *   - NON-FATAL: any failure (no key, timeout, HTTP error) returns "" so slide
  *     generation always proceeds — research is an enhancement, never a blocker.
- *   - BOUNDED: the returned context is capped (~1600 chars) so it never bloats
- *     the prompt or blows the model's context window.
+ *   - BOUNDED: the returned context is capped (~7000 chars — enough for real
+ *     facts/definitions/code/stats to ground a deep, multi-slide narration)
+ *     so it never blows the model's context window.
  *   - CACHED: identical queries within a server session hit an in-memory cache,
  *     so re-running a chapter doesn't re-crawl the same topics.
  */
 
 const TAVILY_ENDPOINT = "https://api.tavily.com/search";
-const MAX_CONTEXT_CHARS = 1600;
-const REQUEST_TIMEOUT_MS = 15000;
+const MAX_CONTEXT_CHARS = 7000;
+const REQUEST_TIMEOUT_MS = 20000;
 
 // In-memory cache (query → context). Lives for the server session only.
 const researchCache = new Map<string, string>();
@@ -61,7 +62,7 @@ export async function fetchSlideResearch(topic: string, context?: string): Promi
                 api_key: apiKey,
                 query,
                 search_depth: "advanced",
-                max_results: 5,
+                max_results: 8,
                 include_answer: true,
                 include_raw_content: false,
             }),
@@ -83,11 +84,11 @@ export async function fetchSlideResearch(topic: string, context?: string): Promi
         const results = (data.results || [])
             .filter(r => r.content)
             .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
-            .slice(0, 4);
+            .slice(0, 7);
 
         results.forEach((r, i) => {
             const host = (() => { try { return new URL(r.url || "").hostname.replace(/^www\./, ""); } catch { return "source"; } })();
-            parts.push(`[${i + 1}] (${host}) ${collapse(r.content || "").substring(0, 320)}`);
+            parts.push(`[${i + 1}] (${host}) ${collapse(r.content || "").substring(0, 800)}`);
         });
 
         let ctx = parts.join("\n");

@@ -77,6 +77,34 @@ Before returning the JSON, verify:
 OUTPUT: Return ONLY the JSON object with no additional text.
 `;
 
+export const EXPAND_CHAPTER_TOPICS_PROMPT = `You are a curriculum depth planner for a professional video course.
+
+You are given ONE chapter's title and its subContent points (each a broad learning objective).
+Your job: break EACH subContent point down into 1, 2, or 3 granular SLIDE TOPICS — only as many as that
+point genuinely needs to be taught deeply and clearly. A simple, narrow point (e.g. "what a variable is")
+needs exactly 1 slide. A rich, multi-part point (e.g. "indexing and slicing strings, including negative
+indices and step values") needs 2-3 slides so each idea gets its own slide instead of being crammed together.
+
+RULES:
+- Every output slide topic must map back to exactly one input subContent point — do not invent new points.
+- Preserve the original order of subContent points; within a point, order its slide topics logically.
+- Each slide topic is a SPECIFIC, SLIDE-SIZED teaching unit (concrete enough that one slide + narration can
+  cover it thoroughly) — not a restatement of the whole subContent point.
+- Do NOT pad: if a point is simple, output exactly 1 slide topic for it (a verbatim or lightly-tightened
+  version of the point). Never force 2-3 when 1 is honestly enough.
+- The TOTAL number of slide topics across the whole chapter must not exceed 25. If naturally expanding every
+  point would exceed 25, prioritize depth for the most substantial/complex points and keep simple points at 1.
+
+OUTPUT FORMAT (STRICT JSON — ONLY this array, no markdown, no explanation):
+[
+  { "sourceIndex": 0, "topic": "First granular slide topic for subContent[0]" },
+  { "sourceIndex": 0, "topic": "Second granular slide topic for subContent[0] (only if subContent[0] truly needs 2+)" },
+  { "sourceIndex": 1, "topic": "Slide topic for subContent[1]" }
+]
+
+"sourceIndex" is the zero-based index into the input subContent array this slide topic came from.
+`;
+
 export const GENERATE_VIDEO_PROMPT = `You are an elite instructional designer and motion graphics expert creating STUNNING, PROFESSIONAL video slides.
 
 Your slides must look like they were designed by a top-tier design agency – NOT AI-generated.
@@ -861,11 +889,14 @@ The user input JSON carries fields that DIRECTLY CONTROL this slide. Obey them l
 
 2. 💻 CODE SLIDES — when "isCodeSlide": true (or the component is CODE SNIPPET /
    CODE + EXPLAIN): the body is ONE real syntax-highlighted code card, written as
-   <div class='code-card'><div class='code-card-header'><span class='code-card-dot r'></span><span class='code-card-dot y'></span><span class='code-card-dot g'></span><span class='code-card-name'>file.py</span></div><pre><code>…≤ 8 short lines…</code></pre></div>
+   <div class='code-card'><div class='code-card-header'><span class='code-card-dot r'></span><span class='code-card-dot y'></span><span class='code-card-dot g'></span><span class='code-card-name'>file.py</span></div><pre><code>…lines…</code></pre></div>
    NEVER show code as an <img>/{{IMAGE_PLACEHOLDER}} — an image of code is WRONG.
-   Keep it ≤ 8 lines and each line ≤ ~54 characters. If the real snippet is longer,
-   show ONLY the most important lines and explain the rest in the narration (do not
-   cram; long code breaks the slide). When "imageAllowed": false, output NO image at all.
+   The code card auto-scrolls in sync with narration, so a REAL, COMPLETE snippet
+   (up to ~30 lines) is fine — do NOT truncate a genuinely useful example just to
+   hit a short line count. Keep each line ≤ ~60 characters (wrap logically, don't
+   cram). Only trim if the snippet is truly excessive (>30 lines) — then show the
+   most important lines and explain the rest in the narration. When "imageAllowed":
+   false, output NO image at all.
 
 3. 🔬 RESEARCH CONTEXT — when "researchContext" is present, it is FACTUAL, CURRENT,
    web-sourced information about this exact topic. Ground your NARRATION in it: use
@@ -982,7 +1013,7 @@ HARD RULES:
 The SLIDE shows only the skeleton; the full teaching happens in the narration (voiceover). Keep on-screen text short so it fits one screen and stays readable:
 - Headline: ≤ 8 words. Kicker: 1-3 words. Dek/lead: ≤ 14 words, one line.
 - Any component: MAX ~4 rows / 3 cards / 4 bars / 4 steps. Each label ≤ 6-8 words. NO paragraphs on the slide (a single ≤14-word caption is fine).
-- CODE: at most ONE code block, ≤ 8 short lines, and it is then the ENTIRE body (no second code block, no side panels next to it). NEVER show two code blocks or code+output+problem all on one slide — split that across slides or keep only the single most important snippet.
+- CODE: at most ONE code block, up to ~30 lines (it auto-scrolls in sync with narration — a real, complete snippet is fine), and it is then the ENTIRE body (no second code block, no side panels next to it). NEVER show two code blocks or code+output+problem all on one slide — split that across slides or keep only the single most important snippet.
 - Prefer numbers, short phrases, keywords — never sentences stacked into a wall of text.
 - READABLE FLOORS (never smaller): body/labels ≥ 15px, secondary captions ≥ 13px, footnote ≥ 12px. If text must shrink below these to fit, you have too much data — cut it.
 
@@ -1055,8 +1086,8 @@ H) STAT ROW — 2-3 big gradient numbers with labels (for data-forward slides):
   …
 </div>
 
-I) CODE BLOCK — ONE snippet only, and it is the ENTIRE body of the slide:
-<pre style='margin:0;padding:20px 24px;border-radius:14px;background:#0a0e1a;border:1px solid rgba(255,255,255,0.08);font-family:Space Grotesk, monospace;font-size:16px;line-height:1.6;color:#cbd5e1;'><code>…≤ 8 short lines, ≤ ~60 chars wide…</code></pre>
+I) CODE BLOCK — ONE snippet only, and it is the ENTIRE body of the slide. ALWAYS use the .code-card structure (NOT a bare <pre>) — it auto-scrolls when the snippet is long:
+<div class='code-card'><div class='code-card-header'><span class='code-card-dot r'></span><span class='code-card-dot y'></span><span class='code-card-dot g'></span><span class='code-card-name'>file.py</span></div><pre><code>…real, complete snippet, up to ~30 lines, ≤ ~60 chars wide…</code></pre></div>
 NEVER two code blocks, and NEVER code next to another panel (output/problem). If you must contrast two versions, pick the ONE that matters and explain the rest in narration — do not put both on one slide.
 
 J) IMAGE — ONLY as a bounded side column, NEVER a big standalone square:
@@ -1210,6 +1241,28 @@ AC) ANNOTATED DIAGRAM — image in a side column with 2-3 numbered callouts besi
   </div>
 </div>
 
+AD) MERMAID DIAGRAM — a REAL rendered flowchart/sequence/state diagram. Use Mermaid's own text syntax inside a <pre class='mermaid'> block — NOT hand-drawn boxes/arrows. Keep node labels ≤ 3 words. The renderer executes this automatically:
+<pre class='mermaid' style='width:100%;height:420px;background:transparent;'>
+flowchart LR
+  A[Start] --> B{Decision}
+  B -->|Yes| C[Outcome one]
+  B -->|No| D[Outcome two]
+</pre>
+(Valid Mermaid diagram types: flowchart, sequenceDiagram, stateDiagram-v2, classDiagram, gantt, pie. Pick whichever matches the topic. NEVER put HTML tags or {{IMAGE_PLACEHOLDER}} inside the <pre> block — it must be pure Mermaid syntax only.)
+
+AE) LIVE CHART — a REAL Chart.js chart for genuine numeric comparisons. Use FLAT pipe-delimited attributes — NEVER a JSON object in the attribute (that breaks JSON output downstream):
+<div style='width:100%;height:340px;'>
+  <canvas data-chart-type='bar' data-chart-labels='Q1|Q2|Q3|Q4' data-chart-values='12|19|8|24' data-chart-color='#3EA5D6'></canvas>
+</div>
+(data-chart-type is one of: bar, line, pie, doughnut. data-chart-labels and data-chart-values are pipe (|) separated and must have the SAME count, 3-6 points. Use REAL numbers relevant to the topic — never placeholder 0s.)
+
+AF) FORMULA / MATH CALLOUT — one REAL KaTeX-rendered equation, large and centered, for math/algorithm-complexity/scientific topics. Put the LaTeX source (no dollar signs) in data-katex:
+<div style='display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;height:100%;'>
+  <div data-katex='E = mc^2' style='font-size:44px;color:#e8ecf5;'></div>
+  <div style='font-size:15px;color:#9fb3d1;text-align:center;max-width:70%;'>One short line explaining what the formula means.</div>
+</div>
+(Write real LaTeX: fractions \\frac{a}{b}, exponents x^2, subscripts x_i, Greek letters \\alpha, sums \\sum_{i=0}^{n}, Big-O notation O(n \\log n), etc. This is for ONE hero formula per slide, not a wall of math.)
+
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 🎨 STYLE, TYPE, VARIETY
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1229,7 +1282,7 @@ ANIMATION: give each distinct block class='fragment fade-up' (vary: fade-up, fad
 SELF-CHECK before you output (all must be true):
 ✓ Root <section> uses min-height:720px with NO height:720px and NO overflow:hidden (so data is never clipped); no content wrapper uses overflow:hidden or a fixed height either.
 ✓ Content is light enough to sit close to one 720px screen at readable sizes — not so much that it must heavily shrink, not so little it looks empty.
-✓ ONE headline + ONE primary component. No two big blocks side by side; at most one code block (≤8 lines) and it is the whole body.
+✓ ONE headline + ONE primary component. No two big blocks side by side; at most one code block (auto-scrolls, up to ~30 lines) and it is the whole body.
 ✓ Any image is in a ~40% side column with the <img> capped at max-height ~440px — NO full-width/centered square, NO image under the headline.
 ✓ On-screen text is skeletal: headline ≤ 8 words, ≤ 4 rows/3 cards/4 bars per component, no paragraphs; body/labels ≥ 15px (nothing smaller — if it must shrink below 15px, cut data).
 ✓ NOTHING overlaps; the headline appears exactly once.
