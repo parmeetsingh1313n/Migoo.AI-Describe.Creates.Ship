@@ -182,7 +182,7 @@ function buildRevealHtml(html, interval, baseUrl) {
 
   const headMatch   = content.match(/<head[^>]*>([\s\S]*?)<\/head>/i);
   const headContent = headMatch ? headMatch[1] : '';
-  content = content.replace(/<head[^>]*>[\s\S]*?<\/head>/i);
+  content = content.replace(/<head[^>]*>[\s\S]*?<\/head>/i, '');
 
   const bodyMatch = content.match(/<body([^>]*)>([\s\S]*)<\/body>/i);
   const bodyAttrs = bodyMatch ? bodyMatch[1] : '';
@@ -396,6 +396,203 @@ ${content}
 </body></html>`;
 }
 
+// ── Build ONE reveal.js document for a new-fragment-system slide ──────────────
+// Mirrors app/api/render-chapter/route.ts's buildRevealDeckHtml — real reveal.js
+// (self-hosted at ${baseUrl}/reveal/*, same static assets this Vercel deploy
+// already serves from /public/reveal) instead of the custom scale/fragment
+// approximation above. Legacy (data-reveal) slides keep using buildRevealHtml.
+function buildRevealDeckHtml(html, baseUrl) {
+  let content = html
+    .replace(/<!DOCTYPE[^>]*>/gi, '')
+    .replace(/<\/?html[^>]*>/gi, '');
+  const headMatch   = content.match(/<head[^>]*>([\s\S]*?)<\/head>/i);
+  const headContent = headMatch ? headMatch[1] : '';
+  content = content.replace(/<head[^>]*>[\s\S]*?<\/head>/i, '');
+  const bodyMatch = content.match(/<body([^>]*)>([\s\S]*)<\/body>/i);
+  content = bodyMatch ? bodyMatch[2] : content.replace(/<\/?body[^>]*>/gi, '');
+
+  const baseHref = baseUrl ? `<base href="${baseUrl.replace(/\/$/, '')}/">` : '';
+  const b = (baseUrl || '').replace(/\/$/, '');
+
+  const revealAssetTags = `
+<link rel="stylesheet" href="${b}/reveal/reset.css">
+<link rel="stylesheet" href="${b}/reveal/reveal.css">
+<link rel="stylesheet" href="${b}/reveal/vendor/katex/katex.min.css">
+<script src="${b}/reveal/reveal.js"></script>
+<script src="${b}/reveal/plugin/math.js"></script>
+<script src="${b}/reveal/vendor/katex/katex.min.js"></script>
+<script src="${b}/reveal/vendor/mermaid.min.js"></script>
+<script src="${b}/reveal/vendor/chart.js"></script>
+<script src="${b}/reveal/vendor/mark.min.js"></script>
+<script src="${b}/reveal/vendor/typed.js"></script>`;
+
+  const revealCustomStyles = `
+<style>
+.reveal .fragment.scale-in { opacity: 0; transform: scale(0.5); }
+.reveal .fragment.scale-in.visible { opacity: 1; transform: none; }
+.reveal .fragment.blur-in { opacity: 0; filter: blur(8px); transform: scale(0.95); }
+.reveal .fragment.blur-in.visible { opacity: 1; filter: none; transform: none; }
+.reveal .fragment.slide-up { opacity: 0; transform: translateY(60px); }
+.reveal .fragment.slide-up.visible { opacity: 1; transform: none; }
+.reveal, .reveal .slides, .reveal .slides section { width: 100% !important; height: 100% !important; }
+.reveal .slides section { top: 0 !important; }
+.mark-hl { background: rgba(139,92,246,0.35); color: inherit; border-radius: 3px; padding: 0 2px; }
+.reveal .code-card-body, .reveal .code-card pre { max-height: 460px !important; overflow-y: auto !important; }
+</style>`;
+
+  const bgScript = `
+    document.querySelectorAll('[data-background-gradient]').forEach(function(el){var g=el.getAttribute('data-background-gradient');if(g){el.style.background=g;el.style.minHeight='720px';el.style.minWidth='1440px';}});
+    document.querySelectorAll('[data-background-color]').forEach(function(el){var c=el.getAttribute('data-background-color');if(c){el.style.backgroundColor=c;el.style.minHeight='720px';}});
+    var fb=document.querySelector('[data-background-gradient]');if(fb){document.body.style.background=fb.getAttribute('data-background-gradient')||'';
+    }else{var fc=document.querySelector('[data-background-color]');if(fc){document.body.style.backgroundColor=fc.getAttribute('data-background-color')||'';}else{document.body.style.background='linear-gradient(135deg,#0f172a 0%,#1e293b 100%)';}}`;
+
+  const initScript = `
+    (function () {
+      function runCompanionLibs() {
+        if (window.mermaid) { try { window.mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'loose' }); window.mermaid.run({ querySelector: '.mermaid' }); } catch (e) {} }
+        if (window.katex) { document.querySelectorAll('[data-katex]').forEach(function (el) { try { window.katex.render(el.getAttribute('data-katex') || '', el, { throwOnError: false }); } catch (e) {} }); }
+        if (window.Chart) { document.querySelectorAll('canvas[data-chart-type]').forEach(function (el) { try {
+          var type=el.getAttribute('data-chart-type')||'bar', labels=(el.getAttribute('data-chart-labels')||'').split('|').filter(Boolean), values=(el.getAttribute('data-chart-values')||'').split('|').map(Number).filter(function(n){return !isNaN(n);}), color=el.getAttribute('data-chart-color')||'#6D5BD3';
+          new window.Chart(el, { type: type, data: { labels: labels, datasets: [{ data: values, backgroundColor: color, borderColor: color, borderWidth: 1 }] }, options: { responsive: true, maintainAspectRatio: false, animation: false, plugins: { legend: { display: type==='pie'||type==='doughnut', labels: { color: '#e2e8f0' } } }, scales: (type==='pie'||type==='doughnut') ? {} : { x: { ticks: { color: '#9fb3d1' }, grid: { color: 'rgba(255,255,255,0.08)' } }, y: { ticks: { color: '#9fb3d1' }, grid: { color: 'rgba(255,255,255,0.08)' } } } } });
+        } catch (e) {} }); }
+        if (window.Mark) { document.querySelectorAll('[data-mark]').forEach(function (el) { try { var terms=(el.getAttribute('data-mark')||'').split('|').filter(Boolean); if (terms.length) new window.Mark(el).mark(terms,{className:'mark-hl'}); } catch (e) {} }); }
+      }
+      function boot() {
+        var deck = new Reveal({
+          embedded: true, width: 1440, height: 720, margin: 0,
+          minScale: 0.2, maxScale: 1, center: true,
+          controls: false, progress: false, hash: false, keyboard: false,
+          transition: 'none',
+          plugins: (window.RevealMath && window.RevealMath.KaTeX) ? [window.RevealMath.KaTeX] : [],
+        });
+        window.__deck = deck;
+        window.__deckReady = false;
+        deck.initialize().then(function () {
+          runCompanionLibs();
+          deck.slide(0, 0, -1);
+          window.__deckReady = true;
+        });
+      }
+      if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
+      else boot();
+      window.__scrollCodeToProgress = function (progress) {
+        var body = document.querySelector('.code-card-body, .code-card pre');
+        if (!body) return;
+        var maxScroll = body.scrollHeight - body.clientHeight;
+        if (maxScroll <= 0) return;
+        var p = Math.max(0, Math.min(1, progress));
+        body.scrollTop = maxScroll * p;
+      };
+    })();
+  `;
+
+  return `<!DOCTYPE html><html><head><meta charset="UTF-8">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+${baseHref}${headContent}
+${revealAssetTags}
+${revealCustomStyles}
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Outfit:wght@300;400;500;600;700;800;900&family=Poppins:wght@300;400;500;600;700;800;900&family=Space+Grotesk:wght@400;500;600;700&family=Playfair+Display:ital,wght@0,400..900;1,400..900&family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&display=swap');
+*{box-sizing:border-box;margin:0;padding:0;}
+*::-webkit-scrollbar{display:none;width:0;height:0;}
+*{scrollbar-width:none;-ms-overflow-style:none;}
+pre,code,p,h1,h2,h3,h4,span,div,li,td,th,blockquote{overflow-wrap:anywhere;}
+pre,code,table,img,.code-card{max-width:100%!important;}
+pre,code{white-space:pre-wrap!important;word-break:break-word!important;}
+table{table-layout:fixed!important;}
+body{width:1440px;height:720px;overflow:hidden;background:#0f172a;}
+section{width:1440px!important;box-sizing:border-box!important;}
+img{max-width:100%;}
+.code-card{border-radius:14px!important;border:1px solid rgba(255,255,255,0.10)!important;background:#0b1020!important;overflow:hidden!important;box-shadow:0 18px 44px rgba(0,0,0,0.45)!important;width:100%!important;}
+.code-card-header{display:flex!important;align-items:center!important;gap:8px!important;padding:11px 16px!important;background:rgba(255,255,255,0.04)!important;border-bottom:1px solid rgba(255,255,255,0.07)!important;}
+.code-card-dot{width:11px!important;height:11px!important;border-radius:50%!important;flex-shrink:0!important;}
+.code-card-dot.r{background:#ff5f56!important;}.code-card-dot.y{background:#ffbd2e!important;}.code-card-dot.g{background:#27c93f!important;}
+.code-card-name{margin-left:8px!important;font-family:'Space Grotesk',monospace!important;font-size:13px!important;color:#9fb3d1!important;letter-spacing:0.3px!important;}
+.code-card pre,.code-card-body{margin:0!important;padding:18px 22px!important;font-family:'Space Grotesk','Space Mono',ui-monospace,monospace!important;font-size:16px!important;line-height:1.6!important;color:#e6edf7!important;white-space:pre-wrap!important;overflow-wrap:anywhere!important;word-break:break-word!important;tab-size:2!important;max-width:100%!important;}
+.code-card code{font-family:inherit!important;background:none!important;}
+.tok-kw{color:#c792ea!important;font-weight:600!important;}.tok-str{color:#c3e88d!important;}.tok-num{color:#f78c6c!important;}.tok-com{color:#6b7a99!important;font-style:italic!important;}.tok-fn{color:#82aaff!important;}.tok-punct{color:#89ddff!important;}
+.glassmorphism-card,.glassmorphism,.glass-card,.glass{background:rgba(255,255,255,0.07)!important;backdrop-filter:blur(16px)!important;-webkit-backdrop-filter:blur(16px)!important;border:1px solid rgba(255,255,255,0.13)!important;border-radius:14px!important;padding:12px 16px!important;color:#e2e8f0;}
+.card,.box,.content-box,.info-card,.feature-card,.stat-card{background:rgba(255,255,255,0.07)!important;border:1px solid rgba(255,255,255,0.12)!important;border-radius:12px!important;padding:12px 16px!important;color:#e2e8f0;}
+.gradient-border-card,.gradient-border,.glowing-card,.glow-card{background:#0f172a!important;box-shadow:0 0 0 2px rgba(139,92,246,0.55)!important;border-radius:12px!important;padding:12px 16px!important;color:#e2e8f0;}
+.outlined-card,.outlined,.border-card,.minimal-card{background:transparent!important;border:1.5px solid rgba(255,255,255,0.22)!important;border-radius:10px!important;padding:12px 16px!important;color:#e2e8f0;}
+.gradient-fill-card,.gradient-card,.gradient-fill{background:linear-gradient(135deg,rgba(59,130,246,0.18),rgba(139,92,246,0.18))!important;border:1px solid rgba(255,255,255,0.09)!important;border-radius:12px!important;padding:12px 16px!important;color:#e2e8f0;}
+.neumorphic-card,.neumorphic,.neu-card{background:#1e293b!important;box-shadow:6px 6px 12px rgba(0,0,0,0.45),-4px -4px 10px rgba(255,255,255,0.04)!important;border-radius:16px!important;padding:12px 16px!important;color:#e2e8f0;}
+.minimal-tag,.tag-card,.pill-card,.chip{background:rgba(255,255,255,0.09)!important;border-radius:24px!important;padding:6px 16px!important;display:inline-flex!important;align-items:center!important;gap:8px!important;color:#e2e8f0;}
+.stat-block{display:flex!important;flex-direction:column!important;align-items:center!important;text-align:center!important;padding:14px 10px!important;background:rgba(255,255,255,0.05)!important;border-radius:14px!important;border:1px solid rgba(255,255,255,0.09)!important;}
+.stat-number{font-size:34px!important;font-weight:900!important;line-height:1!important;background:linear-gradient(135deg,#3b82f6,#8b5cf6)!important;-webkit-background-clip:text!important;-webkit-text-fill-color:transparent!important;}
+.stat-label{font-size:11px!important;color:#94a3b8!important;margin-top:5px!important;}
+.badge,.label-badge,.status-badge{display:inline-flex!important;align-items:center!important;padding:4px 12px!important;border-radius:20px!important;font-size:11px!important;font-weight:600!important;background:rgba(139,92,246,0.2)!important;border:1px solid rgba(139,92,246,0.4)!important;color:#c4b5fd!important;}
+.alert-box{background:rgba(245,158,11,0.08)!important;border-left:4px solid #f59e0b!important;border-radius:8px!important;padding:10px 14px!important;color:#fef08a!important;font-size:12px!important;}
+.info-box{background:rgba(59,130,246,0.08)!important;border-left:4px solid #3b82f6!important;border-radius:8px!important;padding:10px 14px!important;color:#93c5fd!important;font-size:12px!important;}
+.success-box{background:rgba(16,185,129,0.08)!important;border-left:4px solid #10b981!important;border-radius:8px!important;padding:10px 14px!important;color:#a7f3d0!important;font-size:12px!important;}
+.gradient-box{background:linear-gradient(135deg,rgba(59,130,246,0.1),rgba(139,92,246,0.1))!important;border:1px solid rgba(255,255,255,0.08)!important;border-left:4px solid #8b5cf6!important;border-radius:8px!important;padding:10px 14px!important;color:#e9d5ff!important;font-size:12px!important;}
+.quote-card{border-left:4px solid #8b5cf6!important;background:rgba(139,92,246,0.07)!important;border-radius:0 10px 10px 0!important;padding:11px 16px!important;font-style:italic!important;font-size:13px!important;color:#e2e8f0!important;}
+.code-block-premium{font-family:'Space Mono',monospace!important;font-size:11px!important;line-height:1.4!important;max-height:350px!important;overflow:hidden!important;border-radius:12px!important;border:1px solid rgba(255,255,255,0.08)!important;background:#090d16!important;padding:14px!important;}
+.process-row{display:flex!important;flex-direction:row!important;justify-content:space-between!important;width:100%!important;gap:12px!important;margin:4px 0!important;}
+.process-step{flex:1!important;background:rgba(255,255,255,0.05)!important;border:1px solid rgba(255,255,255,0.08)!important;border-radius:12px!important;padding:12px!important;text-align:center!important;position:relative!important;}
+.process-step-number{width:26px!important;height:26px!important;border-radius:50%!important;background:linear-gradient(135deg,#3b82f6,#8b5cf6)!important;display:flex!important;align-items:center!important;justify-content:center!important;margin:0 auto 8px auto!important;font-size:11px!important;font-weight:800!important;color:#ffffff!important;}
+.grid-2-col{display:grid!important;grid-template-columns:repeat(2,1fr)!important;gap:16px!important;width:100%!important;}
+.grid-3-col{display:grid!important;grid-template-columns:repeat(3,1fr)!important;gap:16px!important;width:100%!important;}
+.grid-4-col{display:grid!important;grid-template-columns:repeat(4,1fr)!important;gap:12px!important;width:100%!important;}
+.bento-grid{display:grid!important;grid-template-columns:repeat(3,1fr)!important;gap:14px!important;width:100%!important;}
+.bento-span-2{grid-column:span 2!important;}.bento-span-3{grid-column:span 3!important;}
+.kanban-board{display:grid!important;grid-template-columns:repeat(3,1fr)!important;gap:10px!important;width:100%!important;}
+.kanban-column{background:rgba(255,255,255,0.03)!important;border-radius:10px!important;border:1px solid rgba(255,255,255,0.07)!important;overflow:hidden!important;}
+.timeline-row{display:flex!important;flex-direction:row!important;justify-content:space-between!important;align-items:flex-start!important;width:100%!important;position:relative!important;padding-top:24px!important;margin-top:10px!important;}
+.premium-table{width:100%!important;border-collapse:collapse!important;border-radius:12px!important;overflow:hidden!important;background:rgba(255,255,255,0.03)!important;border:1px solid rgba(255,255,255,0.08)!important;}
+.premium-table th{background:linear-gradient(90deg,rgba(59,130,246,0.15),rgba(139,92,246,0.15))!important;color:#ffffff!important;font-weight:700!important;text-align:left!important;padding:10px 14px!important;font-size:13px!important;border-bottom:1.5px solid rgba(255,255,255,0.15)!important;}
+.premium-table td{padding:8px 14px!important;font-size:11px!important;color:#cbd5e1!important;border-bottom:1px solid rgba(255,255,255,0.05)!important;}
+.split-card{display:flex!important;border-radius:12px!important;overflow:hidden!important;border:1px solid rgba(255,255,255,0.08)!important;}
+.split-card-accent{width:5px!important;flex-shrink:0!important;background:linear-gradient(180deg,#3b82f6,#8b5cf6)!important;}
+.split-card-body{flex:1!important;padding:10px 14px!important;background:rgba(255,255,255,0.04)!important;}
+.feature-matrix{display:grid!important;grid-template-columns:repeat(4,1fr)!important;gap:10px!important;width:100%!important;}
+.feature-matrix-cell{display:flex!important;flex-direction:column!important;align-items:center!important;padding:11px 8px!important;background:rgba(255,255,255,0.04)!important;border-radius:10px!important;border:1px solid rgba(255,255,255,0.07)!important;text-align:center!important;font-size:11px!important;color:#cbd5e1!important;gap:6px!important;}
+.diff-panel{display:grid!important;grid-template-columns:1fr 1fr!important;gap:3px!important;width:100%!important;}
+.diff-panel-left{background:rgba(244,63,94,0.07)!important;border:1px solid rgba(244,63,94,0.22)!important;padding:11px 14px!important;border-radius:10px 0 0 10px!important;}
+.diff-panel-right{background:rgba(16,185,129,0.07)!important;border:1px solid rgba(16,185,129,0.22)!important;padding:11px 14px!important;border-radius:0 10px 10px 0!important;}
+.row-list{display:flex!important;flex-direction:column!important;width:100%!important;border-radius:10px!important;overflow:hidden!important;}
+.row-list-item{display:flex!important;align-items:center!important;gap:12px!important;padding:9px 14px!important;font-size:12px!important;color:#cbd5e1!important;}
+.row-list-item:nth-child(odd){background:rgba(255,255,255,0.04)!important;}
+.row-list-item:nth-child(even){background:rgba(255,255,255,0.02)!important;}
+.accent{color:#8b5cf6!important;}.accent-blue{color:#3b82f6!important;}.accent-pink{color:#ec4899!important;}.accent-green{color:#10b981!important;}.accent-cyan{color:#06b6d4!important;}.accent-orange{color:#f59e0b!important;}.text-muted{color:#94a3b8!important;}.text-light{color:#cbd5e1!important;}
+.progress-bar-container{width:100%;height:10px;background:rgba(255,255,255,0.06);border-radius:5px;overflow:hidden;}
+.progress-bar-fill{height:100%;background:linear-gradient(90deg,#3b82f6,#8b5cf6);border-radius:5px;}
+.divider{height:1px;background:rgba(255,255,255,0.12);margin:8px 0;}
+.divider-vertical{width:1px;background:rgba(255,255,255,0.12);margin:0 8px;align-self:stretch;}
+</style></head>
+<body style="margin:0;padding:0;width:1440px;height:720px;overflow:hidden;background:#0f172a;">
+<div class="reveal"><div class="slides">${content}</div></div>
+<script>(function(){${bgScript}})();</script>
+<script>${initScript}</script>
+</body></html>`;
+}
+
+// ── Capture a WHOLE slide's fragment sequence through real reveal.js in ONE ──
+// page load — mirrors app/api/render-chapter/route.ts's screenshotRevealDeckSequence.
+async function captureRevealDeckStates(browser, html, baseUrl, intervals, totalSec, imgPathForInterval) {
+  const page = await browser.newPage();
+  try {
+    await page.setViewport({ width: 1440, height: 720, deviceScaleFactor: 1 });
+    const deckHtml = buildRevealDeckHtml(html, baseUrl);
+    await page.setContent(deckHtml, { waitUntil: 'networkidle0', timeout: 20000 });
+    await page.evaluateHandle(() => document.fonts.ready);
+    await page.waitForFunction('window.__deckReady === true', { timeout: 15000 }).catch(() => {});
+    await new Promise(r => setTimeout(r, 400));
+
+    for (let j = 0; j < intervals.length; j++) {
+      const iv = intervals[j];
+      await page.evaluate((idx) => { window.__deck.slide(0, 0, idx); }, iv.fragmentIndex);
+      const scrollProgress = totalSec > 0 ? iv.startSec / totalSec : 0;
+      await page.evaluate((p) => { if (window.__scrollCodeToProgress) window.__scrollCodeToProgress(p); }, scrollProgress);
+      await new Promise(r => setTimeout(r, 150));
+      await page.screenshot({ path: imgPathForInterval(j), type: 'png', clip: { x: 0, y: 0, width: 1440, height: 720 } });
+    }
+  } finally {
+    await page.close();
+  }
+}
+
 // ── Shared Puppeteer browser pool (one browser per parallel slide worker) ────
 // Each slide gets its own browser instance to allow true parallelism.
 // Browser is launched once per slide render, kept open for all states, then closed.
@@ -447,29 +644,58 @@ async function renderSlide(i, slide, totalSlides) {
     ],
   });
 
+  const revealDataArr = slide.revealData ?? [];
+  const isLegacySlide = revealDataArr.length > 0 && String(revealDataArr[0]).startsWith('r');
+
   const intervalClips = [];
   try {
-    for (let j = 0; j < intervals.length; j++) {
-      const iv = intervals[j];
-      const clipDur = iv.endSec - iv.startSec;
-      if (clipDur < 0.05) continue;
-
-      // Screenshot
-      const imgPath = path.join(workDir, `s${i}-state${j}.png`);
+    if (!isLegacySlide) {
+      // ── Real reveal.js path: ONE page load for the whole slide ────────────
+      const validIntervals = intervals
+        .map((iv, j) => ({ iv, j }))
+        .filter(({ iv }) => (iv.endSec - iv.startSec) >= 0.05);
+      const imgPathFor = (k) => path.join(workDir, `s${i}-state${validIntervals[k].j}.png`);
       try {
-        const revealHtml = buildRevealHtml(slide.html, iv, baseUrl);
-        await screenshotWithBrowser(browser, revealHtml, imgPath);
-        console.log(`  📸 Slide ${i + 1} state ${j} OK`);
+        await captureRevealDeckStates(browser, slide.html, baseUrl, validIntervals.map(v => v.iv), totalSec, imgPathFor);
+        console.log(`  📸 Slide ${i + 1}: ${validIntervals.length} reveal.js state(s) captured in ONE page load`);
       } catch (e) {
-        console.warn(`  ⚠️  Screenshot failed: ${e.message} — black frame`);
-        await execAsync(`"${getFFmpeg()}" -y -f lavfi -i color=c=black:s=1440x720:r=1:d=1 -frames:v 1 "${imgPath}"`).catch(() => {});
+        console.warn(`  ⚠️  Reveal deck capture failed: ${e.message} — black frames`);
+        for (let k = 0; k < validIntervals.length; k++) {
+          await execAsync(`"${getFFmpeg()}" -y -f lavfi -i color=c=black:s=1440x720:r=1:d=1 -frames:v 1 "${imgPathFor(k)}"`).catch(() => {});
+        }
       }
+      for (let k = 0; k < validIntervals.length; k++) {
+        const { iv } = validIntervals[k];
+        const clipDur = iv.endSec - iv.startSec;
+        const clipPath = path.join(workDir, `s${i}-clip${k}.mp4`);
+        const prevImgPath = k > 0 ? imgPathFor(k - 1) : undefined;
+        await makeClip(imgPathFor(k), audioPath, iv.startSec, clipDur, clipPath, prevImgPath);
+        intervalClips.push(clipPath);
+      }
+    } else {
+      // ── Legacy path: unchanged — one full page reload per interval ────────
+      for (let j = 0; j < intervals.length; j++) {
+        const iv = intervals[j];
+        const clipDur = iv.endSec - iv.startSec;
+        if (clipDur < 0.05) continue;
 
-      // Clip
-      const clipPath = path.join(workDir, `s${i}-clip${j}.mp4`);
-      const prevImgPath = j > 0 ? path.join(workDir, `s${i}-state${j - 1}.png`) : undefined;
-      await makeClip(imgPath, audioPath, iv.startSec, clipDur, clipPath, prevImgPath);
-      intervalClips.push(clipPath);
+        // Screenshot
+        const imgPath = path.join(workDir, `s${i}-state${j}.png`);
+        try {
+          const revealHtml = buildRevealHtml(slide.html, iv, baseUrl);
+          await screenshotWithBrowser(browser, revealHtml, imgPath);
+          console.log(`  📸 Slide ${i + 1} state ${j} OK`);
+        } catch (e) {
+          console.warn(`  ⚠️  Screenshot failed: ${e.message} — black frame`);
+          await execAsync(`"${getFFmpeg()}" -y -f lavfi -i color=c=black:s=1440x720:r=1:d=1 -frames:v 1 "${imgPath}"`).catch(() => {});
+        }
+
+        // Clip
+        const clipPath = path.join(workDir, `s${i}-clip${j}.mp4`);
+        const prevImgPath = j > 0 ? path.join(workDir, `s${i}-state${j - 1}.png`) : undefined;
+        await makeClip(imgPath, audioPath, iv.startSec, clipDur, clipPath, prevImgPath);
+        intervalClips.push(clipPath);
+      }
     }
   } finally {
     await browser.close();
