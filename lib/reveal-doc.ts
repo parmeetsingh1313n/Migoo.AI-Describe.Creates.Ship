@@ -556,8 +556,9 @@ export const COMPONENT_STYLESHEET = `
        This is the ONLY correct way to show code. Readable font (never clipped),
        an IDE-style header with traffic-light dots + a filename/language chip,
        and tokens colored by the injected highlighter (.tok-* classes below).
-       NO max-height/overflow:hidden here — the prompt caps code at ≤ 9 short
-       lines so it fits the 720px budget without shrinking. */
+       The body is a FIXED-HEIGHT scroll viewport: a long snippet stays at a
+       readable font size and auto-scrolls in sync with narration (via
+       __scrollCodeToProgress) instead of shrinking the whole slide. */
     .code-card {
       border-radius: 14px !important;
       border: 1px solid rgba(255,255,255,0.10) !important;
@@ -585,11 +586,14 @@ export const COMPONENT_STYLESHEET = `
       font-family: 'Space Grotesk','Space Mono', ui-monospace, monospace !important;
       font-size: 16px !important; line-height: 1.6 !important;
       color: #e6edf7 !important;
-      /* WRAP, don't scroll: a long line must fold onto the next line instead of
-         forcing horizontal overflow (which used to shrink the entire slide). */
+      /* WRAP long lines, don't scroll horizontally; but DO scroll vertically:
+         cap the height so a long snippet becomes a scroll viewport (kept in a
+         readable font, auto-scrolled with narration) instead of expanding the
+         slide and forcing a whole-slide shrink. */
       white-space: pre-wrap !important;
       overflow-wrap: anywhere !important; word-break: break-word !important;
-      overflow: visible !important; tab-size: 2 !important; max-width: 100% !important;
+      max-height: 460px !important; overflow-y: auto !important;
+      tab-size: 2 !important; max-width: 100% !important;
     }
     .code-card code { font-family: inherit !important; background: none !important; }
     /* Syntax tokens (set by the injected highlighter) */

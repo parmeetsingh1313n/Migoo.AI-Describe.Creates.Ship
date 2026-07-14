@@ -331,7 +331,7 @@ table{table-layout:fixed!important;}
 .code-card-dot{width:11px!important;height:11px!important;border-radius:50%!important;flex-shrink:0!important;}
 .code-card-dot.r{background:#ff5f56!important;}.code-card-dot.y{background:#ffbd2e!important;}.code-card-dot.g{background:#27c93f!important;}
 .code-card-name{margin-left:8px!important;font-family:'Space Grotesk',monospace!important;font-size:13px!important;color:#9fb3d1!important;letter-spacing:0.3px!important;}
-.code-card pre,.code-card-body{margin:0!important;padding:18px 22px!important;font-family:'Space Grotesk','Space Mono',ui-monospace,monospace!important;font-size:16px!important;line-height:1.6!important;color:#e6edf7!important;white-space:pre-wrap!important;overflow-wrap:anywhere!important;word-break:break-word!important;overflow:visible!important;tab-size:2!important;max-width:100%!important;}
+.code-card pre,.code-card-body{margin:0!important;padding:18px 22px!important;font-family:'Space Grotesk','Space Mono',ui-monospace,monospace!important;font-size:16px!important;line-height:1.6!important;color:#e6edf7!important;white-space:pre-wrap!important;overflow-wrap:anywhere!important;word-break:break-word!important;max-height:460px!important;overflow-y:auto!important;tab-size:2!important;max-width:100%!important;}
 .code-card code{font-family:inherit!important;background:none!important;}
 .tok-kw{color:#c792ea!important;font-weight:600!important;}.tok-str{color:#c3e88d!important;}.tok-num{color:#f78c6c!important;}.tok-com{color:#6b7a99!important;font-style:italic!important;}.tok-fn{color:#82aaff!important;}.tok-punct{color:#89ddff!important;}
 body{width:1440px;height:720px;overflow:hidden;background:#0f172a;}
