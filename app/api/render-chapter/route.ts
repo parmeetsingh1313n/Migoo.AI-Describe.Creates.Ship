@@ -126,10 +126,20 @@ function buildRevealIntervals(slide: any, totalSec: number): RevealInterval[] {
     return result;
 
   } else if (isNewFrag) {
+    // Prefer the per-fragment timeline (real [start,end] from each fragment's word
+    // share of the audio) when present; fall back to the legacy chunk[i] mapping.
+    const timeline: any[] | undefined = slide.caption?.fragmentTimeline;
     const events: Array<{ at: number; idx: number }> = [];
     const data = fragmentData!;
-    for (let i = 0; i < data.length; i++) {
-      events.push({ at: Math.max(0, (chunks[i]?.timestamp?.[0] ?? (i * 1.2)) - 0.05), idx: data[i] });
+    if (Array.isArray(timeline) && timeline.length > 0) {
+      for (let i = 0; i < data.length; i++) {
+        const tl = timeline.find((t: any) => t.index === data[i]) ?? timeline[i];
+        events.push({ at: Math.max(0, (tl?.startSec ?? (i * 1.2)) - 0.05), idx: data[i] });
+      }
+    } else {
+      for (let i = 0; i < data.length; i++) {
+        events.push({ at: Math.max(0, (chunks[i]?.timestamp?.[0] ?? (i * 1.2)) - 0.05), idx: data[i] });
+      }
     }
     events.sort((a, b) => a.at - b.at);
     const result: RevealInterval[] = [];

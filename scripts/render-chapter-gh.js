@@ -155,9 +155,23 @@ function buildRevealIntervals(slide, totalSec) {
     return result;
 
   } else if (isNewFrag) {
+    // Prefer the per-fragment timeline (each fragment's real [start,end] from its
+    // word share of the audio) when present — it spreads reveals across the whole
+    // narration. Fall back to the old chunk[i] mapping for slides generated before
+    // fragmentTimeline existed (that mapping bunches all reveals in the first
+    // seconds, but it's the best available for legacy slides).
+    const timeline = slide.caption?.fragmentTimeline;
     const events = [];
-    for (let i = 0; i < fragmentData.length; i++) {
-      events.push({ at: Math.max(0, (chunks[i]?.timestamp?.[0] ?? (i * 1.2)) - 0.05), idx: fragmentData[i] });
+    if (Array.isArray(timeline) && timeline.length > 0) {
+      for (let i = 0; i < fragmentData.length; i++) {
+        const tl = timeline.find(t => t.index === fragmentData[i]) ?? timeline[i];
+        const at = Math.max(0, (tl?.startSec ?? (i * 1.2)) - 0.05);
+        events.push({ at, idx: fragmentData[i] });
+      }
+    } else {
+      for (let i = 0; i < fragmentData.length; i++) {
+        events.push({ at: Math.max(0, (chunks[i]?.timestamp?.[0] ?? (i * 1.2)) - 0.05), idx: fragmentData[i] });
+      }
     }
     events.sort((a, b) => a.at - b.at);
 

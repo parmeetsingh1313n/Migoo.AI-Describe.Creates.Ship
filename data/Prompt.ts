@@ -924,10 +924,30 @@ Return ONLY a single valid JSON object. NO markdown, NO explanations, NO code bl
   "slideIndex": 1,
   "html": "<section data-background-gradient='linear-gradient(135deg, #0f172a, #1e293b)'>...</section>",
   "narration": {
-    "fullText": "Your 3500-4500 word narration, deeply chained to previous slides..."
+    "fullText": "Your 3500-4500 word narration, deeply chained to previous slides...",
+    "fragments": [
+      { "index": 0, "text": "The part of the narration spoken while fragment 0 is the focus..." },
+      { "index": 1, "text": "The part spoken while fragment 1 is revealed..." }
+    ]
   },
   "fragmentData": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
 }
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🎯 NARRATION FRAGMENTS — segment the voiceover per on-screen fragment (REQUIRED)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Every distinct on-screen block carries class='fragment …' data-fragment-index='N'.
+"narration.fragments" splits your voiceover into one segment PER fragment index, in
+reading order, so the renderer knows WHICH part of the slide is being spoken at any
+moment (it zooms the "camera" to that fragment while its segment plays).
+- One entry per data-fragment-index used in the html (same indices as fragmentData).
+- The segments IN ORDER, concatenated, MUST equal your full narration — so
+  fullText = the fragment texts joined with spaces. Do NOT write new content here;
+  just SPLIT the same narration you wrote in fullText at natural fragment boundaries.
+- Each fragment's segment covers what you say WHILE that block is the focus (roughly
+  proportional: a fragment you dwell on longer gets a longer segment).
+- Keep fullText AND fragments consistent (fullText is the join of fragments[].text).
+
 
 ═══════════════════════════════════════════════════════════════════════════════
 🔗 CONTEXT CHAINING RULES (MOST IMPORTANT — READ CAREFULLY)

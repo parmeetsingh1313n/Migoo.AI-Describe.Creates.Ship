@@ -363,6 +363,37 @@ function wordsToChunks(words: Word[]): { timestamp: [number, number]; text: stri
 }
 
 /**
+ * Build a per-fragment timeline from the model's narration.fragments + the known
+ * audio duration. Each fragment's [start,end] is its share of the total spoken
+ * words, so a fragment the narrator dwells on gets a proportionally longer window.
+ *
+ * This is the timing signal the render "camera director" uses to know which
+ * on-screen fragment is being spoken at each moment. It replaces the old broken
+ * mapping (fragment i → caption-chunk i), where ~20 fragments mapped to the first
+ * ~20 of ~800 word-chunks and every fragment revealed in the opening seconds.
+ *
+ * Returns [{ index, startSec, endSec, text }]. Falls back to an even split when
+ * fragment word counts are unavailable. Instant — no STT/batch job.
+ */
+function buildFragmentTimeline(
+    fragments: Array<{ index: number; text?: string }> | undefined,
+    audioDurationSec: number,
+): Array<{ index: number; startSec: number; endSec: number }> {
+    if (!Array.isArray(fragments) || fragments.length === 0 || audioDurationSec <= 0) return [];
+    const counts = fragments.map(f => Math.max(1, (f.text ?? "").split(/\s+/).filter(Boolean).length));
+    const totalWords = counts.reduce((a, b) => a + b, 0);
+    const secPerWord = audioDurationSec / totalWords;
+    let cursor = 0;
+    return fragments.map((f, i) => {
+        const start = cursor;
+        cursor += counts[i] * secPerWord;
+        // Clamp the last fragment's end exactly to the audio duration.
+        const end = i === fragments.length - 1 ? audioDurationSec : cursor;
+        return { index: f.index ?? i, startSec: +start.toFixed(3), endSec: +end.toFixed(3) };
+    });
+}
+
+/**
  * Generate captions directly from narration text + known audio duration.
  * 
  * OLD approach: Upload audio → Sarvam batch STT job → poll → download → parse
@@ -1128,6 +1159,14 @@ export const generateCourseAudioFn = inngest.createFunction(
 
                 // ⚡ Instant captions from narration — replaces slow Sarvam batch STT job
                 const captions = generateCaptionsFromNarration(narration, audioDuration, "en-IN");
+                // Per-fragment timeline (which on-screen fragment is spoken when) —
+                // drives the render camera director. Proportional to each fragment's
+                // word share of the audio; instant, no STT.
+                const fragmentTimeline = buildFragmentTimeline((slide.narration as any)?.fragments, audioDuration);
+                if (fragmentTimeline.length) {
+                    captions.fragmentTimeline = fragmentTimeline;
+                    console.log(`🎥 ${TAG} Slide ${i + 1} fragment timeline: ${fragmentTimeline.length} windows`);
+                }
                 console.log(`🎬 ${TAG} Slide ${i + 1} Captions: ${captions.chunks?.length ?? 0} chunks`);
 
                 // Persist to DB
