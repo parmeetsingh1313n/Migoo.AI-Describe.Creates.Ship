@@ -410,6 +410,124 @@ ${content}
 </body></html>`;
 }
 
+// ── CINEMATIC mode (behind a flag) ───────────────────────────────────────────
+// When CINEMATIC=1 (env or payload), the new-fragment path records a smooth
+// "camera" that zooms/pans to the fragment being narrated (dense slides) and
+// plays component-aware reveal animations, by frame-stepping window.__seekTo(t)
+// and screenshotting each frame. Otherwise the fast frozen-screenshot path runs.
+const CINEMATIC = String(process.env.CINEMATIC ?? payload.cinematic ?? '').trim() === '1'
+  || payload.cinematic === true;
+const CINE_FPS = 30;
+
+// Inlined here (this is a standalone CI script that can't import the TS lib) —
+// KEEP IN SYNC with lib/reveal-doc.ts CINEMATIC_DIRECTOR_SCRIPT + COMPONENT_ANIMATION_STYLES.
+const CINEMATIC_DIRECTOR_SCRIPT = `
+<style>
+#cine-camera { transform-origin: 0 0; will-change: transform; }
+.reveal .fragment.cine-spoken.visible { opacity: 0.42 !important; transition: opacity 0.5s ease; }
+.reveal .fragment.cine-active.visible { opacity: 1 !important; transition: opacity 0.4s ease; }
+</style>
+<script>
+(function () {
+  var EASE = function (x) { return x < 0.5 ? 4*x*x*x : 1 - Math.pow(-2*x+2, 3)/2; };
+  var FONT_THRESHOLD = 15, ZOOM_PAD = 90, MAX_ZOOM = 1.9, DRAG = 0.55;
+  var VW = 1440, VH = 720, camera = null, deckDense = null;
+  function timeline() { return Array.isArray(window.__cineTimeline) ? window.__cineTimeline : []; }
+  function duration() { return window.__cineDuration || 0; }
+  function ensureCamera() {
+    if (camera) return camera;
+    var reveal = document.querySelector('.reveal');
+    if (!reveal || !reveal.parentNode) return null;
+    camera = document.getElementById('cine-camera');
+    if (!camera) {
+      camera = document.createElement('div');
+      camera.id = 'cine-camera';
+      camera.style.position = 'absolute'; camera.style.top = '0'; camera.style.left = '0';
+      camera.style.width = VW + 'px'; camera.style.height = VH + 'px';
+      reveal.parentNode.insertBefore(camera, reveal); camera.appendChild(reveal);
+    }
+    return camera;
+  }
+  function measureDense() {
+    if (deckDense !== null) return deckDense;
+    var scale = 1, slides = document.querySelector('.reveal .slides');
+    if (slides) {
+      var tr = getComputedStyle(slides).transform;
+      var m = tr && tr !== 'none' && tr.match(/matrix\\(([^)]+)\\)/);
+      if (m) { var parts = m[1].split(','); scale = parseFloat(parts[0]) || 1; }
+    }
+    var sample = document.querySelector('.reveal .slides section p, .reveal .slides section li, .reveal .slides section td, .reveal .slides section span');
+    var fs = sample ? parseFloat(getComputedStyle(sample).fontSize) : 18;
+    deckDense = (fs * scale) < FONT_THRESHOLD; return deckDense;
+  }
+  function fragmentRect(idx) {
+    var el = document.querySelector('.reveal .slides section [data-fragment-index="' + idx + '"]')
+          || document.querySelectorAll('.reveal .slides section .fragment')[idx];
+    if (!el) return null;
+    var r = el.getBoundingClientRect();
+    if (r.width < 4 || r.height < 4) return null;
+    return { x: r.left, y: r.top, w: r.width, h: r.height };
+  }
+  function frameFor(rect) {
+    if (!rect) return { s: 1, tx: 0, ty: 0 };
+    var w = rect.w + ZOOM_PAD * 2, h = rect.h + ZOOM_PAD * 2;
+    var s = Math.min(VW / w, VH / h, MAX_ZOOM); if (s < 1) s = 1;
+    var cx = rect.x + rect.w / 2, cy = rect.y + rect.h / 2;
+    var tx = VW / 2 - cx * s, ty = VH / 2 - cy * s;
+    tx = Math.min(0, Math.max(tx, VW - VW * s)); ty = Math.min(0, Math.max(ty, VH - VH * s));
+    return { s: s, tx: tx, ty: ty };
+  }
+  function lerp(a, b, t) { return a + (b - a) * t; }
+  function applyReveals(t) {
+    var tl = timeline();
+    if (!window.__deck || tl.length === 0) return -1;
+    var activeOrd = -1;
+    for (var i = 0; i < tl.length; i++) { if (t >= tl[i].startSec) activeOrd = i; }
+    window.__deck.slide(0, 0, activeOrd);
+    var frags = document.querySelectorAll('.reveal .slides section .fragment');
+    for (var k = 0; k < frags.length; k++) frags[k].classList.remove('cine-active', 'cine-spoken');
+    for (var j = 0; j <= activeOrd && j < tl.length; j++) {
+      var el = document.querySelector('.reveal .slides section [data-fragment-index="' + tl[j].index + '"]') || frags[tl[j].index];
+      if (!el) continue;
+      el.classList.add(j === activeOrd ? 'cine-active' : 'cine-spoken');
+    }
+    return activeOrd;
+  }
+  window.__seekTo = function (t) {
+    ensureCamera();
+    var activeOrd = applyReveals(t), tl = timeline();
+    if (window.__scrollCodeToProgress && duration() > 0) window.__scrollCodeToProgress(t / duration());
+    if (!camera) return;
+    if (!measureDense() || activeOrd < 0 || tl.length === 0) { camera.style.transform = 'none'; return; }
+    var cur = tl[activeOrd], prev = activeOrd > 0 ? tl[activeOrd - 1] : cur;
+    var span = Math.max(0.001, cur.endSec - cur.startSec);
+    var into = Math.max(0, Math.min(1, (t - cur.startSec) / span));
+    var e = EASE(Math.min(1, into / DRAG));
+    var fCur = frameFor(fragmentRect(cur.index)), fPrev = frameFor(fragmentRect(prev.index));
+    var s = lerp(fPrev.s, fCur.s, e), tx = lerp(fPrev.tx, fCur.tx, e), ty = lerp(fPrev.ty, fCur.ty, e);
+    camera.style.transform = 'translate(' + tx.toFixed(2) + 'px,' + ty.toFixed(2) + 'px) scale(' + s.toFixed(4) + ')';
+  };
+  window.__cineReset = function () { deckDense = null; };
+})();
+</script>`;
+
+const COMPONENT_ANIMATION_STYLES = `
+<style>
+.reveal .fragment .progress-bar-fill, .reveal .fragment [class*="progress"] [style*="width"] { transform-origin: left center; }
+.reveal .fragment.visible .progress-bar-fill, .reveal .fragment.visible [class*="progress"] [style*="width"] { animation: cineBarFill 0.9s cubic-bezier(0.22,1,0.36,1) both; }
+@keyframes cineBarFill { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+.reveal .fragment.visible .cine-cascade > *, .reveal .fragment.visible .stepper > *, .reveal .fragment.visible .numbered-steps > * { animation: cineRise 0.55s ease both; }
+.reveal .fragment.visible :is(.cine-cascade, .stepper, .numbered-steps) > *:nth-child(1){animation-delay:.05s}
+.reveal .fragment.visible :is(.cine-cascade, .stepper, .numbered-steps) > *:nth-child(2){animation-delay:.20s}
+.reveal .fragment.visible :is(.cine-cascade, .stepper, .numbered-steps) > *:nth-child(3){animation-delay:.35s}
+.reveal .fragment.visible :is(.cine-cascade, .stepper, .numbered-steps) > *:nth-child(4){animation-delay:.50s}
+.reveal .fragment.visible :is(.cine-cascade, .stepper, .numbered-steps) > *:nth-child(5){animation-delay:.65s}
+@keyframes cineRise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+.reveal .fragment.visible [style*="conic-gradient"] { animation: cineSweep 1s ease both; }
+@keyframes cineSweep { from { opacity: 0; transform: rotate(-25deg) scale(0.9); } to { opacity: 1; transform: none; } }
+.reveal .fragment.visible canvas[data-chart-type] { animation: cineRise 0.7s ease both; }
+</style>`;
+
 // ── Build ONE reveal.js document for a new-fragment-system slide ──────────────
 // Mirrors app/api/render-chapter/route.ts's buildRevealDeckHtml — real reveal.js
 // (self-hosted at ${baseUrl}/reveal/*, same static assets this Vercel deploy
@@ -588,6 +706,7 @@ img{max-width:100%;}
 <div class="reveal"><div class="slides">${content}</div></div>
 <script>(function(){${bgScript}})();</script>
 <script>${initScript}</script>
+${CINEMATIC ? COMPONENT_ANIMATION_STYLES + CINEMATIC_DIRECTOR_SCRIPT : ''}
 </body></html>`;
 }
 
@@ -616,6 +735,48 @@ async function captureRevealDeckStates(browser, html, baseUrl, intervals, totalS
       await new Promise(r => setTimeout(r, 150));
       await page.screenshot({ path: imgPathForInterval(j), type: 'png', clip: { x: 0, y: 0, width: 1440, height: 720 } });
     }
+  } finally {
+    await page.close();
+  }
+}
+
+// ── CINEMATIC capture: frame-step the director and screenshot each frame ──────
+// One page load; sets window.__cineTimeline/__cineDuration, then for every frame
+// f in [0, totalSec*fps) calls window.__seekTo(f/fps) and screenshots. The PNG
+// sequence is later encoded (with audio) into the slide clip. Deterministic and
+// smooth regardless of runner speed (unlike real-time screen recording).
+async function captureRevealDeckCinematic(browser, slide, baseUrl, timeline, totalSec, framesDir) {
+  const page = await browser.newPage();
+  try {
+    await page.setViewport({ width: 1440, height: 720, deviceScaleFactor: 1 });
+    const deckHtml = buildRevealDeckHtml(slide.html, baseUrl);
+    await page.setContent(deckHtml, { waitUntil: 'networkidle0', timeout: 20000 });
+    await page.evaluateHandle(() => document.fonts.ready);
+    await page.waitForFunction('window.__deckReady === true', { timeout: 15000 }).catch(() => {});
+    await page.waitForFunction(
+      "Array.from(document.querySelectorAll('pre.mermaid, .mermaid')).every(function(el){return el.getAttribute('data-mermaid-done');})",
+      { timeout: 8000 }
+    ).catch(() => {});
+    // Hand the director its timeline + duration.
+    await page.evaluate((tl, dur) => {
+      window.__cineTimeline = tl;
+      window.__cineDuration = dur;
+      if (window.__cineReset) window.__cineReset();
+    }, timeline, totalSec);
+    await new Promise(r => setTimeout(r, 300));
+
+    const totalFrames = Math.max(1, Math.round(totalSec * CINE_FPS));
+    const pad = (n) => String(n).padStart(5, '0');
+    for (let f = 0; f < totalFrames; f++) {
+      const t = f / CINE_FPS;
+      await page.evaluate((tt) => { if (window.__seekTo) window.__seekTo(tt); }, t);
+      await page.screenshot({
+        path: path.join(framesDir, `f${pad(f)}.png`),
+        type: 'png',
+        clip: { x: 0, y: 0, width: 1440, height: 720 },
+      });
+    }
+    return totalFrames;
   } finally {
     await page.close();
   }
@@ -675,8 +836,36 @@ async function renderSlide(i, slide, totalSlides) {
   const revealDataArr = slide.revealData ?? [];
   const isLegacySlide = revealDataArr.length > 0 && String(revealDataArr[0]).startsWith('r');
 
+  // Cinematic timeline: prefer the model/backend fragmentTimeline; else derive one
+  // from the reveal intervals (start/end per fragment) so the director still works.
+  const cineTimeline = (Array.isArray(slide.caption?.fragmentTimeline) && slide.caption.fragmentTimeline.length > 0)
+    ? slide.caption.fragmentTimeline
+    : intervals
+        .filter(iv => iv.fragmentIndex >= 0 && iv.fragmentIndex !== 999)
+        .map(iv => ({ index: iv.fragmentIndex, startSec: iv.startSec, endSec: iv.endSec }));
+  const useCinematic = CINEMATIC && !isLegacySlide && cineTimeline.length > 0;
+
   const intervalClips = [];
   try {
+    if (useCinematic) {
+      // ── Cinematic path: record a smooth camera by frame-stepping the director ──
+      const framesDir = path.join(workDir, `s${i}-frames`);
+      fs.mkdirSync(framesDir, { recursive: true });
+      const slideClipCine = path.join(workDir, `slide-${i}.mp4`);
+      try {
+        const nFrames = await captureRevealDeckCinematic(browser, slide, baseUrl, cineTimeline, totalSec, framesDir);
+        console.log(`  🎥 Slide ${i + 1}: ${nFrames} cinematic frames @ ${CINE_FPS}fps`);
+        await encodeFrameSequence(framesDir, audioPath, totalSec, slideClipCine);
+        // Clean up frames to keep disk usage bounded on the runner.
+        try { fs.rmSync(framesDir, { recursive: true, force: true }); } catch {}
+        console.log(`  ✅ Slide ${i + 1} complete (cinematic)`);
+        return { index: i, slideClip: slideClipCine, durationSec: totalSec };
+      } catch (e) {
+        console.warn(`  ⚠️  Cinematic capture failed: ${e.message} — falling back to frozen frames`);
+        try { fs.rmSync(framesDir, { recursive: true, force: true }); } catch {}
+        // fall through to the frozen-screenshot path below
+      }
+    }
     if (!isLegacySlide) {
       // ── Real reveal.js path: ONE page load for the whole slide ────────────
       const validIntervals = intervals
@@ -772,7 +961,9 @@ async function render() {
 
   // Option 1: PARALLEL slide rendering — all slides processed simultaneously
   // Each slide gets its own Puppeteer browser + FFmpeg processes
-  const CONCURRENCY = Math.min(totalSlides, 4); // cap at 4 to avoid OOM on 7GB runners
+  // Cinematic mode writes hundreds of PNG frames per slide, so run fewer in
+  // parallel to keep disk + memory bounded on a 7GB runner.
+  const CONCURRENCY = Math.min(totalSlides, CINEMATIC ? 2 : 4);
   const results = [];
 
   // Process in batches of CONCURRENCY
@@ -896,7 +1087,25 @@ async function makeClip(imgPath, audioPath, audioStart, duration, out, prevImgPa
   await execAsync(cmd, { maxBuffer: 100 * 1024 * 1024, timeout: 1800000 });
 }
 
-// ── FFmpeg concat ────────────────────────────────────────────────────────────
+// ── Encode a cinematic PNG frame sequence (+ audio) into ONE slide clip ───────
+// framesDir holds f00000.png, f00001.png, … at CINE_FPS. Output params MUST match
+// makeClip's (H.264 yuv420p CRF 28, AAC 128k 44.1k, 1440x720, faststart) so the
+// final `concat -c copy` can stream-copy every slide clip without re-encoding.
+async function encodeFrameSequence(framesDir, audioPath, durationSec, out) {
+  const ff = getFFmpeg();
+  const pattern = path.join(framesDir, 'f%05d.png').replace(/\\/g, '/');
+  const cmd = [
+    `"${ff}" -y`,
+    `-framerate ${CINE_FPS} -i "${pattern}"`,
+    `-i "${audioPath}"`,
+    `-c:v libx264 -preset fast -crf 28 -pix_fmt yuv420p -r ${CINE_FPS}`,
+    `-vf "scale=1440:720:force_original_aspect_ratio=decrease,pad=1440:720:(ow-iw)/2:(oh-ih)/2,setsar=1"`,
+    `-c:a aac -b:a 128k -ar 44100`,
+    `-t ${durationSec.toFixed(3)} -movflags +faststart`,
+    `"${out}"`,
+  ].join(' ');
+  await execAsync(cmd, { maxBuffer: 100 * 1024 * 1024, timeout: 1800000 });
+}
 async function concat(clips, out) {
   const ff  = getFFmpeg();
   const lst = out.replace('.mp4', '_list.txt');

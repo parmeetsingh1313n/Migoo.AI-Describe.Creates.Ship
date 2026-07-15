@@ -70,6 +70,215 @@ export const REVEAL_CUSTOM_FRAGMENT_STYLES = `
 `;
 
 /**
+ * ── CINEMATIC DIRECTOR ────────────────────────────────────────────────────────
+ * A time-driven "camera" for the rendered video. Both render engines inject this,
+ * then screenshot each frame after calling window.__seekTo(tSec) — so the whole
+ * animation is a PURE FUNCTION OF TIME (deterministic, smooth at any fps, no
+ * dropped frames from real-time recording).
+ *
+ * At time t it:
+ *   1. Reveals every fragment whose window has started (via reveal.js), marks the
+ *      most recent as .cine-active and earlier ones as .cine-spoken (dimmed but
+ *      still lit — "old portion stays visible as the eye moves on").
+ *   2. On DENSE slides only (effective body font < THRESHOLD after reveal.js
+ *      scale), eases a camera transform on a wrapper so the active fragment's
+ *      region fills the frame, dragging smoothly toward the next region. On
+ *      comfortable slides it stays full-frame (reveal-only).
+ *   3. Scrolls a long .code-card in sync with the slide's overall progress.
+ *
+ * Inputs read off window: __cineTimeline = [{index,startSec,endSec}] and
+ * __cineDuration (seconds). If the timeline is absent, __seekTo still reveals
+ * fragments by time but applies no camera, so nothing breaks.
+ */
+export const CINEMATIC_DIRECTOR_SCRIPT = `
+<style>
+/* Camera wrapper — the director transforms this, composing WITH reveal.js's own
+   scale (which lives on .reveal .slides). We wrap OUTSIDE .reveal so we never
+   fight reveal's transform. */
+#cine-camera { transform-origin: 0 0; will-change: transform; }
+.reveal .fragment.cine-spoken.visible { opacity: 0.42 !important; transition: opacity 0.5s ease; }
+.reveal .fragment.cine-active.visible { opacity: 1 !important; transition: opacity 0.4s ease; }
+</style>
+<script>
+(function () {
+  var EASE = function (x) { return x < 0.5 ? 4*x*x*x : 1 - Math.pow(-2*x+2, 3)/2; }; // cubic in-out
+  var FONT_THRESHOLD = 15;   // effective body px below which we engage the camera
+  var ZOOM_PAD = 90;         // px of breathing room around the focused region
+  var MAX_ZOOM = 1.9;        // never magnify a region more than this
+  var DRAG = 0.55;           // fraction of a fragment window spent easing from prev framing
+
+  var VW = 1440, VH = 720;
+  var camera = null, deckDense = null;
+
+  function timeline() { return Array.isArray(window.__cineTimeline) ? window.__cineTimeline : []; }
+  function duration() { return window.__cineDuration || 0; }
+
+  // Wrap the deck in a camera element once (idempotent).
+  function ensureCamera() {
+    if (camera) return camera;
+    var reveal = document.querySelector('.reveal');
+    if (!reveal || !reveal.parentNode) return null;
+    camera = document.getElementById('cine-camera');
+    if (!camera) {
+      camera = document.createElement('div');
+      camera.id = 'cine-camera';
+      camera.style.position = 'absolute';
+      camera.style.top = '0'; camera.style.left = '0';
+      camera.style.width = VW + 'px'; camera.style.height = VH + 'px';
+      reveal.parentNode.insertBefore(camera, reveal);
+      camera.appendChild(reveal);
+    }
+    return camera;
+  }
+
+  // Effective body font size AFTER reveal.js scale — decides dense vs comfortable.
+  function measureDense() {
+    if (deckDense !== null) return deckDense;
+    var scale = 1;
+    var slides = document.querySelector('.reveal .slides');
+    if (slides) {
+      var tr = getComputedStyle(slides).transform;
+      var m = tr && tr !== 'none' && tr.match(/matrix\\(([^)]+)\\)/);
+      if (m) { var parts = m[1].split(','); scale = parseFloat(parts[0]) || 1; }
+    }
+    var sample = document.querySelector('.reveal .slides section p, .reveal .slides section li, .reveal .slides section td, .reveal .slides section span');
+    var fs = sample ? parseFloat(getComputedStyle(sample).fontSize) : 18;
+    deckDense = (fs * scale) < FONT_THRESHOLD;
+    return deckDense;
+  }
+
+  // The DOM rect (in viewport px) of the fragment with a given index.
+  function fragmentRect(idx) {
+    var el = document.querySelector('.reveal .slides section [data-fragment-index="' + idx + '"]')
+          || document.querySelectorAll('.reveal .slides section .fragment')[idx];
+    if (!el) return null;
+    var r = el.getBoundingClientRect();
+    if (r.width < 4 || r.height < 4) return null;
+    return { x: r.left, y: r.top, w: r.width, h: r.height };
+  }
+
+  // Camera transform (scale s, translate tx,ty) that frames a rect within VW×VH.
+  function frameFor(rect) {
+    if (!rect) return { s: 1, tx: 0, ty: 0 };
+    var w = rect.w + ZOOM_PAD * 2, h = rect.h + ZOOM_PAD * 2;
+    var s = Math.min(VW / w, VH / h, MAX_ZOOM);
+    if (s < 1) s = 1;
+    var cx = rect.x + rect.w / 2, cy = rect.y + rect.h / 2;
+    var tx = VW / 2 - cx * s, ty = VH / 2 - cy * s;
+    // Clamp so we never reveal empty space outside the slide.
+    tx = Math.min(0, Math.max(tx, VW - VW * s));
+    ty = Math.min(0, Math.max(ty, VH - VH * s));
+    return { s: s, tx: tx, ty: ty };
+  }
+
+  function lerp(a, b, t) { return a + (b - a) * t; }
+
+  // Reveal fragments up to time t; tag active/spoken. Returns active ordinal.
+  function applyReveals(t) {
+    var tl = timeline();
+    if (!window.__deck || tl.length === 0) return -1;
+    var activeOrd = -1;
+    for (var i = 0; i < tl.length; i++) {
+      if (t >= tl[i].startSec) activeOrd = i;
+    }
+    window.__deck.slide(0, 0, activeOrd);
+    var frags = document.querySelectorAll('.reveal .slides section .fragment');
+    for (var k = 0; k < frags.length; k++) frags[k].classList.remove('cine-active', 'cine-spoken');
+    for (var j = 0; j <= activeOrd && j < tl.length; j++) {
+      var el = document.querySelector('.reveal .slides section [data-fragment-index="' + tl[j].index + '"]') || frags[tl[j].index];
+      if (!el) continue;
+      el.classList.add(j === activeOrd ? 'cine-active' : 'cine-spoken');
+    }
+    return activeOrd;
+  }
+
+  // Master seek — pure function of time.
+  window.__seekTo = function (t) {
+    ensureCamera();
+    var activeOrd = applyReveals(t);
+    var tl = timeline();
+
+    if (window.__scrollCodeToProgress && duration() > 0) {
+      window.__scrollCodeToProgress(t / duration());
+    }
+
+    if (!camera) return;
+    if (!measureDense() || activeOrd < 0 || tl.length === 0) {
+      camera.style.transform = 'none';
+      return;
+    }
+
+    var cur = tl[activeOrd];
+    var prev = activeOrd > 0 ? tl[activeOrd - 1] : cur;
+    var span = Math.max(0.001, cur.endSec - cur.startSec);
+    var into = Math.max(0, Math.min(1, (t - cur.startSec) / span));
+    var dragT = Math.min(1, into / DRAG);
+    var e = EASE(dragT);
+
+    var fCur = frameFor(fragmentRect(cur.index));
+    var fPrev = frameFor(fragmentRect(prev.index));
+    var s = lerp(fPrev.s, fCur.s, e);
+    var tx = lerp(fPrev.tx, fCur.tx, e);
+    var ty = lerp(fPrev.ty, fCur.ty, e);
+    camera.style.transform = 'translate(' + tx.toFixed(2) + 'px,' + ty.toFixed(2) + 'px) scale(' + s.toFixed(4) + ')';
+  };
+
+  window.__cineReset = function () { deckDense = null; };
+})();
+</script>`;
+
+/**
+ * ── COMPONENT-AWARE REVEAL ANIMATIONS ─────────────────────────────────────────
+ * When a fragment becomes visible, these make the COMPONENT inside it animate in
+ * a way that fits its type (not just a generic fade): progress/meter bars fill
+ * their width, numbered steppers/callouts cascade their children, gauge/donut
+ * rings sweep in, chart canvases fade+rise. Purely CSS driven off reveal.js's
+ * `.fragment.visible` class + child stagger via --i, so they work in BOTH the
+ * live preview and the recorded video with no JS.
+ *
+ * The prompt already emits recognizable class names (.progress-bar-container /
+ * .code-card / .stat-* etc.) and data-fragment-index blocks; these rules key off
+ * those. Safe/no-op on slides that don't use them.
+ */
+export const COMPONENT_ANIMATION_STYLES = `
+<style>
+/* Progress / meter bars: fill from 0 → target width when revealed. The target
+   width stays whatever the slide set inline; we animate the transform scaleX. */
+.reveal .fragment .progress-bar-fill,
+.reveal .fragment [class*="progress"] [style*="width"] { transform-origin: left center; }
+.reveal .fragment.visible .progress-bar-fill,
+.reveal .fragment.visible [class*="progress"] [style*="width"] {
+  animation: cineBarFill 0.9s cubic-bezier(0.22,1,0.36,1) both;
+}
+@keyframes cineBarFill { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+
+/* Numbered steppers / callouts / feature rows: cascade children in sequence.
+   Each direct child is delayed by its index via nth-child (works up to 8). */
+.reveal .fragment.visible .cine-cascade > * ,
+.reveal .fragment.visible .stepper > * ,
+.reveal .fragment.visible .numbered-steps > * {
+  animation: cineRise 0.55s ease both;
+}
+.reveal .fragment.visible :is(.cine-cascade, .stepper, .numbered-steps) > *:nth-child(1){animation-delay:.05s}
+.reveal .fragment.visible :is(.cine-cascade, .stepper, .numbered-steps) > *:nth-child(2){animation-delay:.20s}
+.reveal .fragment.visible :is(.cine-cascade, .stepper, .numbered-steps) > *:nth-child(3){animation-delay:.35s}
+.reveal .fragment.visible :is(.cine-cascade, .stepper, .numbered-steps) > *:nth-child(4){animation-delay:.50s}
+.reveal .fragment.visible :is(.cine-cascade, .stepper, .numbered-steps) > *:nth-child(5){animation-delay:.65s}
+@keyframes cineRise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+
+/* Gauge / donut / ring: sweep the conic ring in when revealed. */
+.reveal .fragment.visible [style*="conic-gradient"] {
+  animation: cineSweep 1s ease both;
+}
+@keyframes cineSweep { from { opacity: 0; transform: rotate(-25deg) scale(0.9); } to { opacity: 1; transform: none; } }
+
+/* Chart canvases: gentle fade + rise (Chart.js draws its own bars/lines). */
+.reveal .fragment.visible canvas[data-chart-type] {
+  animation: cineRise 0.7s ease both;
+}
+</style>`;
+
+/**
  * Reveal.js init + companion plugin bootstrap (Mermaid/Chart/mark.js/Typed
  * aren't reveal.js plugins themselves — they're standalone libraries we
  * trigger ourselves once the deck is ready) + the postMessage/global bridge
