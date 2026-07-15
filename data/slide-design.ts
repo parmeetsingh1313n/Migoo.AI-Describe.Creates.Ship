@@ -46,6 +46,8 @@ export const SLIDE_ARCHETYPES = [
     "PRINCIPLE BAND — one strong italic serif statement in a tinted full-width band; a memorable takeaway",
     "CODE SNIPPET — ONE syntax-highlighted code card (use the .code-card component), a REAL, COMPLETE, working snippet up to ~50 lines (it auto-scrolls in sync with narration — never fake-truncate it), a filename/language chip in the header, and it is the ENTIRE body; NEVER an image of code, NEVER a table cell",
     "CODE + EXPLAIN — a 2-column body: a syntax-highlighted .code-card (a real complete snippet, up to ~20 lines, auto-scrolls) on one side and 2-3 short numbered takeaways on the other; for explaining what a snippet does",
+    "CODE + CALLOUTS — a 2-column body: a syntax-highlighted .code-card (a real complete snippet, up to ~20 lines, auto-scrolls) on one side and 2-3 numbered callout cards (circular number + bold label + one-line detail) on the other; each callout maps to a part of the code",
+    "CODE + STEPS — a 2-column body: a syntax-highlighted .code-card (a real complete snippet, up to ~20 lines, auto-scrolls) on one side and a compact 3-4 step NUMBERED STEPPER (circular numbers joined by a spine) on the other; for code that follows a sequence of stages",
     "MERMAID DIAGRAM — a REAL rendered Mermaid flowchart/sequence/state diagram (diagram-as-code, never hand-drawn boxes) for processes, algorithms, state machines, or architecture; ≤ 3 words per node label",
     "LIVE CHART — a REAL Chart.js bar/line/pie/doughnut chart (never a hand-CSS'd bar approximation) for genuine numeric/statistical comparisons; 3-6 data points",
     "FORMULA / MATH CALLOUT — one REAL KaTeX-rendered formula or equation, large and centered, with a short one-line explanation beneath; for math, algorithm complexity, or scientific notation",
@@ -85,6 +87,24 @@ export function componentName(archetype: string): string {
     return archetype.split(/[—-]/)[0].trim();
 }
 
+/**
+ * A deterministic NON-code archetype near a given (chapterIndex, si) — used when a
+ * slide's natural rotation lands on a code archetype but the chapter has already
+ * spent its code budget, so we swap in visual variety instead of yet another code
+ * card. Walks the co-prime rotation forward until it hits a non-code entry.
+ */
+export function pickNonCodeArchetype(chapterIndex: number, si: number): string {
+    const n = SLIDE_ARCHETYPES.length;
+    const STRIDE = 7;
+    const offset = 1 + chapterIndex * 5;
+    for (let step = 0; step < n; step++) {
+        let idx = (offset + (si + step) * STRIDE) % n;
+        if (idx === 0) idx = 1;
+        if (!isCodeArchetype(SLIDE_ARCHETYPES[idx])) return SLIDE_ARCHETYPES[idx];
+    }
+    return SLIDE_ARCHETYPES[1]; // unreachable (catalog has many non-code entries)
+}
+
 /** Whether an archetype is a code slide (must be a .code-card, never an image). */
 export function isCodeArchetype(archetype: string): boolean {
     return /^CODE/i.test(componentName(archetype));
@@ -95,7 +115,34 @@ export function isCodeArchetype(archetype: string): boolean {
  * used as a fallback signal when a per-topic LLM needsCode classification is
  * unavailable/unreliable, so a chapter never loses all its code slides just
  * because one upstream call had a bad response.
+ *
+ * IMPORTANT: kept DELIBERATELY NARROW. An earlier version matched broad nouns
+ * (list, array, variable, module, library, code, string…) that appear in almost
+ * every programming topic, so nearly every slide got force-overridden to a code
+ * card and the whole component catalog collapsed to code. This version only fires
+ * on topics that are genuinely about writing/reading a concrete snippet — verbs
+ * and syntax constructs, not the vocabulary of the domain.
  */
 export function isLikelyCodeTopic(topic: string): boolean {
-    return /\b(function|method|class|api|loop|for loop|while loop|syntax|algorithm|implement|debug|compile|library|framework|module|snippet|code|variable|array|list|dictionary|string method|regex|query|sql|command|script|constructor|inheritance|recursion|exception|try\/?except|try\/?catch|async|await|callback|closure|pointer|struct|interface)\b/i.test(topic);
+    return /\b(implement(ing|ation)?|syntax|code example|write (a|the) (function|method|class|loop|query)|for loop|while loop|list comprehension|regex|regular expression|sql query|constructor|inheritance|recursion|recursive|try\/?except|try\/?catch|exception handling|async\/?await|callback|closure|decorator|generator function|lambda|function signature|method chaining)\b/i.test(topic);
+}
+
+/**
+ * How many code slides a chapter of `totalSlides` should be allowed to contain.
+ * The topic-aware override forces code archetypes when a topic looks code-shaped;
+ * without a cap a programming chapter can become ALL code cards. Cap at ~40% (at
+ * least 1) so the rest of the catalog (diagrams, charts, steppers, …) still shows.
+ */
+export function codeSlideBudget(totalSlides: number): number {
+    return Math.max(1, Math.round(totalSlides * 0.4));
+}
+
+/**
+ * The mixed-layout archetypes: a code card paired with ONE small companion
+ * component (numbered takeaways / progress steps / checklist) in a 2-column body.
+ * These are the ONLY archetypes where code may sit next to another component —
+ * everywhere else the strict one-component rule still applies.
+ */
+export function isCodeCompanionArchetype(archetype: string): boolean {
+    return /^CODE \+/i.test(componentName(archetype));
 }

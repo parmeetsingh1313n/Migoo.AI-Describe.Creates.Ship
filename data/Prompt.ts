@@ -1012,7 +1012,7 @@ Compose three stacked zones, sized to fit ~720px naturally:
 
 HARD RULES:
 - Never use overflow:hidden or a fixed height on the section or on content wrappers (it clips data). The ONLY height cap allowed is max-height on an <img> so a photo can't grow huge.
-- One headline + ONE primary component (+ optional footer). Do NOT stack multiple big blocks vertically, and NEVER put two large blocks (e.g. two code panels) side by side — that always overflows.
+- One headline + ONE primary component (+ optional footer). Do NOT stack multiple big blocks vertically, and NEVER put two large blocks (e.g. two code panels) side by side — that always overflows. (EXCEPTION: a "CODE + …" archetype — CODE + EXPLAIN / CODE + CALLOUTS / CODE + STEPS — is a sanctioned 2-column body: ONE .code-card beside ONE small companion component. That is the ONLY allowed two-block layout, and only when the mandatory component names it.)
 - If the content would not comfortably fit ~720px at readable sizes, REMOVE data. Cutting content is always better than clipping or shrinking it.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1021,7 +1021,7 @@ HARD RULES:
 The SLIDE shows only the skeleton; the full teaching happens in the narration (voiceover). Keep on-screen text short so it fits one screen and stays readable:
 - Headline: ≤ 8 words. Kicker: 1-3 words. Dek/lead: ≤ 14 words, one line.
 - Any component: MAX ~4 rows / 3 cards / 4 bars / 4 steps. Each label ≤ 6-8 words. NO paragraphs on the slide (a single ≤14-word caption is fine).
-- CODE: at most ONE code block, up to ~30 lines (it auto-scrolls in sync with narration — a real, complete snippet is fine), and it is then the ENTIRE body (no second code block, no side panels next to it). NEVER show two code blocks or code+output+problem all on one slide — split that across slides or keep only the single most important snippet.
+- CODE: at most ONE code block, up to ~30 lines (it auto-scrolls in sync with narration — a real, complete snippet is fine), and it is then the ENTIRE body (no second code block, no side panels next to it). NEVER show two code blocks or code+output+problem all on one slide — split that across slides or keep only the single most important snippet. (EXCEPTION: a "CODE + …" archetype pairs the ONE .code-card with ONE small companion component — numbered callouts or a stepper — in a 2-column body. Still only ONE code block; the companion is NOT a second code block.)
 - Prefer numbers, short phrases, keywords — never sentences stacked into a wall of text.
 - READABLE FLOORS (never smaller): body/labels ≥ 15px, secondary captions ≥ 13px, footnote ≥ 12px. If text must shrink below these to fit, you have too much data — cut it.
 

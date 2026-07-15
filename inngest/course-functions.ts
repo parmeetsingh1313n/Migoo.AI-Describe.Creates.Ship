@@ -20,7 +20,7 @@ import { GENERATE_SINGLE_SLIDE_PROMPT, EXPAND_CHAPTER_TOPICS_PROMPT } from "@/da
 import { putWithRotation } from "@/lib/blob";
 import { generateNanoBananaImage, generateNanoBananaImagesParallel } from "@/lib/apify-image";
 import { fetchSlideResearch } from "@/lib/tavily";
-import { SLIDE_TYPE_PAIRS, SLIDE_ACCENTS, SLIDE_ARCHETYPES, pickArchetype, componentName, isCodeArchetype, isLikelyCodeTopic } from "@/data/slide-design";
+import { SLIDE_TYPE_PAIRS, SLIDE_ACCENTS, SLIDE_ARCHETYPES, pickArchetype, pickNonCodeArchetype, componentName, isCodeArchetype, isCodeCompanionArchetype, isLikelyCodeTopic, codeSlideBudget } from "@/data/slide-design";
 import { eq } from "drizzle-orm";
 import { inngest } from "./client";
 
@@ -821,24 +821,35 @@ export const generateCourseSlidesFn = inngest.createFunction(
                 );
 
                 // ── Assign the EXACT primary component for this slide + forbid repeats ──
-                // Topic-aware override: if THIS slide's topic actually needs a code
-                // example (flagged by expandChapterTopics, LLM or keyword-heuristic),
-                // force a code archetype regardless of where the position-based
-                // rotation naturally landed — the rotation alone was letting
-                // programming chapters go whole chapters without a single code slide.
+                // Topic-aware override with a CHAPTER CODE BUDGET: if THIS slide's
+                // topic actually needs a code example, force a code archetype — BUT
+                // only while the chapter is still under its code budget (~40% of
+                // slides). Once the budget is spent, we stop forcing code and swap in
+                // a non-code archetype for variety, so a programming chapter no longer
+                // collapses into wall-to-wall code cards. Conversely, if the natural
+                // rotation lands on code while we're over budget, we swap it out too.
                 const naturalArchetype = pickArchetype(chapterIndex, si);
                 const wantsCode = chapterTopics[si]?.needsCode ?? false;
+                // How many code slides THIS chapter has actually produced so far.
+                const codeSlidesSoFar = slidesData.filter(s => isCodeArchetype(s.archetype ?? "")).length;
+                const codeBudget = codeSlideBudget(totalSlides);
+                const codeBudgetLeft = codeSlidesSoFar < codeBudget;
+
                 let archetype = naturalArchetype;
-                if (wantsCode && !isCodeArchetype(naturalArchetype)) {
-                    // Alternate between the two code archetypes based on how many
-                    // code slides precede this one, so consecutive code slides in a
-                    // programming chapter don't all look identical.
-                    const codeSlidesSoFar = chapterTopics.slice(0, si).filter(t => t.needsCode).length;
+                if (wantsCode && codeBudgetLeft && !isCodeArchetype(naturalArchetype)) {
+                    // Force a code archetype — rotate across the code family (plain
+                    // CODE SNIPPET + the mixed CODE+X variants) so consecutive code
+                    // slides look distinct instead of identical.
                     const codeArchetypes = SLIDE_ARCHETYPES.filter(isCodeArchetype);
                     archetype = codeArchetypes[codeSlidesSoFar % codeArchetypes.length] ?? naturalArchetype;
+                } else if (isCodeArchetype(naturalArchetype) && (!wantsCode || !codeBudgetLeft)) {
+                    // Natural rotation landed on code but this topic doesn't need it,
+                    // or the chapter is out of code budget → swap to a non-code layout.
+                    archetype = pickNonCodeArchetype(chapterIndex, si);
                 }
                 const primaryComponent = componentName(archetype);           // e.g. "CODE SNIPPET"
                 const isCodeSlide = isCodeArchetype(archetype);
+                const isCodeCompanion = isCodeCompanionArchetype(archetype);  // code + a companion component
                 // Components ACTUALLY used by earlier slides in THIS chapter (not the
                 // natural rotation — a prior slide may itself have been code-overridden)
                 // — the model must not fall back onto any of them again. Code archetypes
@@ -874,8 +885,10 @@ export const generateCourseSlidesFn = inngest.createFunction(
                     researchContext: researchContext || null,
                     designHint: `🎯 BUILD THIS EXACT COMPONENT (non-negotiable): ${archetype}. `
                         + `Do NOT substitute a table/diff/tiles or any of these already-used layouts: [${usedComponents.join(", ") || "none yet"}]. `
-                        + (isCodeSlide
-                            ? `This slide's topic genuinely needs a real code example. The ENTIRE body is ONE syntax-highlighted .code-card (header + <pre><code>, real line breaks preserved) — NEVER inline text, NEVER a <table> cell, NEVER an image of code. Write a REAL, COMPLETE, working snippet (up to ~50 lines for a full CODE SNIPPET slide, ~20 for CODE + EXPLAIN) — it auto-scrolls in sync with narration, so never fake-truncate with "// rest omitted" or "...". Do NOT output {{IMAGE_PLACEHOLDER}} or any <img> on this slide. `
+                        + (isCodeCompanion
+                            ? `This is a 2-COLUMN slide: a syntax-highlighted .code-card (header + <pre><code>, real line breaks, a REAL COMPLETE working snippet up to ~20 lines — it auto-scrolls, so never fake-truncate with "// rest omitted" or "...") on ONE side, and the named companion component (numbered callouts / stepper) on the OTHER side. The code and the companion are the ONLY two blocks. NEVER an image of code, NEVER code in a <table> cell. Do NOT output {{IMAGE_PLACEHOLDER}} or any <img> on this slide. `
+                            : isCodeSlide
+                            ? `This slide's topic genuinely needs a real code example. The ENTIRE body is ONE syntax-highlighted .code-card (header + <pre><code>, real line breaks preserved) — NEVER inline text, NEVER a <table> cell, NEVER an image of code. Write a REAL, COMPLETE, working snippet (up to ~50 lines) — it auto-scrolls in sync with narration, so never fake-truncate with "// rest omitted" or "...". Do NOT output {{IMAGE_PLACEHOLDER}} or any <img> on this slide. `
                             : `Include ONE {{IMAGE_PLACEHOLDER}} where it genuinely helps, kept SMALL (~28-30% side column, max-height 300px) so it never crowds out real content — or skip it entirely if this component doesn't need one. `)
                         + `Type pairing: ${SLIDE_TYPE_PAIRS[(chapterIndex + si) % SLIDE_TYPE_PAIRS.length]}. Accent color: ${SLIDE_ACCENTS[(chapterIndex * 2 + si) % SLIDE_ACCENTS.length]}. Make this slide look clearly different from the previous one (except code slides, which may share a look with earlier code slides in this chapter).`,
                 });

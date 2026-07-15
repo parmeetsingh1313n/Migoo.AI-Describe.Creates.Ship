@@ -18,7 +18,7 @@ import { db } from "@/config/db";
 import { openrouter } from "@/config/openrouter";
 import { chapterContentSlides, courseImages, coursesTable } from "@/config/schema";
 import { GENERATE_SINGLE_SLIDE_PROMPT } from "@/data/Prompt";
-import { SLIDE_TYPE_PAIRS, SLIDE_ACCENTS, SLIDE_ARCHETYPES, pickArchetype, componentName, isCodeArchetype, isLikelyCodeTopic } from "@/data/slide-design";
+import { SLIDE_TYPE_PAIRS, SLIDE_ACCENTS, SLIDE_ARCHETYPES, pickArchetype, componentName, isCodeArchetype, isCodeCompanionArchetype, isLikelyCodeTopic } from "@/data/slide-design";
 import { fetchSlideResearch } from "@/lib/tavily";
 import { apiError, apiSuccess, apiOptions } from "@/lib/api-helpers";
 import { validateInput, regenerateSlideSchema } from "@/lib/validations";
@@ -87,10 +87,11 @@ export async function POST(req: NextRequest) {
         const naturalArchetype = pickArchetype(chapterIndex, si);
         const wantsCode = isLikelyCodeTopic(slideTopic);
         const archetype = (wantsCode && !isCodeArchetype(naturalArchetype))
-            ? (SLIDE_ARCHETYPES.filter(isCodeArchetype)[si % 2] ?? naturalArchetype)
+            ? (SLIDE_ARCHETYPES.filter(isCodeArchetype)[si % SLIDE_ARCHETYPES.filter(isCodeArchetype).length] ?? naturalArchetype)
             : naturalArchetype;
         const primaryComponent = componentName(archetype);
         const isCodeSlide = isCodeArchetype(archetype);
+        const isCodeCompanion = isCodeCompanionArchetype(archetype);
 
         // Tavily RAG — ground the regenerated narration in accurate, current facts.
         const researchContext = await fetchSlideResearch(slideTopic, `${course.courseName} · ${chapter.chapterTitle}`);
@@ -112,7 +113,9 @@ export async function POST(req: NextRequest) {
             imageAllowed: !isCodeSlide,
             researchContext: researchContext || null,
             designHint: `🎯 BUILD THIS EXACT COMPONENT unless the user's change request below asks for a different one: ${archetype}. `
-                + (isCodeSlide
+                + (isCodeCompanion
+                    ? `2-COLUMN slide: a .code-card (header + <pre><code>, real line breaks, a REAL COMPLETE snippet up to ~20 lines, auto-scrolls) on ONE side and the named companion component (numbered callouts / stepper) on the OTHER — those are the only two blocks. NEVER a table cell or an image of code. NO {{IMAGE_PLACEHOLDER}} / <img>. `
+                    : isCodeSlide
                     ? `CODE slide: the ENTIRE body is ONE .code-card (header + <pre><code>, real line breaks) — NEVER a table cell or plain text. A REAL, COMPLETE, working snippet up to ~50 lines is fine (it auto-scrolls in sync with narration — never fake-truncate it). NO {{IMAGE_PLACEHOLDER}} / <img>. `
                     : `Include ONE {{IMAGE_PLACEHOLDER}} where it genuinely helps, kept SMALL (~28-30% side column, max-height 300px) unless the component is image-free. `)
                 + `Type pairing: ${SLIDE_TYPE_PAIRS[si % SLIDE_TYPE_PAIRS.length]}. Accent color: ${SLIDE_ACCENTS[si % SLIDE_ACCENTS.length]}.`,
