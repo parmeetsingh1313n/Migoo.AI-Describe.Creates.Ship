@@ -410,13 +410,18 @@ ${content}
 </body></html>`;
 }
 
-// ── CINEMATIC mode (behind a flag) ───────────────────────────────────────────
-// When CINEMATIC=1 (env or payload), the new-fragment path records a smooth
-// "camera" that zooms/pans to the fragment being narrated (dense slides) and
-// plays component-aware reveal animations, by frame-stepping window.__seekTo(t)
-// and screenshotting each frame. Otherwise the fast frozen-screenshot path runs.
-const CINEMATIC = String(process.env.CINEMATIC ?? payload.cinematic ?? '').trim() === '1'
-  || payload.cinematic === true;
+// ── CINEMATIC mode (default ON — the font threshold decides per slide) ────────
+// The new-fragment path records a smooth timeline by frame-stepping
+// window.__seekTo(t) and screenshotting each frame. The on-page director then
+// decides PER SLIDE, from the measured effective font size:
+//   • dense slide (font < threshold)  → eyeball camera zooms/pans to the narrated
+//     fragment and drags to the next;
+//   • comfortable slide (font good)   → NO camera — the whole slide is shown with
+//     smooth reveal.js + component animations only.
+// So cinematic is always on; the threshold (not a flag) gates the eyeball. Set
+// CINEMATIC=0 to force the old fast frozen-screenshot engine (fallback/testing).
+const CINEMATIC = String(process.env.CINEMATIC ?? payload.cinematic ?? '').trim() !== '0'
+  && payload.cinematic !== false;
 const CINE_FPS = 30;
 
 // Inlined here (this is a standalone CI script that can't import the TS lib) —
