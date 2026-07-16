@@ -203,7 +203,12 @@ export const CINEMATIC_DIRECTOR_SCRIPT = `
     }
 
     if (!camera) return;
-    if (!measureDense() || activeOrd < 0 || tl.length === 0) {
+    // ── EYEBALL IS MANDATORY ON ALL SLIDES ──────────────────────────────────
+    // The font-threshold gate (only zoom on dense slides) is DISABLED so every
+    // slide gets the camera. To restore per-slide gating, re-add !measureDense()
+    // to the guard below:
+    //   if (!measureDense() || activeOrd < 0 || tl.length === 0) {
+    if (activeOrd < 0 || tl.length === 0) {
       camera.style.transform = 'none';
       return;
     }

@@ -503,7 +503,12 @@ const CINEMATIC_DIRECTOR_SCRIPT = `
     var activeOrd = applyReveals(t), tl = timeline();
     if (window.__scrollCodeToProgress && duration() > 0) window.__scrollCodeToProgress(t / duration());
     if (!camera) return;
-    if (!measureDense() || activeOrd < 0 || tl.length === 0) { camera.style.transform = 'none'; return; }
+    // ── EYEBALL IS MANDATORY ON ALL SLIDES ──────────────────────────────────
+    // The font-threshold gate (only zoom on dense slides) is DISABLED so every
+    // slide gets the camera. To restore per-slide gating, re-add !measureDense()
+    // to the guard below:
+    //   if (!measureDense() || activeOrd < 0 || tl.length === 0) { camera.style.transform = 'none'; return; }
+    if (activeOrd < 0 || tl.length === 0) { camera.style.transform = 'none'; return; }
     var cur = tl[activeOrd], prev = activeOrd > 0 ? tl[activeOrd - 1] : cur;
     var span = Math.max(0.001, cur.endSec - cur.startSec);
     var into = Math.max(0, Math.min(1, (t - cur.startSec) / span));
