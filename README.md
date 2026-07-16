@@ -4,19 +4,20 @@
 
 ### Describe It. AI Creates It. Ship It.
 
-> A full-stack AI video creation platform with **4 production modules** — from educational courses and viral shorts to cinematic motion graphics and a full creative studio — powered by multi-provider AI orchestration.
+> A full-stack AI video-creation platform with **5 production modules** — from multi-chapter educational courses and viral faceless shorts to chat-driven motion graphics, AI study notes, and a full director's-chair studio — powered by durable background pipelines and multi-provider AI orchestration.
 
 [![Next.js 16](https://img.shields.io/badge/Next.js-16.1-black?style=for-the-badge&logo=next.js)](https://nextjs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Clerk Auth](https://img.shields.io/badge/Auth-Clerk-6C47FF?style=for-the-badge&logo=clerk&logoColor=white)](https://clerk.dev/)
 [![Drizzle ORM](https://img.shields.io/badge/ORM-Drizzle-C5F74F?style=for-the-badge)](https://orm.drizzle.team/)
+[![Inngest](https://img.shields.io/badge/Jobs-Inngest-4636F5?style=for-the-badge)](https://www.inngest.com/)
 [![Remotion](https://img.shields.io/badge/Video-Remotion-0B84F3?style=for-the-badge)](https://www.remotion.dev/)
 [![Vitest](https://img.shields.io/badge/Tested_with-Vitest-6E9F18?style=for-the-badge&logo=vitest&logoColor=white)](https://vitest.dev/)
 [![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)](LICENSE)
 
 ---
 
-**[🚀 Getting Started](#-getting-started)** · **[📖 Documentation](#-api-reference)** · **[🧪 Testing](#-testing)** · **[🏗️ Architecture](#️-architecture)**
+**[🚀 Getting Started](#-getting-started)** · **[🎯 Modules](#-the-five-modules)** · **[🏗️ Architecture](#️-architecture)** · **[🗄️ Schema](#️-database-schema)** · **[🧪 Testing](#-testing)**
 
 </div>
 
@@ -24,74 +25,94 @@
 
 ## 🌟 What is Migoo?
 
-Migoo is a **full-stack AI platform** that automates the entire video creation pipeline — from a text prompt to a rendered, downloadable video. It combines multiple AI providers (Gemini, OpenRouter, Groq, Sarvam, Leonardo AI) with Remotion's programmatic video engine to deliver four distinct production workflows.
+Migoo is a **full-stack AI platform** that automates the entire video-creation pipeline — from a text prompt to a rendered, downloadable video or export. It combines multiple AI providers (NVIDIA NIM, Gemini, Groq, Sarvam, Apify image/video actors) with **reveal.js** and **Remotion** rendering engines, orchestrated by **Inngest** durable workflows, to deliver five distinct production workflows behind one Next.js app.
+
+The defining engineering idea: **thin, fast API routes that validate and enqueue; durable Inngest step-functions that do the minutes-long work with automatic retries and per-step memoization; and the heaviest render pushed off to GitHub Actions** where Puppeteer + FFmpeg have a real machine.
 
 ---
 
-## 🎯 The Four Modules
+## 🎯 The Five Modules
 
 <table>
 <tr>
-<td width="50%">
+<td width="50%" valign="top">
 
-### 📚 Video Course Generator
-Generate complete multi-chapter educational video courses from a single topic.
+### 📚 Course Generator
+Turn one topic into a complete multi-chapter **video course**.
 
-**Pipeline:** Topic → AI Layout → Slides → TTS Narration → Caption Sync → Image Generation → Video Render
+**Pipeline:** Topic → AI curriculum → reveal.js slides (fragments + narration) → **human review gate** → Sarvam TTS + fragment timeline → **cinematic MP4 render on GitHub Actions** → streaming download
 
-- Multi-chapter course structuring via LLM
-- Rich HTML presentation slides
-- Multi-language TTS via Sarvam AI
-- Word-level synchronized captions
-- AI-generated cinematic visuals (Leonardo AI)
-- Automated Remotion video compilation
+- LLM curriculum (8–15 chapters) + per-slide HTML
+- 35-archetype slide catalog with anti-repeat rotation & code-density budget
+- Screening-room review (regenerate a slide, polish narration) before paying for audio
+- Word-share **fragment timeline** drives an "eyeball camera" that zooms/pans to the narrated fragment
+- Puppeteer + FFmpeg deterministic frame-stepped render; 44 MB raw-chunk delivery
 
 </td>
-<td width="50%">
+<td width="50%" valign="top">
 
 ### ⚡ Short Video Generator
-Create viral short-form video series with a 1-click auto-pilot pipeline.
+Faceless vertical (9:16) **short-form series** on autopilot.
 
-**Pipeline:** Niche → Script → Voice → Captions → Images → Video → Publish
+**Pipeline:** Niche → research → script → Sarvam TTS → word-synced captions → AI images → image-to-video → avatar intro/outro → Remotion render
 
-- 7-step Inngest durable workflow
-- Niche-based recurring series
-- Multiple visual styles (Realistic, Cyberpunk, GTA, etc.)
-- Platform-optimized (TikTok, Reels, Shorts)
-- Automated asset sourcing & composition
-- Batch generation for content scheduling
+- 6-step series wizard (niche · voice · music · style · captions · schedule)
+- Durable multi-step Inngest pipeline; **`shortVideoProgress` idempotency ledger** so retries never re-charge paid video APIs
+- Word-level caption sync via Sarvam batch STT (`saaras:v3`)
+- Swappable image-to-video providers (Wan / Pollo / Leonardo Kling / Runway)
+- Hormozi/MrBeast/karaoke caption presets applied at render
 
 </td>
 </tr>
 <tr>
-<td width="50%">
+<td width="50%" valign="top">
 
 ### ✨ Motion Graphics Generator
-AI chat-driven animated promo videos with 25+ professional scene types.
+**Chat-driven** animated promo videos rendered with Remotion.
 
-**Pipeline:** Prompt → AI Chat → Scene Generation → Theme Selection → Asset Creation → Voiceover → Video Render
+**Pipeline:** Prompt → theme gate → AI scene breakdown → chat refinement → optional voiceover → live preview → render + cache
 
-- Conversational AI scene builder
-- 25+ animated scene types (title reveals, stat counters, comparisons, kinetic text, logo reveals, etc.)
-- 6 cinematic color palettes
-- Upload logos, product shots & screenshots
-- Optional AI voiceover narration
-- Background music selection
-- Multiple aspect ratios (16:9, 9:16, 1:1)
+- Conversational scene builder (25+ animated scene types)
+- Theme/palette system; **per-theme render cache** (fingerprint → skip re-render)
+- `@remotion/player` live preview identical to the final MP4
+- Optional Sarvam voiceover; background music; 16:9 / 9:16 / 1:1
 
 </td>
-<td width="50%">
+<td width="50%" valign="top">
 
-### 🎬 Migoo Studio
-Full creative control — you're the director, the platform is your crew.
+### 📝 Notes Generator
+AI **study notes & infographics** with client-side export.
+
+**Pipeline:** Source (text/doc/topic/url) → extraction → chunked generation → structured JSON → styled HTML → PNG/PDF export
+
+- 6 note styles (Cornell, mindmap, flashcard, infographic, cheatsheet, timeline)
+- Chunked LLM generation keeps long notes coherent
+- Decorative page designs; client-side PNG/PDF via html-to-image / jsPDF / pdf-lib
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
+### 🎬 Migoo Studio (Director's Chair)
+Power-user variant of Shorts — **you direct every scene**.
 
 **Features:**
-- **Document Source** — Upload PDFs, ZIPs, or images as source material
-- **Scene Asset Manager** — Inject your own photos & video clips
-- **Human Touch Score** — Gamified script editor for authenticity
-- **Voice & Captions** — Hormozi-style dynamic caption styling
-- **Music & SFX** — Smart sound design per scene
-- **Mixed Media** — Combine AI-generated content with your footage
+- **Document source** — upload docs; Sarvam extracts markdown context
+- **Per-scene asset control** — `kling_video` · `user_upload` · `ai_image` · `doc_image`
+- **Human-touch script editor** for authenticity
+- Reuses the Short-Video render pipeline (`shortVideoAssets` + `sceneAssetTypes` / `contextMarkdown`)
+
+</td>
+<td width="50%" valign="top">
+
+### 🧩 Shared Foundation
+One backbone under all five modules.
+
+- **Next.js 16 App Router** + **Clerk** auth + **Neon/Drizzle**
+- **Custom LLM router** (NVIDIA NIM primary → Nemotron → GPT-oss) with key rotation, 6-strategy JSON repair, and a **CJK/Cyrillic foreign-script guard**
+- **Inngest** durable jobs · **Appwrite** storage · **Tavily** RAG
+- Zod validation · IP rate-limiting · CSRF · Vitest
 
 </td>
 </tr>
@@ -103,45 +124,28 @@ Full creative control — you're the director, the platform is your crew.
 
 ```text
 ┌──────────────────────────────────────────────────────────────────────────────┐
-│                        🖥️  FRONTEND (Next.js 16 App Router)                  │
-│                                                                              │
-│   ┌──────────────┐   ┌──────────────┐   ┌──────────────┐   ┌──────────────┐  │
-│   │ Video Course │   │ Short Video  │   │ Motion Graph │   │ Migoo Studio │  │
-│   │ Generator    │   │ Generator    │   │ Generator    │   │ Director Seat│  │
-│   └──────────────┘   └──────────────┘   └──────────────┘   └──────────────┘  │
+│                     🖥️  FRONTEND (Next.js 16 App Router)                      │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────────────────┐ │
+│  │  Course  │ │  Shorts  │ │  Motion  │ │  Notes   │ │  Studio (Director)   │ │
+│  └──────────┘ └──────────┘ └──────────┘ └──────────┘ └──────────────────────┘ │
 ├──────────────────────────────────────────────────────────────────────────────┤
-│                         🔒  AUTHENTICATION & SECURITY                         │
-│       Clerk Auth Guard  ·  IP-Based Rate Limiting  ·  CSRF Validation        │
+│                    🔒  middleware.ts — Clerk · Rate-limit · CSRF               │
 ├──────────────────────────────────────────────────────────────────────────────┤
-│                         🔌  API ORCHESTRATION LAYER                          │
-│     17+ Route Handlers · Zod Validation · Drizzle ORM · AI Fallbacks         │
+│              🔌  API ROUTE HANDLERS — Zod validate → enqueue → 202             │
 ├──────────────────────────────────────────────────────────────────────────────┤
-│                         ⚡  BACKGROUND WORKER PIPELINE                       │
-│      Inngest Durable Workflows · Remotion Server-Side Video Rendering        │
+│           ⚡  INNGEST DURABLE PIPELINES (step.run memoized + retried)          │
+│     course slides/audio · shorts scenes/video · motion graphic · thumbnails    │
 ├──────────────────────────────────────────────────────────────────────────────┤
-│                         🗄️  DATA & EXTERNAL SERVICES                          │
-│                                                                              │
-│   ┌───────────┐   ┌───────────┐   ┌───────────┐   ┌───────────┐   ┌────────┐ │
-│   │  Neon DB  │   │ Appwrite  │   │ Sarvam AI │   │ Gemini /  │   │Leonardo│ │
-│   │  Postgres │   │  Storage  │   │  TTS/STT  │   │ OpenRouter│   │   AI   │ │
-│   └───────────┘   └───────────┘   └───────────┘   └───────────┘   └────────┘ │
+│                        🧠  AI ORCHESTRATION LAYER                              │
+│   LLM router (NVIDIA NIM→Nemotron→GPT-oss) · Sarvam TTS/STT · Apify img/video  │
+│   Tavily RAG · reveal.js · Remotion · Puppeteer+FFmpeg (on GitHub Actions)     │
+├──────────────────────────────────────────────────────────────────────────────┤
+│                        🗄️  DATA & STORAGE                                      │
+│      Neon Postgres (Drizzle) · Appwrite Storage · GitHub Releases (large MP4)  │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
----
-
-## 🛡️ Security
-
-| Layer | Implementation | Details |
-|:------|:---------------|:--------|
-| **Authentication** | Clerk (delegated) | OAuth + email auth; no passwords stored in DB |
-| **Authorization** | Route-level guards | `clerkMiddleware` protects all non-public routes |
-| **Rate Limiting** | IP-based sliding window | 60 req/min per IP on all API routes |
-| **Input Validation** | Zod schemas | Every API endpoint validates request body/query params |
-| **CSRF Protection** | Origin header validation | Blocks cross-origin mutations |
-| **XSS Prevention** | HTML entity sanitization | `<script>` tag detection via Zod refinements |
-| **Security Headers** | Middleware-injected | HSTS, X-Frame-Options, X-Content-Type-Options, etc. |
-| **SQL Injection** | Drizzle ORM parameterized | All queries use type-safe query builder |
+**Why heavy renders run on GitHub Actions, not Vercel:** reveal.js/Remotion rendering needs headless Chromium (Puppeteer) + FFmpeg native binaries and 30–60 min of CPU — impossible under Vercel's serverless limits. Vercel dispatches a `repository_dispatch`, serves the slide/scene data back over HTTP, and receives progress/`completed` webhook callbacks. `next.config.ts` deliberately excludes `@remotion/*`, `puppeteer`, and `ffmpeg-static` from the Vercel bundle.
 
 ---
 
@@ -149,23 +153,26 @@ Full creative control — you're the director, the platform is your crew.
 
 <table>
 <tr><th>Category</th><th>Technology</th><th>Purpose</th></tr>
-<tr><td><b>Framework</b></td><td>Next.js 16 (App Router)</td><td>Full-stack React with SSR/SSG</td></tr>
+<tr><td><b>Framework</b></td><td>Next.js 16 (App Router)</td><td>Full-stack React, route handlers, RSC</td></tr>
 <tr><td><b>Language</b></td><td>TypeScript 5</td><td>End-to-end type safety</td></tr>
 <tr><td><b>Auth</b></td><td>Clerk</td><td>Delegated auth (OAuth, email, sessions)</td></tr>
-<tr><td><b>Database</b></td><td>Neon (Serverless PostgreSQL)</td><td>Scalable cloud-native Postgres</td></tr>
-<tr><td><b>ORM</b></td><td>Drizzle ORM</td><td>Type-safe SQL with migrations</td></tr>
-<tr><td><b>Styling</b></td><td>Tailwind CSS v4</td><td>Utility-first responsive design</td></tr>
-<tr><td><b>UI Library</b></td><td>Radix UI + shadcn/ui</td><td>Accessible, composable components</td></tr>
-<tr><td><b>AI / LLM</b></td><td>Gemini, OpenRouter, Groq, Cohere</td><td>Multi-provider LLM orchestration</td></tr>
-<tr><td><b>Text-to-Speech</b></td><td>Sarvam AI, ElevenLabs</td><td>Multi-language narration</td></tr>
-<tr><td><b>Image Generation</b></td><td>Leonardo AI</td><td>Cinematic AI visuals</td></tr>
-<tr><td><b>Video Rendering</b></td><td>Remotion</td><td>Programmatic video composition</td></tr>
-<tr><td><b>Storage</b></td><td>Appwrite Storage</td><td>Audio/image/video asset storage with multi-config rotation</td></tr>
-<tr><td><b>Background Jobs</b></td><td>Inngest</td><td>Durable, step-based async workflows</td></tr>
-<tr><td><b>Validation</b></td><td>Zod</td><td>Runtime schema validation</td></tr>
-<tr><td><b>Testing</b></td><td>Vitest</td><td>Fast unit & integration tests</td></tr>
-<tr><td><b>CI/CD</b></td><td>GitHub Actions</td><td>Automated type-check, lint, and test</td></tr>
-<tr><td><b>Animations</b></td><td>Framer Motion</td><td>Smooth UI transitions</td></tr>
+<tr><td><b>Database</b></td><td>Neon (Serverless Postgres, HTTP driver)</td><td>Connectionless queries for serverless</td></tr>
+<tr><td><b>ORM</b></td><td>Drizzle ORM</td><td>Type-safe SQL + Drizzle Kit migrations</td></tr>
+<tr><td><b>Background Jobs</b></td><td>Inngest</td><td>Durable, step-memoized async pipelines</td></tr>
+<tr><td><b>LLM (primary)</b></td><td>NVIDIA NIM (GLM-5.2 → Nemotron → GPT-oss)</td><td>Custom router w/ key rotation + JSON repair</td></tr>
+<tr><td><b>LLM (aux)</b></td><td>Groq (Llama-3.3-70B), Google Gemini</td><td>Fallback + vision + structured output</td></tr>
+<tr><td><b>Text-to-Speech / STT</b></td><td>Sarvam AI (bulbul:v3 / saaras:v3)</td><td>Narration + word-level caption timestamps</td></tr>
+<tr><td><b>Image Generation</b></td><td>Apify actors (Gemini "Nano-Banana"), WaveSpeed</td><td>Slide/scene images + thumbnails</td></tr>
+<tr><td><b>Image-to-Video</b></td><td>Apify Wan 2.2 (Pollo / Leonardo Kling / Runway)</td><td>Animating short-video scenes</td></tr>
+<tr><td><b>Slides Engine</b></td><td>reveal.js + Mermaid, KaTeX, Chart.js, mark.js</td><td>Animated course slides (preview + render)</td></tr>
+<tr><td><b>Video Rendering</b></td><td>Remotion + Puppeteer + FFmpeg</td><td>Programmatic MP4 composition & capture</td></tr>
+<tr><td><b>Render Compute</b></td><td>GitHub Actions (repository_dispatch)</td><td>Off-Vercel heavy render farm</td></tr>
+<tr><td><b>RAG</b></td><td>Tavily + Wikipedia deep-crawl</td><td>Grounding facts into content</td></tr>
+<tr><td><b>Storage</b></td><td>Appwrite Storage + GitHub Releases</td><td>Audio/image/video assets (multi-key rotation)</td></tr>
+<tr><td><b>Validation</b></td><td>Zod</td><td>Env + request schema validation</td></tr>
+<tr><td><b>Export</b></td><td>html-to-image, jsPDF, pdf-lib</td><td>Notes PNG/PDF export</td></tr>
+<tr><td><b>Testing</b></td><td>Vitest</td><td>Unit tests for security-critical utils</td></tr>
+<tr><td><b>Styling</b></td><td>Tailwind CSS v4 + Radix UI</td><td>Accessible, composable UI</td></tr>
 </table>
 
 ---
@@ -175,83 +182,89 @@ Full creative control — you're the director, the platform is your crew.
 ### Prerequisites
 
 - **Node.js** 18+ (recommended: 20 LTS)
-- **npm** (included with Node.js)
-- Accounts: [Clerk](https://clerk.dev), [Neon](https://neon.tech), [Sarvam AI](https://sarvam.ai), [OpenRouter](https://openrouter.ai), [Appwrite](https://appwrite.io), [Leonardo AI](https://leonardo.ai)
+- Accounts/keys: [Clerk](https://clerk.dev), [Neon](https://neon.tech), [Sarvam AI](https://sarvam.ai), [NVIDIA NIM](https://build.nvidia.com), [Appwrite](https://appwrite.io), [Inngest](https://inngest.com), [Apify](https://apify.com), [Tavily](https://tavily.com)
 
 ### Installation
 
 ```bash
-# 1. Clone the repository
+# 1. Clone
 git clone https://github.com/parmeetsingh1313n/Migoo.AI-Describe.Creates.Ship.git
 cd Migoo.AI-Describe.Creates.Ship
 
-# 2. Install dependencies
+# 2. Install
 npm install --legacy-peer-deps
 
-# 3. Configure environment variables
-cp .env.example .env
-# Edit .env with your API keys (see table below)
+# 3. Configure environment
+cp .env.example .env      # then fill in the keys below
 
-# 4. Push database schema to Neon
+# 4. Push the database schema to Neon
 npx drizzle-kit push
 
-# 5. Start the development server
-npm run dev
+# 5. Run
+npm run dev               # http://localhost:3000
 ```
-
-The app will be available at `http://localhost:3000`.
 
 ### Environment Variables
 
 | Variable | Required | Description |
 |:---------|:--------:|:------------|
 | `DATABASE_URL` | ✅ | Neon PostgreSQL connection string |
-| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | ✅ | Clerk frontend publishable key |
-| `CLERK_SECRET_KEY` | ✅ | Clerk backend secret key |
-| `OPENROUTER_API_KEY` | ✅ | OpenRouter API key for LLM access |
-| `GEMINI_API_KEY` | ✅ | Google Gemini API key |
-| `SARVAM_API_KEY` | ✅ | Sarvam AI key for TTS/STT |
-| `APPWRITE_ENDPOINT` | ✅ | Appwrite Storage endpoint URL |
-| `APPWRITE_PROJECT_ID` | ✅ | Appwrite project ID |
-| `APPWRITE_API_KEY` | ✅ | Appwrite server API key |
-| `APPWRITE_BUCKET_ID` | ✅ | Appwrite storage bucket ID |
-| `LEONARDO_API_KEY` | ✅ | Leonardo AI image generation |
-| `INNGEST_SIGNING_KEY` | ✅ | Inngest webhook signing key |
+| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` / `CLERK_SECRET_KEY` | ✅ | Clerk auth keys |
+| `NVIDIA_API_KEY` (+ `NVIDIA_API_KEY1..9`) | ✅ | LLM router keys (rotated) |
+| `SARVAM_API_KEY` (+ `SARVAM_API_KEY_1..n`) | ✅ | TTS/STT keys (rotated) |
+| `INNGEST_EVENT_KEY` / `INNGEST_SIGNING_KEY` | ✅ | Inngest durable-jobs keys |
+| `APPWRITE_ENDPOINT` / `APPWRITE_PROJECT_ID` / `APPWRITE_API_KEY` / `APPWRITE_BUCKET_ID` | ✅ | Storage (supports `_1..5` rotation) |
+| `APIFY_TOKEN` (+ `APIFY_TOKEN_1..10`) | ✅ | Image + image-to-video actors |
+| `TAVILY_API_KEY` | ⬜ | RAG research grounding |
+| `GROQ_API_KEYS` / `GEMINI_API_KEY` | ⬜ | Auxiliary LLM providers |
+| `GH_PAT` / `GH_OWNER` / `GH_REPO` / `WEBHOOK_SECRET` | ⬜ | GitHub-Actions render dispatch + callback |
 
 ---
 
 ## 🗄️ Database Schema
 
-Migoo uses **8 tables** managed by Drizzle ORM:
+Managed by **Drizzle ORM** (`config/schema.tsx`, `postgresql` dialect).
 
+```text
+users (email = tenant key)
+ ├─1:N─ courses ──1:N── chapter_content_slides   (html · narration+fragments · captions · audio)
+ │         └─1:N── course_images
+ │         └───── chapter_generation_status       (status · slides/audio/render progress)
+ │
+ ├─1:N─ short_video_series ──1:N── short_video_assets   (scriptData · captionData · scene URLs)
+ │                          └──1:N── short_video_progress (idempotency: unique(seriesId, stepKey))
+ │
+ ├─1:N─ motion_graphic_projects ──1:N── motion_graphic_messages  (AI chat history)
+ │         (sceneData · theme · remotionProps · renderHistory)
+ │
+ └─1:N─ notes_projects   (sourceContent · generatedData · generatedHtml · exportUrl)
 ```
-┌──────────────┐       ┌──────────────────┐       ┌──────────────────────┐
-│    users     │──1:N──│     courses       │──1:N──│ chapter_content_slides│
-│  (profiles)  │       │  (AI layouts)    │       │ (slides+audio+captions)│
-└──────────────┘       └──────────────────┘       └──────────────────────┘
-       │                       │
-       │                       └──────1:N──┌──────────────────┐
-       │                                   │  course_images   │
-       │                                   └──────────────────┘
-       │
-       ├──────1:N──┌──────────────────┐       ┌──────────────────┐
-       │           │ short_video_series│──1:N──│ short_video_assets│
-       │           └──────────────────┘       └──────────────────┘
-       │
-       └──────1:N──┌─────────────────────────┐       ┌─────────────────────────┐
-                   │ motion_graphic_projects  │──1:N──│ motion_graphic_messages  │
-                   │ (scenes+theme+video)     │       │ (AI chat history)        │
-                   └─────────────────────────┘       └─────────────────────────┘
-```
+
+Studio reuses `short_video_assets` via its `sceneAssetTypes` and `contextMarkdown` columns.
 
 ### Database Commands
 
 ```bash
-npx drizzle-kit push       # Push schema directly (development)
-npx drizzle-kit generate   # Generate versioned migration SQL (production)
-npx drizzle-kit migrate    # Apply pending migrations
-npx drizzle-kit studio     # Visual database browser
+npx drizzle-kit push       # Push schema (development)
+npx drizzle-kit generate   # Generate versioned migration SQL
+npx drizzle-kit migrate    # Apply migrations
+npx drizzle-kit studio     # Visual DB browser
 ```
+
+---
+
+## 🛡️ Security
+
+| Layer | Implementation |
+|:------|:---------------|
+| **Authentication** | Clerk (OAuth + email); no passwords stored |
+| **Authorization** | `clerkMiddleware` route guards + per-route ownership checks |
+| **Rate Limiting** | In-memory sliding window, 60 req/min per IP on `/api/*` |
+| **Input Validation** | Zod schemas on every endpoint (`lib/validations.ts`) |
+| **CSRF** | Origin-vs-host check on all mutations |
+| **Webhooks** | `WEBHOOK_SECRET`-guarded render callbacks |
+| **SQL Injection** | Drizzle parameterized queries |
+| **Env safety** | Zod-validated env at import (`lib/env.ts`), fail-fast in prod |
 
 ---
 
@@ -260,143 +273,74 @@ npx drizzle-kit studio     # Visual database browser
 ```bash
 npm test              # Run all tests
 npm run test:watch    # Watch mode
-npm run test:coverage # Generate coverage report
+npm run test:coverage # Coverage report
 ```
 
-### Test Suites
-
-| Suite | Tests | Coverage Area |
-|:------|:-----:|:--------------|
-| **Validation Schemas** | 23 | Input validation for all API endpoints |
-| **Rate Limiting** | 7 | Sliding window enforcement, expiry |
-| **API Helpers** | 5 | Response shapes, security headers, CORS |
-| **Environment Config** | 6 | Env variable schema validation |
-| | **41** | **Total tests** |
-
----
-
-## 📡 API Reference
-
-All API routes are protected by **Clerk authentication**, **rate limiting** (60 req/min), **CSRF validation**, and **Zod input validation**.
-
-See [docs/API.md](docs/API.md) for complete documentation.
-
-### Quick Reference
-
-| Endpoint | Method | Module | Description |
-|:---------|:------:|:------:|:------------|
-| `/api/user` | `POST` | Core | Create or fetch user profile |
-| `/api/course` | `GET` | Courses | List/fetch courses |
-| `/api/generate-course-layout` | `POST` | Courses | AI course structure generation |
-| `/api/generate-video-content` | `POST` | Courses | Slides + TTS + captions |
-| `/api/generate-images` | `POST` | Courses | AI image generation |
-| `/api/generate-thumbnail` | `POST` | Courses | Course thumbnail |
-| `/api/create-short-series` | `POST` | Shorts | Create short video series |
-| `/api/short-series` | `GET` | Shorts | List short series |
-| `/api/video` | `GET` | Shorts | Fetch video assets |
-| `/api/motion-graphics` | `POST/GET` | Motion | Create/list motion graphic projects |
-| `/api/motion-graphics/[id]/chat` | `POST` | Motion | AI conversational scene builder |
-| `/api/motion-graphics/[id]/generate` | `POST` | Motion | Trigger render pipeline |
-| `/api/motion-graphics/[id]/upload` | `POST` | Motion | Upload reference assets |
-| `/api/studio` | `POST/GET` | Studio | Studio project management |
-| `/api/tts-preview` | `POST` | Core | Preview text-to-speech |
+Vitest (node env) covers the deterministic, security-critical shared utilities — `lib/validations`, `lib/env`, `lib/rate-limit`, `lib/api-helpers`. The non-deterministic LLM/render pipelines are validated by integration and manual runs.
 
 ---
 
 ## 📦 Project Structure
 
-```
+```text
 migoo/
-├── app/                            # Next.js App Router
-│   ├── api/                        # 17 API Route Handlers
-│   │   ├── course/                 #   Course CRUD
-│   │   ├── generate-*/             #   AI generation endpoints
-│   │   ├── motion-graphics/        #   Motion graphic projects & chat
-│   │   ├── studio/                 #   Studio project management
-│   │   ├── create-short-series/    #   Short video creation
-│   │   ├── short-series/           #   Short series listing
-│   │   └── inngest/                #   Inngest webhook endpoint
-│   ├── (auth)/                     # Auth pages (sign-in, sign-up)
-│   ├── (routes)/                   # Course listing & detail pages
-│   ├── short-generator/            # Short video generator UI
-│   ├── motion-graphics/            # Motion graphics creator + project editor
-│   ├── studio/                     # Migoo Studio (director's chair)
-│   └── _components/                # Shared page components
-│
-├── config/                         # Service Configuration
-│   ├── schema.tsx                  #   Drizzle database schema
-│   ├── db.tsx                      #   Neon database connection
-│   ├── gemini.ts                   #   Google Gemini AI client
-│   ├── openrouter.ts               #   OpenRouter multi-model client
-│   ├── groq.ts                     #   Groq LLM client
-│   ├── ai-fallback.ts              #   Multi-provider fallback chain
-│   └── image-generator.ts          #   Image generation orchestrator
-│
-├── lib/                            # Shared Utilities
-│   ├── api-helpers.ts              #   Typed API responses + security headers
-│   ├── validations.ts              #   Zod validation schemas
-│   ├── rate-limit.ts               #   Sliding window rate limiter
-│   ├── leonardo.ts                 #   Leonardo AI integration
-│   ├── enhanced-tts.ts             #   Enhanced TTS pipeline
-│   └── video-render.ts             #   Remotion video rendering
-│
-├── inngest/                        # Background Job Definitions
-│   ├── client.ts                   #   Inngest client config
-│   └── functions.ts                #   Short video + motion graphic pipelines
-│
-├── remotion/                       # Video Compositions
-│   ├── Composition.tsx             #   Course video composition
-│   ├── MotionGraphicComposition.tsx #   Motion graphic renderer (25+ scene types)
-│   └── Root.tsx                    #   Remotion entry point
-│
-├── components/                     # React UI Components
-├── hooks/                          # Custom React Hooks
-├── context/                        # React Context Providers
-├── __tests__/                      # Vitest Test Suites (41 tests)
-├── .github/workflows/              # CI/CD (GitHub Actions)
-├── docs/                           # API documentation
-└── middleware.ts                   # Auth + Rate Limiting + CSRF
+├── app/
+│   ├── api/                         # Route handlers (thin: validate → enqueue)
+│   │   ├── generate-course-layout/  #   Course curriculum
+│   │   ├── generate-video-content/  #   Course slides (Phase 1)
+│   │   ├── approve-slides/          #   Review gate → audio (Phase 2)
+│   │   ├── render-chapter/          #   Dispatch cinematic render to GitHub Actions
+│   │   ├── create-short-series/     #   Shorts series config
+│   │   ├── short-series/ · video/   #   Shorts generation + render props
+│   │   ├── motion-graphics/         #   Motion projects + chat
+│   │   ├── notes/ · course-notes/   #   Notes generation
+│   │   ├── studio/ · sarvam-doc/    #   Studio + document extraction
+│   │   └── inngest/                 #   Inngest serve endpoint
+│   ├── (auth)/ (routes)/            # Auth pages · course viewer
+│   ├── course-generator/ short-generator/ motion-graphics/ notes/ studio/
+│   └── _components/
+├── config/                          # db · schema · openrouter (LLM router) · sarvam · gemini · groq
+├── lib/                             # api-helpers · validations · rate-limit · blob · reveal-doc · providers
+├── inngest/                         # client · course-functions · functions (durable pipelines)
+├── remotion/                        # Root · MotionGraphicComposition · CourseComposition
+├── scripts/                         # render-chapter-gh.js · upload-*.js (GitHub Actions render)
+├── data/                            # Prompt.ts · slide-design.ts · voices.ts
+├── docs/                            # API.md · INTERVIEW_GUIDE.md (architecture deep-dive)
+├── __tests__/                       # Vitest suites
+├── .github/workflows/               # render-chapter.yml (repository_dispatch render)
+└── middleware.ts                    # Auth + Rate-limit + CSRF
 ```
 
 ---
 
 ## 🚢 Deployment
 
-### Vercel (Recommended)
+**Vercel (app):** import the repo, add env vars, deploy — Next.js is auto-detected.
+**GitHub Actions (render farm):** set `GH_PAT`/`GH_OWNER`/`GH_REPO`/`WEBHOOK_SECRET`; heavy renders dispatch to `.github/workflows/render-chapter.yml`.
+**Inngest:** register the serve endpoint (`/api/inngest`) in the Inngest dashboard.
 
-1. Push to GitHub
-2. Import project in [Vercel Dashboard](https://vercel.com/new)
-3. Add all environment variables
-4. Deploy — Vercel auto-detects Next.js
+---
 
-### Manual
+## 📖 Deep-Dive Documentation
 
-```bash
-npm run build    # Build for production
-npm start        # Start production server
-```
+A full architecture + per-module engineering deep-dive (pipelines, file-by-file breakdowns, code snippets, and design rationale) lives in **[docs/INTERVIEW_GUIDE.md](docs/INTERVIEW_GUIDE.md)**. API reference: **[docs/API.md](docs/API.md)**.
 
 ---
 
 ## 👥 Author
 
-<table>
-<tr>
-<td align="center">
-<b>Parmeet Singh</b><br/>
-Full-Stack Developer<br/>
+<table><tr><td align="center">
+<b>Parmeet Singh</b><br/>Full-Stack Developer<br/>
 <a href="https://github.com/parmeetsingh1313n">@parmeetsingh1313n</a>
-</td>
-</tr>
-</table>
+</td></tr></table>
 
 ## 🤝 Contributing
 
-We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## 📄 License
 
-This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
+MIT — see [LICENSE](LICENSE).
 
 ---
 
