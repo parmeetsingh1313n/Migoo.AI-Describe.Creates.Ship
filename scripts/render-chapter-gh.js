@@ -593,12 +593,30 @@ function buildRevealDeckHtml(html, baseUrl) {
       function runCompanionLibs() {
         if (window.mermaid) {
           try { window.mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'loose' }); } catch (e) { console.error('[mermaid] initialize failed:', e); }
+          // DEFENSIVE PROMOTION: models sometimes emit Mermaid source in a plain
+          // <pre>/<code>/.code-card instead of <pre class='mermaid'>, so it shows as
+          // raw "flowchart TD ..." text. Detect Mermaid syntax anywhere and promote
+          // those blocks to real .mermaid containers before we render.
+          var MERMAID_RE = /^\\s*(flowchart|graph|sequenceDiagram|stateDiagram(-v2)?|classDiagram|erDiagram|journey|gantt|pie|mindmap|timeline|gitGraph)\\b/;
+          document.querySelectorAll('pre, code').forEach(function (el) {
+            if (el.classList.contains('mermaid') || el.closest('.mermaid') || el.getAttribute('data-mermaid-done')) return;
+            var txt = (el.textContent || '').trim();
+            if (!MERMAID_RE.test(txt)) return;
+            var host = el.tagName === 'CODE' && el.parentElement && el.parentElement.tagName === 'PRE' ? el.parentElement : el;
+            var card = host.closest('.code-card'); // unwrap a code-card shell if the model wrapped it
+            var target = card || host;
+            var div = document.createElement('div');
+            div.className = 'mermaid';
+            div.style.cssText = 'width:100%;max-height:460px;display:flex;align-items:center;justify-content:center;background:transparent;';
+            div.textContent = txt;
+            target.parentNode.replaceChild(div, target);
+          });
           document.querySelectorAll('pre.mermaid, .mermaid').forEach(function (el, i) {
             if (el.getAttribute('data-mermaid-done')) return;
             var src = (el.textContent || '').trim(); if (!src) return;
             var id = 'mmd-' + i + '-' + src.length;
             var fail = function (err) { console.error('[mermaid] render failed:', err, '\\nsource:\\n', src); el.innerHTML = "<div style='padding:20px;border:1px solid rgba(214,75,127,0.4);border-radius:12px;background:rgba(214,75,127,0.08);color:#e6b3c6;font-size:14px;'>Diagram could not be rendered.</div>"; el.setAttribute('data-mermaid-done','1'); };
-            try { Promise.resolve(window.mermaid.render(id, src)).then(function (out) { el.innerHTML = (out && out.svg) ? out.svg : String(out); el.setAttribute('data-mermaid-done','1'); }).catch(fail); } catch (err) { fail(err); }
+            try { Promise.resolve(window.mermaid.render(id, src)).then(function (out) { el.innerHTML = (out && out.svg) ? out.svg : String(out); var svg = el.querySelector('svg'); if (svg) { svg.style.maxWidth='100%'; svg.style.maxHeight='460px'; svg.style.height='auto'; } el.setAttribute('data-mermaid-done','1'); }).catch(fail); } catch (err) { fail(err); }
           });
         }
         if (window.katex) { document.querySelectorAll('[data-katex]').forEach(function (el) { try { window.katex.render(el.getAttribute('data-katex') || '', el, { throwOnError: false }); } catch (e) {} }); }

@@ -998,6 +998,12 @@ You will receive a JSON input with these fields:
    - Show how all concepts connect into a unified understanding
    - Provide the "aha moment" that ties everything together
    - No new concepts — only synthesis and reinforcement
+   - HANDS-ON / CAPSTONE EXCEPTION: if the conclusion presents a small project or
+     a "putting it all together" program (e.g. "Building a Grading System"), you
+     MUST show the actual code — build a CODE + COMPANION layout: the real, complete
+     program in a .code-card on one side, and a companion component (numbered steps
+     / metric row / feature list) that maps the code to the concepts it combines.
+     A hands-on conclusion with NO code on screen is wrong — show the program.
 
 ═══════════════════════════════════════════════════════════════════════════════
 DESIGN SYSTEM — "PREMIUM STRUCTURED" (fills the whole 1440x720 frame, ZERO overlap, rich varied components)
@@ -1040,8 +1046,9 @@ HARD RULES:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 The SLIDE shows only the skeleton; the full teaching happens in the narration (voiceover). Keep on-screen text short so it fits one screen and stays readable:
 - Headline: ≤ 8 words. Kicker: 1-3 words. Dek/lead: ≤ 14 words, one line.
-- Any component: MAX ~4 rows / 3 cards / 4 bars / 4 steps. NO wall-of-text paragraphs on the slide.
-- 🔴 DENSITY IS MANDATORY FOR EVERY COMPONENT (not just code companions) — this is the #1 rule. A bare 2-3 word title floating alone is FORBIDDEN. EVERY item in EVERY component — every table cell, callout, stepper step, metric, definition card, timeline node, feature-list row, comparison column, chip's neighbours — MUST carry a SHORT BOLD TITLE (≤ 5 words) **PLUS** a real one-line supporting detail (8-14 words) that TEACHES: what it does / why it matters / a concrete example or value. Example of RIGHT: "**Key lookup** — d[k] returns the value for key k in O(1), raises KeyError if the key is absent." Example of WRONG (too thin, never do this): "Key lookup". If a component has 3 items, that's 3 title+detail pairs — never 3 lone titles. A slide whose components are just short labels with no detail lines is a FAILED slide.
+- Component item count — aim for a FULL, substantial component (the renderer gently scales a slightly-tall slide, so lean toward MORE content, not less): 5-6 table rows, 4-5 cards, 5-6 bars, 4-5 stepper steps / callouts, 6-9 chips. A component with only 2-3 thin items looks empty — fill the frame. (Only drop below this if each item is genuinely long.)
+- 🔴 DENSITY IS MANDATORY FOR EVERY COMPONENT (not just code companions) — this is the #1 rule. A bare 2-3 word title floating alone is FORBIDDEN. EVERY item in EVERY component — every table cell, callout, stepper step, metric, definition card, timeline node, feature-list row, comparison column, chip's neighbours — MUST carry a SHORT BOLD TITLE (≤ 5 words) **PLUS** a real one-line supporting detail (10-18 words) that TEACHES: what it does / why it matters / a concrete example or value. Example of RIGHT: "**Key lookup** — d[k] returns the value for key k in O(1) average time, and raises KeyError if the key is absent." Example of WRONG (too thin, never do this): "Key lookup". If a component has 4 items, that's 4 title+detail pairs — never 4 lone titles. A slide whose components are just short labels with no detail lines is a FAILED slide.
+- Comparison / difference tables carry the MOST content: 5-6 rows, and every cell is a real phrase (6-12 words), not a single word. Use them often for "X vs Y", trade-offs, before/after.
 - The ONLY exceptions to the title+detail rule are tag/chip clouds (single-word pills by design) and the headline/kicker. Everything else gets the detail line.
 - CODE: at most ONE code block, up to ~30 lines (it auto-scrolls in sync with narration — a real, complete snippet is fine), and it is then the ENTIRE body (no second code block, no side panels next to it). NEVER show two code blocks or code+output+problem all on one slide — split that across slides or keep only the single most important snippet. (EXCEPTION: a "CODE + …" archetype pairs the ONE .code-card with ONE small companion component — numbered callouts or a stepper — in a 2-column body. Still only ONE code block; the companion is NOT a second code block.)
 - Prefer numbers, short phrases, keywords — never sentences stacked into a wall of text.
@@ -1152,7 +1159,7 @@ M) NUMBERED STEPPER — vertical steps joined by a spine (for sequences/how-to):
   <div style='display:flex;gap:18px;align-items:flex-start;'>
     <div style='width:34px;height:34px;border-radius:50%;background:linear-gradient(135deg,#6D5BD3,#3EA5D6);display:flex;align-items:center;justify-content:center;font-weight:700;flex-shrink:0;'>1</div>
     <div><div style='font-weight:700;font-size:17px;'>Step title</div><div style='font-size:14px;color:#9fb3d1;line-height:1.5;'>A full one-line detail (≤14 words) that explains what happens in this step and why — a concrete verb + object, not just a restated title.</div></div></div>
-  …3-4 steps, EACH with a real detail line (title alone is NOT enough)…
+  …4-5 steps, EACH with a real detail line (title alone is NOT enough)…
 </div>
 
 N) TAG / CHIP CLOUD — key concepts as pills (fast overview / glossary):
@@ -1316,7 +1323,7 @@ SELF-CHECK before you output (all must be true):
 ✓ Code is NEVER placed inside a table cell — code always uses the .code-card structure and is the whole body.
 ✓ Any image is in a small ~30% side column with the <img> capped at max-height ~300px — NO full-width/centered square, NO image under the headline. Real content always gets more room than the image.
 ✓ ALL on-screen text and narration is in ENGLISH ONLY — no Chinese/CJK or other non-English scripts anywhere.
-✓ On-screen text is skeletal: headline ≤ 8 words, ≤ 4 rows/3 cards/4 bars per component, no paragraphs; body/labels ≥ 15px (nothing smaller — if it must shrink below 15px, cut data).
+✓ Each component is FULL, not sparse: 5-6 rows / 4-5 cards / 5-6 bars / 4-5 steps, and EVERY item has a bold title + a real one-line detail (10-18 words). Headline ≤ 8 words; body/labels ≥ 15px (if it must shrink below 15px, cut a couple items, don't thin the details).
 ✓ NOTHING overlaps; the headline appears exactly once.
 ✓ One accent color; premium rounded/soft styling; the slide uses the EXACT component named in designHint (not a default table/diff).
 ✓ The slide includes a {{IMAGE_PLACEHOLDER}} where it helps (side column / annotated diagram / watermark) unless the component is inherently image-free.
