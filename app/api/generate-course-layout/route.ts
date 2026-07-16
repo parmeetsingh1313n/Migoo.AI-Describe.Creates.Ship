@@ -19,6 +19,10 @@ import { validateInput, generateCourseLayoutSchema } from "@/lib/validations";
 import { currentUser } from "@clerk/nextjs/server";
 import { NextRequest } from "next/server";
 
+// GLM-5.2 at high reasoning effort can take a while — give the function the
+// full Vercel budget so it isn't killed mid-generation.
+export const maxDuration = 300;
+
 export async function POST(req: NextRequest) {
     const user = await currentUser();
 
@@ -72,7 +76,7 @@ export async function POST(req: NextRequest) {
         // Generate comprehensive course layout
         // ═══════════════════════════════════════════════════════════════════
         console.log('🤖 Generating comprehensive course layout with NvidiaAPI...');
-        console.log('Model: mistralai/mistral-large-3-675b-instruct-2512');
+        console.log('Model: z-ai/glm-5.2');
         console.log('Temperature: 0.7 (balanced creativity)');
         console.log('Max Tokens: 8000 (increased for detailed courses)');
 
@@ -80,7 +84,7 @@ export async function POST(req: NextRequest) {
             COURSE_CONFIG_PROMPT,
             userInput,
             {
-                model: 'mistralai/mistral-large-3-675b-instruct-2512',
+                model: 'z-ai/glm-5.2',
                 temperature: 0.7,
                 maxTokens: 8000,
             }
@@ -179,7 +183,7 @@ export async function POST(req: NextRequest) {
             course: courseResult[0],
             metadata: {
                 generatedAt: new Date().toISOString(),
-                model: 'mistralai/mistral-large-3-675b-instruct-2512',
+                model: 'z-ai/glm-5.2',
                 courseId,
                 type,
                 courseName: result.courseName,
