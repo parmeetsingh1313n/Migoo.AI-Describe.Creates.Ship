@@ -182,6 +182,35 @@ function CourseChapters({ course, onRefresh }: Props) {
     const playerRefs = useRef<Record<string, React.RefObject<PlayerRef | null>>>({});
     const containerRefs = useRef<Record<string, React.RefObject<HTMLDivElement | null>>>({});
 
+    // ── Course image readiness (gates the "Generate Video Content" button) ─────
+    // Images auto-generate on page load (one per slide, keyed by a global index
+    // chapterIndex*STRIDE + slideIdx). A chapter's button stays disabled until its
+    // own image range is fully present, so slides never generate against missing
+    // images (which would fall back to generic/round-robin visuals).
+    const IMG_STRIDE = 25; // must match MAX_SLIDES_PER_CHAPTER on the server
+    const [imageIndices, setImageIndices] = useState<Set<number>>(new Set());
+    const [imagesLoaded, setImagesLoaded] = useState(false);
+
+    const fetchImageStatus = useCallback(async () => {
+        if (!course?.courseId) return;
+        try {
+            const res = await axios.get(`/api/generate-images?courseId=${course.courseId}`);
+            const list: number[] = res.data?.data?.indices ?? res.data?.indices ?? [];
+            setImageIndices(new Set(list));
+            setImagesLoaded(true);
+        } catch { /* ignore poll errors */ }
+    }, [course?.courseId]);
+
+    // How many images a chapter expects (upper bound = its outline points, capped
+    // at the stride) and how many of its global-index range are already present.
+    const chapterImageProgress = useCallback((chapterIndex: number, expectedSlides: number) => {
+        const expected = Math.max(1, Math.min(IMG_STRIDE, expectedSlides || 1));
+        const base = chapterIndex * IMG_STRIDE;
+        let have = 0;
+        for (let i = 0; i < expected; i++) if (imageIndices.has(base + i)) have++;
+        return { have, expected, ready: have >= expected };
+    }, [imageIndices]);
+
     // Track fullscreen state globally with vendor prefix support
     useEffect(() => {
         const getFullscreenElement = () => {
@@ -314,6 +343,25 @@ function CourseChapters({ course, onRefresh }: Props) {
         fetchStatuses();
     }, [course?.courseId]);
 
+    // ── Poll image readiness until every chapter's images exist ────────────────
+    // Total expected images across the course (upper bound: each chapter contributes
+    // min(outlinePoints, stride)). Poll every 4s until we have at least that many,
+    // so the per-chapter gating can flip buttons on as ranges fill.
+    const totalExpectedImages = useMemo(() => {
+        const chs = course?.courseLayout?.chapters ?? [];
+        return chs.reduce((sum, ch) => sum + Math.max(1, Math.min(IMG_STRIDE, (ch.subContent?.length || 1))), 0);
+    }, [course?.courseLayout?.chapters]);
+
+    useEffect(() => {
+        if (!course?.courseId) return;
+        fetchImageStatus(); // immediate
+        if (imagesLoaded && imageIndices.size >= totalExpectedImages && totalExpectedImages > 0) {
+            return; // all images present — no need to poll
+        }
+        const interval = setInterval(fetchImageStatus, 4000);
+        return () => clearInterval(interval);
+    }, [course?.courseId, fetchImageStatus, imagesLoaded, imageIndices, totalExpectedImages]);
+
     // Poll status every 3s if any chapter is currently generating or queued
     useEffect(() => {
         const isGeneratingAny = Object.values(statuses).some(
@@ -405,15 +453,14 @@ function CourseChapters({ course, onRefresh }: Props) {
     // Triggers generation event for a single chapter
     const handleGenerateChapter = async (chapter: any, index: number) => {
         if (!course?.courseId) return;
-        
-        // 1. Fire image generation (non-blocking)
-        axios.post('/api/generate-images', {
-            courseName: course.courseName,
-            courseId: course.courseId,
-            chapters: course.courseLayout?.chapters || [],
-        }).catch(e => console.error('⚠️ Image queue failed:', e.message));
 
-        // 2. Queue video content generation
+        // NOTE: image generation is NOT fired here anymore — it auto-starts when the
+        // course page loads (see CoursePage.GetCourseDetails), decoupled from this
+        // button. Clicking "Generate Video Content" now queues ONLY the slides, which
+        // reuse the images function's persisted slide-topic expansion for an exact
+        // 1:1 image↔slide mapping.
+
+        // Queue video content generation
         try {
             // One slide per outline point (capped at 15) — reflect that in the
             // optimistic progress total so the bar isn't stuck at "/7".
@@ -768,11 +815,49 @@ function CourseChapters({ course, onRefresh }: Props) {
                     </div>
                 );
             case 'idle':
-            default:
+            default: {
+                // Gate the button until THIS chapter's images are ready. Images
+                // auto-generate on page load; generating slides before the images
+                // exist would bind generic/round-robin visuals instead of the exact
+                // per-slide image.
+                const expectedSlides = chapter.subContent?.length || 7;
+                const imgProg = chapterImageProgress(index, expectedSlides);
+                const imagesReady = !imagesLoaded ? false : imgProg.ready;
+
+                if (!imagesReady) {
+                    const pct = Math.min(100, Math.round((imgProg.have / imgProg.expected) * 100));
+                    return (
+                        <div className="relative flex flex-col items-center justify-center h-full p-6 text-center bg-gradient-to-b from-zinc-900 to-black text-white gap-4 overflow-hidden select-none">
+                            {animationStyles}
+                            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-40 h-40 bg-amber-500/10 rounded-full blur-3xl" style={{ animation: 'ambientPulse 6s ease-in-out infinite' }} />
+                            <div className="z-10 flex flex-col items-center gap-3 w-full">
+                                <div className="relative flex items-center justify-center w-12 h-12">
+                                    <div className="absolute inset-0 rounded-full border-2 border-amber-500/20 border-t-amber-400 animate-spin" style={{ animationDuration: '1.2s' }} />
+                                    <Sparkles className="h-4 w-4 text-amber-400 animate-pulse" />
+                                </div>
+                                <div>
+                                    <p className="text-sm font-semibold text-zinc-200">Preparing images…</p>
+                                    <p className="text-[11px] text-zinc-500 mt-0.5">Generating this chapter's visuals before slides</p>
+                                </div>
+                                <div className="w-40 bg-zinc-800 rounded-full h-1.5 overflow-hidden">
+                                    <div className="bg-gradient-to-r from-amber-500 to-orange-400 h-full rounded-full transition-all duration-500" style={{ width: `${pct}%` }} />
+                                </div>
+                                <button
+                                    disabled
+                                    className="mt-1 cursor-not-allowed opacity-60 flex items-center gap-1.5 px-4 py-1.5 bg-zinc-800/60 border border-zinc-700/50 text-zinc-400 rounded-full text-xs font-semibold"
+                                >
+                                    <Loader2 className="h-3 w-3 animate-spin" />
+                                    Preparing images {imgProg.have}/{imgProg.expected}
+                                </button>
+                            </div>
+                        </div>
+                    );
+                }
+
                 return (
                     <div className="relative flex flex-col items-center justify-center h-full p-6 text-center bg-gradient-to-b from-zinc-900 to-black text-white gap-4 overflow-hidden group select-none">
                         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-32 h-32 bg-purple-500/10 rounded-full blur-2xl group-hover:bg-purple-500/20 transition-all duration-700" />
-                        
+
                         <div className="z-10 flex flex-col items-center gap-2">
                             <div className="p-3 bg-zinc-800/80 border border-zinc-700/50 rounded-2xl group-hover:border-purple-500/30 transition-all duration-300">
                                 <Sparkles className="h-6 w-6 text-purple-400 animate-pulse" />
@@ -795,6 +880,7 @@ function CourseChapters({ course, onRefresh }: Props) {
                         </DrawOutlineButton>
                     </div>
                 );
+            }
         }
     };
 

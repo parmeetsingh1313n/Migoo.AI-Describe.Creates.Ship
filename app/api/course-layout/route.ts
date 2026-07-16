@@ -72,9 +72,16 @@ export async function PATCH(req: NextRequest) {
         );
         const updatedLayout = { ...layout, chapters: updatedChapters };
 
+        // Editing the outline changes this chapter's slide topics, so the previously
+        // persisted slide-topic expansion (used to keep image↔slide mapping exact) is
+        // now stale — drop it for THIS chapter so the next generation re-expands and
+        // regenerates matching images.
+        const existingTopics = (course.slideTopics as Record<string, unknown>) ?? {};
+        const { [chapterId]: _dropped, ...remainingTopics } = existingTopics;
+
         await db
             .update(coursesTable)
-            .set({ courseLayout: updatedLayout })
+            .set({ courseLayout: updatedLayout, slideTopics: remainingTopics })
             .where(eq(coursesTable.courseId, courseId));
 
         return apiSuccess({

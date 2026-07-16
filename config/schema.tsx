@@ -16,6 +16,12 @@ export const coursesTable = pgTable("courses", {
     type: varchar({ length: 255 }).notNull(),
     voice: varchar({ length: 100 }).default("kabir"),   // Sarvam voice ID for course narration
     courseLayout: json().notNull(),
+    // The ONE canonical per-chapter slide-topic expansion, shape:
+    //   { [chapterId]: Array<{ topic: string; needsCode: boolean }> }
+    // Written by generateCourseImagesFn and REUSED by generateCourseSlidesFn so the
+    // image↔slide global-index mapping (chapterIndex*25 + slideIdx) is EXACT — both
+    // functions must expand a chapter's subContent identically or images mismatch.
+    slideTopics: json("slide_topics"),
     createdAt: timestamp("created_at").defaultNow(),
     courseThumbnail: text(),
 })

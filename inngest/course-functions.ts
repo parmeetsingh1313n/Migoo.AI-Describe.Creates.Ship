@@ -546,11 +546,15 @@ export const generateCourseImagesFn = inngest.createFunction(
         // ever drift slightly, the injection lookup already falls back to round-robin
         // cycling through the course's image pool rather than failing.
         const imageJobs: { globalIdx: number; chIdx: number; slideIdx: number; chapterTitle: string; topic: string; prompt: string }[] = [];
+        // Canonical per-chapter expansion we persist so generateCourseSlidesFn reuses
+        // the EXACT same slide-topic list → identical globalIdx mapping (no drift).
+        const slideTopicsByChapter: Record<string, ChapterTopic[]> = {};
         for (let chIdx = 0; chIdx < chapters.length; chIdx++) {
             const chapter = chapters[chIdx];
             const chapterTitle = chapter.chapterTitle || `Chapter ${chIdx + 1}`;
             const rawSubContent: string[] = chapter.subContent?.slice(0, MAX_SLIDES_PER_CHAPTER) || [chapterTitle];
             const chapterTopics: ChapterTopic[] = await step.run(`expand-topics-for-images-${chIdx}`, () => expandChapterTopics(chapterTitle, rawSubContent));
+            if (chapter.chapterId) slideTopicsByChapter[chapter.chapterId] = chapterTopics;
             chapterTopics.forEach(({ topic }, slideIdx) => {
                 const globalIdx = chIdx * MAX_SLIDES_PER_CHAPTER + slideIdx;
                 imageJobs.push({
@@ -560,6 +564,20 @@ export const generateCourseImagesFn = inngest.createFunction(
                 });
             });
         }
+
+        // Persist the canonical expansion so the slides function reuses it verbatim.
+        // Merge (don't clobber) so a re-run for one chapter never wipes others, and
+        // never overwrite a chapter that already has a stored expansion (the slides
+        // function may already be generating against it).
+        await step.run("persist-slide-topics", async () => {
+            const [course] = await db.select({ slideTopics: coursesTable.slideTopics })
+                .from(coursesTable).where(eq(coursesTable.courseId, courseId));
+            const existingMap = (course?.slideTopics as Record<string, ChapterTopic[]>) ?? {};
+            const merged = { ...slideTopicsByChapter, ...existingMap }; // existing wins
+            await db.update(coursesTable).set({ slideTopics: merged })
+                .where(eq(coursesTable.courseId, courseId));
+            return { chapters: Object.keys(merged).length };
+        });
 
         // If we already have an image for every planned slide, skip.
         if (existing.length >= imageJobs.length && imageJobs.length > 0) {
@@ -750,9 +768,40 @@ export const generateCourseSlidesFn = inngest.createFunction(
         // prior run) keep their original 1:1 mapping so slideIndex continuity
         // with existing rows isn't broken — only fresh chapters get expansion.
         const rawSubContent: string[] = chapter.subContent?.slice(0, MAX_SLIDES_PER_CHAPTER) || [chapter.chapterTitle];
-        const chapterTopics: ChapterTopic[] = existingSlides.length > 0
-            ? rawSubContent.map(topic => ({ topic, needsCode: isLikelyCodeTopic(topic) }))
-            : await step.run("expand-chapter-topics", () => expandChapterTopics(chapter.chapterTitle, rawSubContent));
+        // Reuse the CANONICAL expansion the images function persisted (coursesTable
+        // .slideTopics[chapterId]) so the slide↔image globalIdx mapping is EXACT —
+        // both functions must produce the identical slide-topic list. Order of
+        // preference: (1) existing DB slides keep their 1:1 mapping; (2) the persisted
+        // shared expansion; (3) a fresh expansion (older courses / images not run yet),
+        // which we then persist so a later image pass can align to it.
+        const persistedTopics = await step.run("load-persisted-slide-topics", async () => {
+            const [course] = await db.select({ slideTopics: coursesTable.slideTopics })
+                .from(coursesTable).where(eq(coursesTable.courseId, courseId));
+            const map = (course?.slideTopics as Record<string, ChapterTopic[]>) ?? {};
+            const t = map[chapterId];
+            return Array.isArray(t) && t.length > 0 ? t : null;
+        });
+        let chapterTopics: ChapterTopic[];
+        if (existingSlides.length > 0) {
+            chapterTopics = rawSubContent.map(topic => ({ topic, needsCode: isLikelyCodeTopic(topic) }));
+        } else if (persistedTopics) {
+            console.log(`📎 ${TAG} Reusing persisted slide-topic expansion (${persistedTopics.length} topics) — image mapping will be exact`);
+            chapterTopics = persistedTopics;
+        } else {
+            chapterTopics = await step.run("expand-chapter-topics", () => expandChapterTopics(chapter.chapterTitle, rawSubContent));
+            // Persist so a subsequent image run aligns to the SAME expansion.
+            await step.run("persist-slide-topics-from-slides", async () => {
+                const [course] = await db.select({ slideTopics: coursesTable.slideTopics })
+                    .from(coursesTable).where(eq(coursesTable.courseId, courseId));
+                const map = (course?.slideTopics as Record<string, ChapterTopic[]>) ?? {};
+                if (!map[chapterId]) {
+                    map[chapterId] = chapterTopics;
+                    await db.update(coursesTable).set({ slideTopics: map })
+                        .where(eq(coursesTable.courseId, courseId));
+                }
+                return { persisted: true };
+            });
+        }
         const subTopics = chapterTopics.map(t => t.topic);
         const totalSlides = subTopics.length;
 
