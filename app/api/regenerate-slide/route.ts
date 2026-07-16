@@ -114,10 +114,11 @@ export async function POST(req: NextRequest) {
             researchContext: researchContext || null,
             designHint: `🎯 BUILD THIS EXACT COMPONENT unless the user's change request below asks for a different one: ${archetype}. `
                 + (isCodeCompanion
-                    ? `2-COLUMN slide: a .code-card (header + <pre><code>, real line breaks, a REAL COMPLETE snippet up to ~20 lines, auto-scrolls) on ONE side and the named companion component (numbered callouts / stepper) on the OTHER — those are the only two blocks. NEVER a table cell or an image of code. NO {{IMAGE_PLACEHOLDER}} / <img>. `
+                    ? `2-COLUMN slide: a .code-card (header + <pre><code>, real line breaks, a REAL COMPLETE snippet up to ~20 lines, auto-scrolls) on ONE side and a COMPANION component on the OTHER — do NOT always use callouts; pick the catalog component that best fits this code (stepper, definition cards, metric row, mini comparison table, concept-vs-example, feature list, chip cloud). Those are the only two blocks. NEVER a table cell or an image of code. NO {{IMAGE_PLACEHOLDER}} / <img>. `
                     : isCodeSlide
                     ? `CODE slide: the ENTIRE body is ONE .code-card (header + <pre><code>, real line breaks) — NEVER a table cell or plain text. A REAL, COMPLETE, working snippet up to ~50 lines is fine (it auto-scrolls in sync with narration — never fake-truncate it). NO {{IMAGE_PLACEHOLDER}} / <img>. `
                     : `Include ONE {{IMAGE_PLACEHOLDER}} where it genuinely helps, kept SMALL (~28-30% side column, max-height 300px) unless the component is image-free. `)
+                + `🔴 DENSITY: every item in the component (row / card / step / callout / metric / node) MUST carry a bold title PLUS a real one-line detail (8-14 words) that teaches — bare 2-3 word labels are a FAILED slide. `
                 + `Type pairing: ${SLIDE_TYPE_PAIRS[si % SLIDE_TYPE_PAIRS.length]}. Accent color: ${SLIDE_ACCENTS[si % SLIDE_ACCENTS.length]}.`,
             // ── The user's requested change — the whole point of this endpoint ──
             userChangeRequest: instruction,

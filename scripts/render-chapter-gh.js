@@ -621,13 +621,26 @@ function buildRevealDeckHtml(html, baseUrl) {
       }
       if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
       else boot();
+      // STEPPED code scroll: instead of a continuous linear crawl (which never
+      // lets the viewer actually read), we page through the code — DWELL on each
+      // screenful so it can be read, then a quick eased slide up to the next page.
       window.__scrollCodeToProgress = function (progress) {
         var body = document.querySelector('.code-card-body, .code-card pre');
         if (!body) return;
         var maxScroll = body.scrollHeight - body.clientHeight;
-        if (maxScroll <= 0) return;
-        var p = Math.max(0, Math.min(1, progress));
-        body.scrollTop = maxScroll * p;
+        if (maxScroll <= 1) { body.scrollTop = 0; return; }
+        var page   = Math.max(60, body.clientHeight * 0.88);      // advance ~one screen (slight overlap for context)
+        var nSteps = Math.max(1, Math.ceil(maxScroll / page));    // how many page-slides to reach the bottom
+        var DWELL  = 0.72;                                        // read for 72% of each page's time, then fast-slide
+        var p      = Math.max(0, Math.min(1, progress));
+        var phaseF = p * nSteps;                                  // 0..nSteps
+        var k      = Math.min(nSteps - 1, Math.floor(phaseF));    // current page index
+        var into   = phaseF - k;                                  // 0..1 within this page's time slice
+        var from   = Math.min(maxScroll, k * page);
+        var to     = Math.min(maxScroll, (k + 1) * page);
+        var slide  = into <= DWELL ? 0 : (into - DWELL) / (1 - DWELL);
+        var e      = slide <= 0 ? 0 : (slide >= 1 ? 1 : (1 - Math.pow(1 - slide, 3))); // snappy ease-out
+        body.scrollTop = from + (to - from) * e;
       };
     })();
   `;

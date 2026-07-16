@@ -1040,7 +1040,9 @@ HARD RULES:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 The SLIDE shows only the skeleton; the full teaching happens in the narration (voiceover). Keep on-screen text short so it fits one screen and stays readable:
 - Headline: ≤ 8 words. Kicker: 1-3 words. Dek/lead: ≤ 14 words, one line.
-- Any component: MAX ~4 rows / 3 cards / 4 bars / 4 steps. Each label ≤ 6-8 words. NO paragraphs on the slide (a single ≤14-word caption is fine).
+- Any component: MAX ~4 rows / 3 cards / 4 bars / 4 steps. NO wall-of-text paragraphs on the slide.
+- 🔴 DENSITY IS MANDATORY FOR EVERY COMPONENT (not just code companions) — this is the #1 rule. A bare 2-3 word title floating alone is FORBIDDEN. EVERY item in EVERY component — every table cell, callout, stepper step, metric, definition card, timeline node, feature-list row, comparison column, chip's neighbours — MUST carry a SHORT BOLD TITLE (≤ 5 words) **PLUS** a real one-line supporting detail (8-14 words) that TEACHES: what it does / why it matters / a concrete example or value. Example of RIGHT: "**Key lookup** — d[k] returns the value for key k in O(1), raises KeyError if the key is absent." Example of WRONG (too thin, never do this): "Key lookup". If a component has 3 items, that's 3 title+detail pairs — never 3 lone titles. A slide whose components are just short labels with no detail lines is a FAILED slide.
+- The ONLY exceptions to the title+detail rule are tag/chip clouds (single-word pills by design) and the headline/kicker. Everything else gets the detail line.
 - CODE: at most ONE code block, up to ~30 lines (it auto-scrolls in sync with narration — a real, complete snippet is fine), and it is then the ENTIRE body (no second code block, no side panels next to it). NEVER show two code blocks or code+output+problem all on one slide — split that across slides or keep only the single most important snippet. (EXCEPTION: a "CODE + …" archetype pairs the ONE .code-card with ONE small companion component — numbered callouts or a stepper — in a 2-column body. Still only ONE code block; the companion is NOT a second code block.)
 - Prefer numbers, short phrases, keywords — never sentences stacked into a wall of text.
 - READABLE FLOORS (never smaller): body/labels ≥ 15px, secondary captions ≥ 13px, footnote ≥ 12px. If text must shrink below these to fit, you have too much data — cut it.
@@ -1149,8 +1151,8 @@ M) NUMBERED STEPPER — vertical steps joined by a spine (for sequences/how-to):
 <div style='display:flex;flex-direction:column;gap:18px;'>
   <div style='display:flex;gap:18px;align-items:flex-start;'>
     <div style='width:34px;height:34px;border-radius:50%;background:linear-gradient(135deg,#6D5BD3,#3EA5D6);display:flex;align-items:center;justify-content:center;font-weight:700;flex-shrink:0;'>1</div>
-    <div><div style='font-weight:700;font-size:17px;'>Step title</div><div style='font-size:14px;color:#9fb3d1;'>One-line detail.</div></div></div>
-  …3-4 steps…
+    <div><div style='font-weight:700;font-size:17px;'>Step title</div><div style='font-size:14px;color:#9fb3d1;line-height:1.5;'>A full one-line detail (≤14 words) that explains what happens in this step and why — a concrete verb + object, not just a restated title.</div></div></div>
+  …3-4 steps, EACH with a real detail line (title alone is NOT enough)…
 </div>
 
 N) TAG / CHIP CLOUD — key concepts as pills (fast overview / glossary):

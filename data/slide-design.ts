@@ -48,6 +48,7 @@ export const SLIDE_ARCHETYPES = [
     "CODE + EXPLAIN — a 2-column body: a syntax-highlighted .code-card (a real complete snippet, up to ~20 lines, auto-scrolls) on one side and 2-3 short numbered takeaways on the other; for explaining what a snippet does",
     "CODE + CALLOUTS — a 2-column body: a syntax-highlighted .code-card (a real complete snippet, up to ~20 lines, auto-scrolls) on one side and 2-3 numbered callout cards (circular number + bold label + one-line detail) on the other; each callout maps to a part of the code",
     "CODE + STEPS — a 2-column body: a syntax-highlighted .code-card (a real complete snippet, up to ~20 lines, auto-scrolls) on one side and a compact 3-4 step NUMBERED STEPPER (circular numbers joined by a spine) on the other; for code that follows a sequence of stages",
+    "CODE + COMPANION — a 2-column body: a syntax-highlighted .code-card (a real complete snippet, up to ~20 lines, auto-scrolls) on one side and ONE companion component chosen from the catalog on the other (metric row, definition cards, mini comparison table, tag/chip cloud, concept-vs-example, mini bar-chart, feature list) — pick whichever FITS the code, NOT always callouts. The companion must be DENSE: every item carries a bold title + a real one-line detail.",
     "MERMAID DIAGRAM — a REAL rendered Mermaid flowchart/sequence/state diagram (diagram-as-code, never hand-drawn boxes) for processes, algorithms, state machines, or architecture; ≤ 3 words per node label",
     "LIVE CHART — a REAL Chart.js bar/line/pie/doughnut chart (never a hand-CSS'd bar approximation) for genuine numeric/statistical comparisons; 3-6 data points",
     "FORMULA / MATH CALLOUT — one REAL KaTeX-rendered formula or equation, large and centered, with a short one-line explanation beneath; for math, algorithm complexity, or scientific notation",
@@ -75,8 +76,8 @@ export const SLIDE_ACCENTS = ["#6D5BD3", "#3EA5D6", "#E0653A", "#E8B84B", "#2FA9
 export function pickArchetype(chapterIndex: number, si: number): string {
     if (si === 0) return SLIDE_ARCHETYPES[0]; // INTRO is always a COVER
     const n = SLIDE_ARCHETYPES.length;
-    const STRIDE = 7;                          // co-prime with the catalog length
-    const offset = 1 + chapterIndex * 5;       // each chapter starts at a different archetype
+    const STRIDE = 8;                          // co-prime with the catalog length (35)
+    const offset = 1 + chapterIndex * 3;       // each chapter starts at a different archetype (3 co-prime with 35)
     let idx = (offset + si * STRIDE) % n;
     if (idx === 0) idx = 1;                     // never reuse COVER for a non-intro slide
     return SLIDE_ARCHETYPES[idx];
@@ -95,8 +96,8 @@ export function componentName(archetype: string): string {
  */
 export function pickNonCodeArchetype(chapterIndex: number, si: number): string {
     const n = SLIDE_ARCHETYPES.length;
-    const STRIDE = 7;
-    const offset = 1 + chapterIndex * 5;
+    const STRIDE = 8;
+    const offset = 1 + chapterIndex * 3;
     for (let step = 0; step < n; step++) {
         let idx = (offset + (si + step) * STRIDE) % n;
         if (idx === 0) idx = 1;
