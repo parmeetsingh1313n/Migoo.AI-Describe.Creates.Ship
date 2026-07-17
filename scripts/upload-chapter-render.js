@@ -23,7 +23,8 @@ const path = require('path');
 async function upload() {
   const chapterId  = process.env.CHAPTER_ID;
   const webhookUrl = process.env.WEBHOOK_URL;
-  const endpoint   = (process.env.APPWRITE_VIDEO_ENDPOINT ?? process.env.APPWRITE_ENDPOINT ?? '').replace(/\/$/, '');
+  // Use only the APPWRITE_VIDEO_* variables (the dedicated video workspace).
+  const endpoint   = (process.env.APPWRITE_VIDEO_ENDPOINT ?? '').replace(/\/$/, '');
   const projectId  = process.env.APPWRITE_VIDEO_PROJECT_ID;
   const apiKey     = process.env.APPWRITE_VIDEO_API_KEY;
   const bucketId   = process.env.APPWRITE_VIDEO_BUCKET_ID;
@@ -36,11 +37,6 @@ async function upload() {
     await notify(webhookUrl, chapterId, null, 'failed', 'CHAPTER_ID env var missing');
     process.exit(1);
   }
-  if (!endpoint || !projectId || !apiKey || !bucketId) {
-    console.error('❌ Missing Appwrite env vars (APPWRITE_VIDEO_ENDPOINT / PROJECT_ID / API_KEY / BUCKET_ID)');
-    await notify(webhookUrl, chapterId, null, 'failed', 'Appwrite env vars missing on runner');
-    process.exit(1);
-  }
   if (!fs.existsSync(filePath)) {
     console.error('❌ Rendered file not found:', filePath);
     await notify(webhookUrl, chapterId, null, 'failed', 'Rendered MP4 file not found on runner');
@@ -48,6 +44,8 @@ async function upload() {
   }
 
   // ── GitHub Release upload (primary path for large files) ─────────────────
+  // NOTE: runs BEFORE the Appwrite env guard — this path needs no Appwrite
+  // credentials, so missing Appwrite secrets must not kill a finished render.
   const repo    = process.env.GITHUB_REPOSITORY;
   const ghToken = process.env.GITHUB_TOKEN;
 
@@ -81,6 +79,13 @@ async function upload() {
   }
 
   // ── Appwrite upload ───────────────────────────────────────────────────────
+  // Guard here (not at the top) so the GitHub Release path above can succeed
+  // even when Appwrite secrets are absent.
+  if (!endpoint || !projectId || !apiKey || !bucketId) {
+    console.error('❌ Missing Appwrite env vars (APPWRITE_VIDEO_ENDPOINT / PROJECT_ID / API_KEY / BUCKET_ID)');
+    await notify(webhookUrl, chapterId, null, 'failed', 'GitHub upload unavailable and Appwrite env vars missing on runner');
+    process.exit(1);
+  }
   const client  = new sdk.Client().setEndpoint(endpoint).setProject(projectId).setKey(apiKey);
   const storage = new sdk.Storage(client);
 

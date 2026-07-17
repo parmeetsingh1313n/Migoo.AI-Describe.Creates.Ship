@@ -79,13 +79,13 @@ jobs:
       # ── 7. Upload MP4 to Appwrite + call webhook ──────────────────────────────
       - name: Upload rendered video & notify app
         env:
-          GITHUB_TOKEN:        ${{ secrets.GITHUB_TOKEN }}
-          APPWRITE_ENDPOINT:   ${{ secrets.APPWRITE_VIDEO_ENDPOINT || secrets.APPWRITE_ENDPOINT }}
-          APPWRITE_PROJECT_ID: ${{ secrets.APPWRITE_VIDEO_PROJECT_ID }}
-          APPWRITE_API_KEY:    ${{ secrets.APPWRITE_VIDEO_API_KEY }}
-          APPWRITE_BUCKET_ID:  ${{ secrets.APPWRITE_VIDEO_BUCKET_ID }}
-          CHAPTER_ID:          ${{ github.event.client_payload.chapterId }}
-          WEBHOOK_URL:         ${{ github.event.client_payload.webhookUrl }}
+          GITHUB_TOKEN:              ${{ secrets.GITHUB_TOKEN }}
+          APPWRITE_VIDEO_ENDPOINT:   ${{ secrets.APPWRITE_VIDEO_ENDPOINT }}
+          APPWRITE_VIDEO_PROJECT_ID: ${{ secrets.APPWRITE_VIDEO_PROJECT_ID }}
+          APPWRITE_VIDEO_API_KEY:    ${{ secrets.APPWRITE_VIDEO_API_KEY }}
+          APPWRITE_VIDEO_BUCKET_ID:  ${{ secrets.APPWRITE_VIDEO_BUCKET_ID }}
+          CHAPTER_ID:                ${{ github.event.client_payload.chapterId }}
+          WEBHOOK_URL:               ${{ github.event.client_payload.webhookUrl }}
         run: node scripts/upload-chapter-render.js
 
       # ── 8. Failure notification ───────────────────────────────────────────────
