@@ -24,7 +24,9 @@ async function upload() {
   const chapterId  = process.env.CHAPTER_ID;
   const webhookUrl = process.env.WEBHOOK_URL;
   // Use only the APPWRITE_VIDEO_* variables (the dedicated video workspace).
-  const endpoint   = (process.env.APPWRITE_VIDEO_ENDPOINT ?? '').replace(/\/$/, '');
+  // Endpoint is a fixed, non-secret Appwrite Cloud URL — default it so a
+  // missing APPWRITE_VIDEO_ENDPOINT secret can't kill a finished render.
+  const endpoint   = (process.env.APPWRITE_VIDEO_ENDPOINT || 'https://fra.cloud.appwrite.io/v1').replace(/\/$/, '');
   const projectId  = process.env.APPWRITE_VIDEO_PROJECT_ID;
   const apiKey     = process.env.APPWRITE_VIDEO_API_KEY;
   const bucketId   = process.env.APPWRITE_VIDEO_BUCKET_ID;
