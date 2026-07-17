@@ -858,7 +858,10 @@ export async function GET(req: NextRequest) {
   const fetchData = req.nextUrl.searchParams.get('fetchData') === 'true';
   if (fetchData) {
     const authHeader = req.headers.get('x-appwrite-key') || req.headers.get('Authorization')?.replace('Bearer ', '');
-    if (!authHeader || authHeader !== process.env.APPWRITE_API_KEY) {
+    // Accept either the general key or the dedicated video key — the GitHub
+    // Actions render job sends APPWRITE_VIDEO_API_KEY (see render-chapter.yml).
+    const validKeys = [process.env.APPWRITE_API_KEY, process.env.APPWRITE_VIDEO_API_KEY].filter(Boolean);
+    if (!authHeader || !validKeys.includes(authHeader)) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
