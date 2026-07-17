@@ -422,7 +422,15 @@ ${content}
 // CINEMATIC=0 to force the old fast frozen-screenshot engine (fallback/testing).
 const CINEMATIC = String(process.env.CINEMATIC ?? payload.cinematic ?? '').trim() !== '0'
   && payload.cinematic !== false;
-const CINE_FPS = 30;
+// Capture/encode FPS. 24 (film standard) keeps eyeball pans smooth while cutting
+// ~20% of the per-frame screenshots vs 30. Override with CINE_FPS env if needed.
+// NOTE: makeClip + fallbacks all use CINE_FPS too, so every clip shares one fps
+// and the final `concat -c copy` stays valid (mixed-fps concat can glitch).
+const CINE_FPS = Math.max(10, parseInt(process.env.CINE_FPS ?? '24', 10) || 24);
+// Intermediate frame format. JPEG is 2-3x faster to capture+encode than PNG for
+// full-frame gradient/blur slides; the final H.264 pass is lossy anyway so q85 is
+// visually indistinguishable. Set CINE_FRAME_PNG=1 to force lossless PNG frames.
+const CINE_FRAME_EXT = String(process.env.CINE_FRAME_PNG ?? '').trim() === '1' ? 'png' : 'jpg';
 
 // Inlined here (this is a standalone CI script that can't import the TS lib) —
 // KEEP IN SYNC with lib/reveal-doc.ts CINEMATIC_DIRECTOR_SCRIPT + COMPONENT_ANIMATION_STYLES.
@@ -808,12 +816,14 @@ async function captureRevealDeckCinematic(browser, slide, baseUrl, timeline, tot
 
     const totalFrames = Math.max(1, Math.round(totalSec * CINE_FPS));
     const pad = (n) => String(n).padStart(5, '0');
+    const isJpg = CINE_FRAME_EXT === 'jpg';
     for (let f = 0; f < totalFrames; f++) {
       const t = f / CINE_FPS;
       await page.evaluate((tt) => { if (window.__seekTo) window.__seekTo(tt); }, t);
       await page.screenshot({
-        path: path.join(framesDir, `f${pad(f)}.png`),
-        type: 'png',
+        path: path.join(framesDir, `f${pad(f)}.${CINE_FRAME_EXT}`),
+        type: isJpg ? 'jpeg' : 'png',
+        ...(isJpg ? { quality: 85, optimizeForSpeed: true } : {}),
         clip: { x: 0, y: 0, width: 1440, height: 720 },
       });
     }
@@ -966,7 +976,7 @@ async function renderSlide(i, slide, totalSlides) {
   } else if (intervalClips.length > 1) {
     await concat(intervalClips, slideClip);
   } else {
-    await execAsync(`"${getFFmpeg()}" -y -f lavfi -i color=c=black:s=1440x720:r=30:d=${totalSec.toFixed(3)} -f lavfi -i anullsrc=r=44100:cl=stereo -c:v libx264 -c:a aac -t ${totalSec.toFixed(3)} "${slideClip}"`).catch(() => {});
+    await execAsync(`"${getFFmpeg()}" -y -f lavfi -i color=c=black:s=1440x720:r=${CINE_FPS}:d=${totalSec.toFixed(3)} -f lavfi -i anullsrc=r=44100:cl=stereo -c:v libx264 -c:a aac -r ${CINE_FPS} -t ${totalSec.toFixed(3)} "${slideClip}"`).catch(() => {});
   }
 
   console.log(`  ✅ Slide ${i + 1} complete`);
@@ -1002,9 +1012,11 @@ async function render() {
 
   // Option 1: PARALLEL slide rendering — all slides processed simultaneously
   // Each slide gets its own Puppeteer browser + FFmpeg processes
-  // Cinematic mode writes hundreds of PNG frames per slide, so run fewer in
-  // parallel to keep disk + memory bounded on a 7GB runner.
-  const CONCURRENCY = Math.min(totalSlides, CINEMATIC ? 2 : 4);
+  // Cinematic mode writes hundreds of frames per slide; JPEG frames are ~10x
+  // smaller on disk than PNG, so we can safely run 3 slides in parallel (was 2)
+  // while keeping disk + memory bounded on a 7GB runner. Override with CINE_CONCURRENCY.
+  const cineConc = Math.max(1, parseInt(process.env.CINE_CONCURRENCY ?? '3', 10) || 3);
+  const CONCURRENCY = Math.min(totalSlides, CINEMATIC ? cineConc : 4);
   const results = [];
 
   // Process in batches of CONCURRENCY
@@ -1113,10 +1125,10 @@ async function makeClip(imgPath, audioPath, audioStart, duration, out, prevImgPa
 
   const cmd = [
     `"${ff}" -y`,
-    hasPrev ? `-loop 1 -framerate 30 -t ${duration.toFixed(3)} -i "${prevImgPath}"` : '',
-    `-loop 1 -framerate 30 -t ${duration.toFixed(3)} -i "${imgPath}"`,
+    hasPrev ? `-loop 1 -framerate ${CINE_FPS} -t ${duration.toFixed(3)} -i "${prevImgPath}"` : '',
+    `-loop 1 -framerate ${CINE_FPS} -t ${duration.toFixed(3)} -i "${imgPath}"`,
     `-ss ${audioStart.toFixed(3)} -t ${duration.toFixed(3)} -i "${audioPath}"`,
-    `-c:v libx264 -preset fast -crf 28 -tune stillimage -pix_fmt yuv420p`,
+    `-c:v libx264 -preset fast -crf 28 -tune stillimage -pix_fmt yuv420p -r ${CINE_FPS}`,
     hasPrev
       ? `-filter_complex "[1:v]format=yuva420p,fade=t=in:st=0:d=${fd.toFixed(3)}:alpha=1[fadein];[0:v][fadein]overlay=x=0:y=0,scale=1440:720:force_original_aspect_ratio=decrease,pad=1440:720:(ow-iw)/2:(oh-ih)/2,setsar=1"`
       : `-vf "scale=1440:720:force_original_aspect_ratio=decrease,pad=1440:720:(ow-iw)/2:(oh-ih)/2,setsar=1"`,
@@ -1134,7 +1146,7 @@ async function makeClip(imgPath, audioPath, audioStart, duration, out, prevImgPa
 // final `concat -c copy` can stream-copy every slide clip without re-encoding.
 async function encodeFrameSequence(framesDir, audioPath, durationSec, out) {
   const ff = getFFmpeg();
-  const pattern = path.join(framesDir, 'f%05d.png').replace(/\\/g, '/');
+  const pattern = path.join(framesDir, `f%05d.${CINE_FRAME_EXT}`).replace(/\\/g, '/');
   const cmd = [
     `"${ff}" -y`,
     `-framerate ${CINE_FPS} -i "${pattern}"`,
