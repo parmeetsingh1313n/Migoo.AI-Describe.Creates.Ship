@@ -1007,9 +1007,9 @@ export async function DELETE(req: NextRequest) {
   // 4. Delete file based on mode / videoUrl format
   if (isGitHubActionsMode()) {
     const endpoint = (process.env.APPWRITE_ENDPOINT ?? '').replace(/\/$/, '');
-    const projectId = process.env.APPWRITE_VIDEO_PROJECT_ID || process.env.APPWRITE_PROJECT_ID;
-    const apiKey = process.env.APPWRITE_VIDEO_API_KEY || process.env.APPWRITE_API_KEY;
-    const bucketId = process.env.APPWRITE_VIDEO_BUCKET_ID || process.env.APPWRITE_BUCKET_ID;
+    const projectId = process.env.APPWRITE_VIDEO_PROJECT_ID;
+    const apiKey = process.env.APPWRITE_VIDEO_API_KEY;
+    const bucketId = process.env.APPWRITE_VIDEO_BUCKET_ID;
 
     if (endpoint && projectId && apiKey && bucketId) {
       try {
