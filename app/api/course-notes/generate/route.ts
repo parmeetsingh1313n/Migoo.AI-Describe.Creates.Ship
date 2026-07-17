@@ -322,12 +322,12 @@ Return ONLY the raw JSON array of strings.`;
 
         try {
             const [notesResult, promptsResult] = await Promise.all([
-                // 1. Notes Content Generation (Mistral primary, gpt-oss-120b + llama fallbacks)
+                // 1. Notes Content Generation (GLM-5.2 primary, gpt-oss-120b + llama fallbacks)
                 (async () => {
                     try {
-                        return await callOpenRouter('mistralai/mistral-large-3-675b-instruct-2512');
+                        return await callOpenRouter('z-ai/glm-5.2');
                     } catch (primaryErr) {
-                        console.warn('⚠️ Mistral failed, falling back to gpt-oss-120b for notes:', primaryErr);
+                        console.warn('⚠️ GLM-5.2 failed, falling back to gpt-oss-120b for notes:', primaryErr);
                         try {
                             return await callOpenRouter('openai/gpt-oss-120b');
                         } catch (superErr) {
@@ -336,12 +336,12 @@ Return ONLY the raw JSON array of strings.`;
                         }
                     }
                 })(),
-                // 2. Prompts Generation via Mistral primary, with fallbacks
+                // 2. Prompts Generation via GLM-5.2 primary, with fallbacks
                 (async () => {
                     try {
-                        return await callOpenRouterForPrompts('mistralai/mistral-large-3-675b-instruct-2512', chapterTitle, slideContents);
+                        return await callOpenRouterForPrompts('z-ai/glm-5.2', chapterTitle, slideContents);
                     } catch (err) {
-                        console.warn('⚠️ Mistral prompts failed, trying gpt-oss-120b:', err);
+                        console.warn('⚠️ GLM-5.2 prompts failed, trying gpt-oss-120b:', err);
                         try {
                             return await callOpenRouterForPrompts('openai/gpt-oss-120b', chapterTitle, slideContents);
                         } catch (superErr) {

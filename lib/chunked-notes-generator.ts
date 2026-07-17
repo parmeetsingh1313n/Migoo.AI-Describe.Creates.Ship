@@ -33,8 +33,8 @@ interface ModelTier {
 
 const TIERS: ModelTier[] = [
     {
-        // Tier 1: mistralai/mistral-large-3-675b-instruct-2512 (primary, best quality)
-        model: "mistralai/mistral-large-3-675b-instruct-2512",
+        // Tier 1: z-ai/glm-5.2 (primary, best quality)
+        model: "z-ai/glm-5.2",
         maxContentChars: 300_000,
         maxOutputTokens: 12_000,
         headChars: 10_000,

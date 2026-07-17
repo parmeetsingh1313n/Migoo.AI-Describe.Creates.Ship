@@ -16,7 +16,7 @@
 
 - **Remotion** (`remotion/MotionGraphicComposition.tsx`, `remotion/Root.tsx`, `remotion/lib/motion.tsx`) — programmatic video via React + `useCurrentFrame`, `interpolate`, `spring`, `Sequence`, `AbsoluteFill`, `OffthreadVideo`, `Audio`. **35 scene types** dispatched by a `SceneRenderer`.
 - **@remotion/player** — client-side live preview identical to the render.
-- **Dedicated LLM client** — `lib/motion-graphics-llm.ts` (NVIDIA NIM: Mistral-Large-3-675B primary → GPT-oss-120b → Llama-3.3-70B; in-process key rotation; a premium model for cinematic voiceover rewriting). Separate from the course router and shorts LLM because it needs large, HTML-attribute-safe JSON scene arrays.
+- **Dedicated LLM client** — `lib/motion-graphics-llm.ts` (NVIDIA NIM: GLM-5.2 primary → GPT-oss-120b → Llama-3.3-70B; in-process key rotation; a premium model for cinematic voiceover rewriting). Separate from the course router and shorts LLM because it needs large, HTML-attribute-safe JSON scene arrays.
 - **Theme system** — `lib/theme-palette.ts` resolves preset/custom palettes into a concrete color set fed into every scene.
 - **Groq Vision** — classifies user-uploaded assets (`logo | screenshot | product | person | other`) so an uploaded logo lands in `logo_reveal`/`call_to_action` scenes and a screenshot lands in mockup scenes.
 - **Sarvam TTS** — optional voiceover (`voiceoverEnabled`, `voice`, `language`).

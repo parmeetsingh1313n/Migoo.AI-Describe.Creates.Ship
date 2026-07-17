@@ -304,7 +304,7 @@ Clerk. `app/layout.tsx` wraps in a provider; `app/provider.tsx` lazily upserts t
 | App framework | **Next.js 16** (App Router, route handlers, RSC) |
 | Auth | **Clerk** (`currentUser()`, ownership guards on every mutating route) |
 | Durable background jobs | **Inngest** (`step.run` orchestration, concurrency limits, event fan-out) |
-| LLMs | **OpenRouter** — `mistralai/mistral-large-3-675b` (course layout), `z-ai/glm-5.2` (slides, topic expansion, regen) |
+| LLMs | **OpenRouter** — `z-ai/glm-5.2` (course layout, slides, topic expansion, regen) |
 | RAG grounding | **Tavily** (`fetchSlideResearch`) — live web facts per slide |
 | TTS | **Sarvam AI** (`bulbul:v3`, `en-IN`, MP3 output, multi-key rotation) |
 | Slides engine | **reveal.js** (self-hosted `/public/reveal`) + KaTeX, Mermaid, Chart.js, mark.js, Typed.js |
@@ -320,7 +320,7 @@ Clerk. `app/layout.tsx` wraps in a provider; `app/provider.tsx` lazily upserts t
 ### 3. Pipeline, stage by stage (exact file + function)
 
 **Stage 0 — Course config**
-`app/api/generate-course-layout/route.ts` → `POST`. Validates input (Zod), calls `openrouter.json(COURSE_CONFIG_PROMPT, userInput, { model: "mistralai/mistral-large-3-675b-instruct-2512" })`, validates the chapter/subContent shape, inserts into `coursesTable`, and fires `/api/generate-thumbnail` fire-and-forget.
+`app/api/generate-course-layout/route.ts` → `POST`. Validates input (Zod), calls `openrouter.json(COURSE_CONFIG_PROMPT, userInput, { model: "z-ai/glm-5.2" })`, validates the chapter/subContent shape, inserts into `coursesTable`, and fires `/api/generate-thumbnail` fire-and-forget.
 
 **Stage 1 — Images (per slide, in parallel)**
 `inngest/course-functions.ts` → `generateCourseImagesFn` (event `course/images.generate`). Expands each chapter's `subContent` via `expandChapterTopics()`, computes a **global slide index** `chIdx * MAX_SLIDES_PER_CHAPTER + slideIdx` (25) so each slide maps 1:1 to its own image, generates in batches of 6, uploads webp to Appwrite, inserts into `courseImages`, then runs a **retroactive injection pass** to replace `{{IMAGE_PLACEHOLDER}}` tokens in any slides already written.
@@ -361,7 +361,7 @@ The **cinematic director** (`CINEMATIC_DIRECTOR_SCRIPT` in `lib/reveal-doc.ts`, 
 | File | What it does | Why it exists |
 |---|---|---|
 | `app/_components/Hero.tsx` | Topic/type/voice input; `POST /api/generate-course-layout`; routes to course page | Course-creation entry point |
-| `app/api/generate-course-layout/route.ts` | LLM course config (Mistral-large) → `coursesTable`; fires thumbnail | Stage 0 — curriculum |
+| `app/api/generate-course-layout/route.ts` | LLM course config (GLM-5.2) → `coursesTable`; fires thumbnail | Stage 0 — curriculum |
 | `app/api/course/route.ts` | Fetch course + its slides (with legacy-DB fallback) | Reads course/slide data for the viewer |
 | `app/api/course-layout/route.ts` | `PATCH` a chapter's `subContent` in the layout JSON | Persists Outline Editor edits pre-generation |
 | `app/api/generate-images/route.ts` | Thin dispatcher → `course/images.generate` | Non-blocking image kickoff |
@@ -599,7 +599,7 @@ They're treated as **non-fatal enhancements** where possible: thumbnail failure 
 
 - **Sarvam AI** — the single vendor for both **TTS** (`bulbul:v3` model, `/text-to-speech`) and **STT/captions** (`saaras:v3` batch Speech-to-Text job with `withTimestamps: true`). Wrapped in `config/sarvam.ts` and re-implemented inline in `inngest/functions.ts` (`callSarvamTTS`).
 - **Word-level caption alignment** — Sarvam batch STT returns per-word timestamps; the pipeline groups them into ~6-word segments. (Note: the prompt mentions AssemblyAI, but this codebase uses **Sarvam `saaras:v3`** for word timestamps.)
-- **Script LLM** — NVIDIA NIM (`lib/shorts-llm.ts`): Mistral-Large-3-675B primary, GPT-oss-120b + Llama-3.3-70B fallbacks, with in-process API-key rotation.
+- **Script LLM** — NVIDIA NIM (`lib/shorts-llm.ts`): GLM-5.2 primary, GPT-oss-120b + Llama-3.3-70B fallbacks, with in-process API-key rotation and a CJK/Cyrillic language-leak guard.
 - **Image generation** — Apify actor `fayoussef/bulk-ai-image-generator` running Gemini 2.5 Flash Image ("Nano Banana"), fallback Gemini 3.1 Flash preview, ultimate fallback WaveSpeed GPT-Image-2 (`lib/apify-image.ts`).
 - **Image-to-video** — currently **Apify Wan 2.2 I2V-A14B-Lightning** (`lib/apify-video.ts`, actor `p215uhRBVXpONQfS8`). Legacy provider modules for **Pollo Seedance** (`pollo.ts`/`pollo-video.ts`), **Leonardo Kling 2.5 Turbo** (`leonardo-video.ts`), and **Runway** (`runway.ts`) remain in the repo. The Inngest code calls `submitSeedanceVideoTask`/`checkPolloVideoTaskStatus` names that are now **drop-in stubs exported from `apify-video.ts`** — the provider was swapped without renaming call sites.
 - **Inngest** — multi-step durable pipeline (`generateShortVideo`) that survives Vercel's serverless timeout by checkpointing each step; **`shortVideoProgress`** DB table gives cross-retry idempotency for paid video tasks.
@@ -619,7 +619,7 @@ Handler: **`generateShortVideo`** in `inngest/functions.ts` (id `generate-short-
 | 1.5 | `fetch-covered-topics`, `research-topic-ideas`, `pick-unique-topic` | Fetch already-covered titles, fast Tavily+Wikipedia snippet research, then an LLM picks a unique non-repeated topic (skipped if `customTopic`/studio title given). |
 | 1.8 | `run-web-research`, `distill-fact-sheet` | Deep-crawl RAG (crawl separated from LLM distillation so each gets a fresh timeout window) → verified fact sheet. |
 | 2a | `generate-video-script-reasoning` | Phase-1 free-form reasoning pass (6 scenes, narrative arc, bridging, honorifics rules). |
-| 2b | `generate-video-script` | Phase-2 JSON pass with **key1** (Mistral then GPT-120b, one shot each). Returns `null` to signal retry. |
+| 2b | `generate-video-script` | Phase-2 JSON pass with **key1** (GLM-5.2 then GPT-120b, one shot each). Returns `null` to signal retry. |
 | 2c | `generate-video-script-retry` | Fires only if 2b returned null — retries with **key2** in a fresh Vercel invocation. |
 | 2.5 | `translate-title`, `translate-scene-narration-{i}` | Per-scene translation steps if `language` isn't English. |
 | 3 | `generate-voice-scene-{i}` → `merge-and-upload-audio` | **One Sarvam TTS step per scene** (checkpointed), chunked at 2200 chars, WAV buffers merged. |
@@ -817,7 +817,7 @@ Pre-made HeyGen intro/outro clips have fixed lengths; Sarvam TTS won't match exa
 
 - **Remotion** (`remotion/MotionGraphicComposition.tsx`, `remotion/Root.tsx`, `remotion/lib/motion.tsx`) — programmatic video via React + `useCurrentFrame`, `interpolate`, `spring`, `Sequence`, `AbsoluteFill`, `OffthreadVideo`, `Audio`. **35 scene types** dispatched by a `SceneRenderer`.
 - **@remotion/player** — client-side live preview identical to the render.
-- **Dedicated LLM client** — `lib/motion-graphics-llm.ts` (NVIDIA NIM: Mistral-Large-3-675B primary → GPT-oss-120b → Llama-3.3-70B; in-process key rotation; a premium model for cinematic voiceover rewriting). Separate from the course router and shorts LLM because it needs large, HTML-attribute-safe JSON scene arrays.
+- **Dedicated LLM client** — `lib/motion-graphics-llm.ts` (NVIDIA NIM: GLM-5.2 primary → GPT-oss-120b → Llama-3.3-70B; in-process key rotation; a premium model for cinematic voiceover rewriting). Separate from the course router and shorts LLM because it needs large, HTML-attribute-safe JSON scene arrays.
 - **Theme system** — `lib/theme-palette.ts` resolves preset/custom palettes into a concrete color set fed into every scene.
 - **Groq Vision** — classifies user-uploaded assets (`logo | screenshot | product | person | other`) so an uploaded logo lands in `logo_reveal`/`call_to_action` scenes and a screenshot lands in mockup scenes.
 - **Sarvam TTS** — optional voiceover (`voiceoverEnabled`, `voice`, `language`).
@@ -939,7 +939,7 @@ return <Sequence from={scene.startFrame} durationInFrames={scene.durationInFrame
 
 ### 2. Tech stack in THIS module
 
-- **Chunked LLM generation** — `lib/chunked-notes-generator.ts`: a **tiered model strategy** (Mistral-Large-3-675B → GPT-oss-120b → Llama-3.3-70B) with a **smart content sampler** that fits long documents into the model's context (head + evenly-distributed section excerpts + tail).
+- **Chunked LLM generation** — `lib/chunked-notes-generator.ts`: a **tiered model strategy** (GLM-5.2 → GPT-oss-120b → Llama-3.3-70B) with a **smart content sampler** that fits long documents into the model's context (head + evenly-distributed section excerpts + tail).
 - **Groq Vision** — `analyzeImageWithGroq` (llama-4-scout) extracts text/data/structure from uploaded images/charts so they can be referenced in notes; auto-converts AVIF/HEIC/TIFF → JPEG via `sharp`.
 - **Sarvam Document Intelligence** — for document extraction (via the shared `sarvam-doc` job flow).
 - **Client-side export** — `html-to-image` / `html2canvas-pro` → PNG, `jsPDF` / `pdf-lib` → PDF.
@@ -982,7 +982,7 @@ return <Sequence from={scene.startFrame} durationInFrames={scene.durationInFrame
 **a. Tiered model strategy** (`lib/chunked-notes-generator.ts`):
 ```ts
 const TIERS = [
-  { model: "mistralai/mistral-large-3-675b-instruct-2512", maxContentChars: 300_000, maxOutputTokens: 12_000, headChars: 10_000, tailChars: 5_000 },
+  { model: "z-ai/glm-5.2", maxContentChars: 300_000, maxOutputTokens: 12_000, headChars: 10_000, tailChars: 5_000 },
   { model: "openai/gpt-oss-120b",     maxContentChars: 1_200_000, /* … */ },
   { model: "meta/llama-3.3-70b-instruct", maxContentChars: 1_200_000, /* … */ },
 ];
@@ -1016,7 +1016,7 @@ if (!groqSupported.includes(mimeType)) {
 
 **Q5. How are uploaded charts/screenshots used in notes?** They're analyzed by Groq Vision (`analyzeImageWithGroq`) into a detailed text description (data points, axes, UI elements), which is fed into the generation prompt so the note can reference the image's content accurately. Unsupported formats are converted to JPEG with `sharp` first.
 
-**Q6. Why Groq here rather than the NVIDIA router?** Notes generation is text-structuring + vision, where Groq's Llama-3.3/llama-4-scout are fast and cheap on the free tier; the module explicitly uses `aiFallback`/`groq` (the header comment even says "Groq Only, NO Gemini"). The chunked generator additionally uses NVIDIA-hosted Mistral/GPT-oss/Llama tiers for the heavy structuring pass.
+**Q6. Why Groq here rather than the NVIDIA router?** Notes generation is text-structuring + vision, where Groq's Llama-3.3/llama-4-scout are fast and cheap on the free tier; the module explicitly uses `aiFallback`/`groq` (the header comment even says "Groq Only, NO Gemini"). The chunked generator additionally uses NVIDIA-hosted GLM-5.2/GPT-oss/Llama tiers for the heavy structuring pass.
 
 ---
 

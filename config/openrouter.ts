@@ -230,7 +230,7 @@ CRITICAL STRUCTURAL & DESIGN MANDATES (override defaults):
             for (let keyAttempt = 0; keyAttempt < allKeys.length; keyAttempt++) {
                 const apiKey = this.getActiveKey();
                 // Model-specific token caps — use max supported to avoid ANY truncation
-                const modelMaxTokens = model.includes('mistral-large-3-675b') || model.includes('gpt-oss-120b') || model.includes('llama-3.3')
+                const modelMaxTokens = model.includes('gpt-oss-120b') || model.includes('llama-3.3')
                     ? 65536
                     : model.includes('gpt-oss-20b')
                         ? 32768

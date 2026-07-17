@@ -2,7 +2,7 @@
  * @module motion-graphics-llm
  * @description NVIDIA NIM LLM client dedicated to the Motion Graphics pipeline.
  *
- * Primary:  mistralai/mistral-large-3-675b-instruct-2512
+ * Primary:  z-ai/glm-5.2
  * Fallback: openai/gpt-oss-120b
  * Last:     meta/llama-3.3-70b-instruct
  *
@@ -17,11 +17,11 @@
 const NVIDIA_BASE = 'https://integrate.api.nvidia.com/v1/chat/completions';
 
 // ── Model priority ────────────────────────────────────────────────────────────
-const MG_PRIMARY_MODEL     = 'mistralai/mistral-large-3-675b-instruct-2512';
+const MG_PRIMARY_MODEL     = 'z-ai/glm-5.2';
 const MG_FALLBACK_MODEL    = 'openai/gpt-oss-120b';
 const MG_LAST_RESORT_MODEL = 'meta/llama-3.3-70b-instruct';
 // Premium model dedicated to cinematic voiceover rewriting
-const MG_VOICEOVER_MODEL   = 'mistralai/mistral-large-3-675b-instruct-2512';
+const MG_VOICEOVER_MODEL   = 'z-ai/glm-5.2';
 
 // ── Key rotation (in-process, shared across requests in this server session) ──
 let _mgKeyIdx = 0;
@@ -62,7 +62,8 @@ async function callMgModel(
     apiKey: string,
 ): Promise<{ rawText: string; finishReason?: string }> {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 5 * 60 * 1000);
+    // GLM-5.2 at high reasoning effort can take longer than 5 min — give it headroom.
+    const timeout = setTimeout(() => controller.abort(), 7 * 60 * 1000);
 
     const res = await fetch(NVIDIA_BASE, {
         method: 'POST',

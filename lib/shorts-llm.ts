@@ -2,9 +2,13 @@
  * @module shorts-llm
  * @description NVIDIA NIM LLM client for Shorts script + web-search fact distillation.
  *
- * Primary:   mistralai/mistral-large-3-675b-instruct-2512  (675B MoE, creative, multilingual)
- * Fallback1: openai/gpt-oss-120b                           (117B MoE, strong reasoning)
- * Fallback2: meta/llama-3.3-70b-instruct                   (70B, fast, clean JSON)
+ * Primary:   z-ai/glm-5.2                                   (multilingual reasoning — same as course generator)
+ * Fallback1: openai/gpt-oss-120b                            (117B MoE, strong reasoning)
+ * Fallback2: meta/llama-3.3-70b-instruct                    (70B, fast, clean JSON)
+ *
+ * English-expected outputs (text/reason/json/enrich) are guarded against
+ * CJK/Cyrillic "language leakage" — a leaking response is discarded and the
+ * next model is tried (mirrors config/openrouter.ts). Translation is exempt.
  *
  * Drop-in replacement for groq.text() / aiFallback.json()
  */
@@ -12,28 +16,54 @@
 const NVIDIA_BASE = 'https://integrate.api.nvidia.com/v1/chat/completions';
 
 const MODELS_TEXT: string[] = [
-    'mistralai/mistral-large-3-675b-instruct-2512',
+    'z-ai/glm-5.2',
     'openai/gpt-oss-120b',
     'meta/llama-3.3-70b-instruct',
 ];
 
 const MODELS_JSON: string[] = [
-    'mistralai/mistral-large-3-675b-instruct-2512',
+    'z-ai/glm-5.2',
     'openai/gpt-oss-120b',
 ];
 
-// Translation model list — Mistral primary (best multilingual)
+// Translation model list — GLM-5.2 primary (strong multilingual). Foreign-script
+// output is REQUIRED here, so the English guard is never applied to translate().
 const MODELS_TRANSLATE: string[] = [
-    'mistralai/mistral-large-3-675b-instruct-2512',
+    'z-ai/glm-5.2',
     'meta/llama-3.3-70b-instruct',
-    'openai/gpt-oss-120b', // last resort only
+    'openai/gpt-oss-120b',
 ];
 
 // Image prompt enrichment model list.
 const MODELS_ENRICH: string[] = [
-    'mistralai/mistral-large-3-675b-instruct-2512',
+    'z-ai/glm-5.2',
     'meta/llama-3.3-70b-instruct',
 ];
+
+// ── English-only guard ─────────────────────────────────────────────────────────
+// GLM-5.2 (and other multilingual models) occasionally leak CJK/Cyrillic into an
+// otherwise-English response. CJK Unified Ideographs, Hiragana/Katakana, Hangul,
+// Cyrillic. KEEP IN SYNC with config/openrouter.ts findForeignScript.
+const FOREIGN_SCRIPT = /[一-鿿぀-ヿ가-힯Ѐ-ӿ]/;
+
+/** Recursively scan a parsed object/array for non-Latin script; returns the field path or null. */
+function findForeignScript(value: any, path = ''): string | null {
+    if (typeof value === 'string') return FOREIGN_SCRIPT.test(value) ? (path || 'root') : null;
+    if (Array.isArray(value)) {
+        for (let i = 0; i < value.length; i++) {
+            const hit = findForeignScript(value[i], `${path}[${i}]`);
+            if (hit) return hit;
+        }
+        return null;
+    }
+    if (value && typeof value === 'object') {
+        for (const key of Object.keys(value)) {
+            const hit = findForeignScript(value[key], path ? `${path}.${key}` : key);
+            if (hit) return hit;
+        }
+    }
+    return null;
+}
 
 // ── Key rotation (in-process) ────────────────────────────────────────────────────────────────────
 
@@ -83,26 +113,35 @@ async function callModel(
     requireJson = false,
 ): Promise<CallResult> {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 5 * 60 * 1000);
+    // GLM-5.2 at high reasoning effort can genuinely take longer than 5 min —
+    // give it a fairer chance to answer before aborting (matches course generator).
+    const timeout = setTimeout(() => controller.abort(), 7 * 60 * 1000);
 
     const messages: any[] = [
         { role: 'system', content: systemPrompt },
         { role: 'user',   content: userMessage  },
     ];
 
+    // Reasoning models (glm-5.2, gpt-oss-120b) spend tokens on hidden reasoning
+    // before the visible answer — give them ample headroom so the answer isn't
+    // starved and returned empty/truncated.
+    const effectiveMaxTokens = (model.includes('glm') || model.includes('120b'))
+        ? Math.max(maxTokens, 32000)
+        : maxTokens;
+
     const body: Record<string, any> = {
         model,
         messages,
         temperature,
-        max_tokens: maxTokens,
+        max_tokens: effectiveMaxTokens,
     };
 
-    if (requireJson && !model.includes('120b')) {
+    if (requireJson && !model.includes('120b') && !model.includes('glm')) {
         // NVIDIA NIM API does NOT support assistant prefill (causes 400 BadRequestError).
         // Use response_format + a firm system instruction instead.
+        // Skipped for reasoning models (glm-5.2, gpt-oss-120b) — they answer via a
+        // firm system instruction and can 400 / stall on response_format.
         body.response_format = { type: 'json_object' };
-        // Force the model to output only JSON via a clear system suffix:
-        // (already set in the jsonSystem prompt in shortsLLM.json — this is a belt-and-suspenders guard)
     }
 
     const res = await fetch(NVIDIA_BASE, {
@@ -170,6 +209,7 @@ async function tryModels(
     temperature: number,
     maxTokens: number,
     requireJson = false,
+    guardEnglish = true,
 ): Promise<{ text: string; finishReason: string | null }> {
     const keys = getAllKeys();
     let lastErr: any;
@@ -180,6 +220,12 @@ async function tryModels(
             console.log(`🤖 [shorts-llm] NvidiaAPI model=${model} key=${_keyIdx + 1}/${keys.length} temp=${temperature}`);
             try {
                 const { text, finishReason } = await callModel(model, systemPrompt, userMessage, temperature, maxTokens, apiKey, requireJson);
+                // English-only guard: a leaking multilingual model (e.g. glm-5.2)
+                // is discarded and we move to the next model in the list.
+                if (guardEnglish && FOREIGN_SCRIPT.test(text)) {
+                    console.warn(`⚠️ [shorts-llm] [${model}] leaked non-English script — discarding, trying next model...`);
+                    break; // non-rate: skip remaining keys for this model, go to next model
+                }
                 return { text, finishReason: (finishReason ?? null) as string | null };
             } catch (err: any) {
                 lastErr = err;
@@ -495,7 +541,7 @@ export const shortsLLM = {
 
     /**
      * PHASE 2: JSON Generation Pass (injects Phase 1 reasoning).
-     * Tries Mistral-large first, then GPT-oss-120b — NO retry on the same model.
+     * Tries GLM-5.2 first, then GPT-oss-120b — NO retry on the same model.
      * Each model gets ONE attempt. If both fail, throws.
      */
     async jsonFromReasoning(
@@ -609,11 +655,13 @@ export const shortsLLM = {
         options?: { temperature?: number; maxTokens?: number },
     ): Promise<string> {
         const { text } = await tryModels(
-            ['mistralai/mistral-large-3-675b-instruct-2512'],
+            MODELS_TRANSLATE,
             systemPrompt,
             userPrompt,
             options?.temperature ?? 0.3,
             options?.maxTokens ?? 1024,
+            false, // requireJson
+            false, // guardEnglish — translation MUST be allowed to output non-Latin script
         );
         return text;
     },

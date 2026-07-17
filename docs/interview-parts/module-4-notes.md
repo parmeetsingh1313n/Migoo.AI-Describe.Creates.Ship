@@ -13,7 +13,7 @@
 
 ### 2. Tech stack in THIS module
 
-- **Chunked LLM generation** — `lib/chunked-notes-generator.ts`: a **tiered model strategy** (Mistral-Large-3-675B → GPT-oss-120b → Llama-3.3-70B) with a **smart content sampler** that fits long documents into the model's context (head + evenly-distributed section excerpts + tail).
+- **Chunked LLM generation** — `lib/chunked-notes-generator.ts`: a **tiered model strategy** (GLM-5.2 → GPT-oss-120b → Llama-3.3-70B) with a **smart content sampler** that fits long documents into the model's context (head + evenly-distributed section excerpts + tail).
 - **Groq Vision** — `analyzeImageWithGroq` (llama-4-scout) extracts text/data/structure from uploaded images/charts so they can be referenced in notes; auto-converts AVIF/HEIC/TIFF → JPEG via `sharp`.
 - **Sarvam Document Intelligence** — for document extraction (via the shared `sarvam-doc` job flow).
 - **Client-side export** — `html-to-image` / `html2canvas-pro` → PNG, `jsPDF` / `pdf-lib` → PDF.
@@ -56,7 +56,7 @@
 **a. Tiered model strategy** (`lib/chunked-notes-generator.ts`):
 ```ts
 const TIERS = [
-  { model: "mistralai/mistral-large-3-675b-instruct-2512", maxContentChars: 300_000, maxOutputTokens: 12_000, headChars: 10_000, tailChars: 5_000 },
+  { model: "z-ai/glm-5.2", maxContentChars: 300_000, maxOutputTokens: 12_000, headChars: 10_000, tailChars: 5_000 },
   { model: "openai/gpt-oss-120b",     maxContentChars: 1_200_000, /* … */ },
   { model: "meta/llama-3.3-70b-instruct", maxContentChars: 1_200_000, /* … */ },
 ];
@@ -90,4 +90,4 @@ if (!groqSupported.includes(mimeType)) {
 
 **Q5. How are uploaded charts/screenshots used in notes?** They're analyzed by Groq Vision (`analyzeImageWithGroq`) into a detailed text description (data points, axes, UI elements), which is fed into the generation prompt so the note can reference the image's content accurately. Unsupported formats are converted to JPEG with `sharp` first.
 
-**Q6. Why Groq here rather than the NVIDIA router?** Notes generation is text-structuring + vision, where Groq's Llama-3.3/llama-4-scout are fast and cheap on the free tier; the module explicitly uses `aiFallback`/`groq` (the header comment even says "Groq Only, NO Gemini"). The chunked generator additionally uses NVIDIA-hosted Mistral/GPT-oss/Llama tiers for the heavy structuring pass.
+**Q6. Why Groq here rather than the NVIDIA router?** Notes generation is text-structuring + vision, where Groq's Llama-3.3/llama-4-scout are fast and cheap on the free tier; the module explicitly uses `aiFallback`/`groq` (the header comment even says "Groq Only, NO Gemini"). The chunked generator additionally uses NVIDIA-hosted GLM-5.2/GPT-oss/Llama tiers for the heavy structuring pass.

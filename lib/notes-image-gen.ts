@@ -146,7 +146,7 @@ Total pages: ${totalPages}
 Page breakdown:
 ${pagesSummary}`;
 
-    const models = ["mistralai/mistral-large-3-675b-instruct-2512", "openai/gpt-oss-120b", "meta/llama-3.3-70b-instruct"];
+    const models = ["z-ai/glm-5.2", "openai/gpt-oss-120b", "meta/llama-3.3-70b-instruct"];
     let lastError: any = null;
 
     for (const model of models) {

@@ -1000,7 +1000,7 @@ OUTPUT: JSON object wrapped in <json> and </json> tags.`;
             };
         });
 
-        // Step 2b: Generate Video Script JSON (Phase 2) — key1, Mistral then GPT-120b (one shot each)
+        // Step 2b: Generate Video Script JSON (Phase 2) — key1, GLM-5.2 then GPT-120b (one shot each)
         const scriptDataRaw = await step.run("generate-video-script", async () => {
             // ── STUDIO MODE: Use pre-edited user script ─────────────────────
             if (studioPayload?.scriptData) {
@@ -1035,9 +1035,9 @@ OUTPUT: JSON object wrapped in <json> and </json> tags.`;
             const jsonUser = userPrompt + reasoningBlock +
                 `Now output the complete JSON object with scene1 through scene${sceneCount} as FLAT KEYS (not an array). Start with { on this line:`;
 
-            // Try each model ONCE — Mistral-large first, then GPT-oss-120b
+            // Try each model ONCE — GLM-5.2 first, then GPT-oss-120b
             const MODELS_TO_TRY = [
-                'mistralai/mistral-large-3-675b-instruct-2512',
+                'z-ai/glm-5.2',
                 'openai/gpt-oss-120b',
             ];
 
@@ -1132,7 +1132,7 @@ OUTPUT: JSON object wrapped in <json> and </json> tags.`;
                 `Now output the complete JSON object with scene1 through scene${sceneCount} as FLAT KEYS (not an array). Start with { on this line:`;
 
             const MODELS_TO_TRY = [
-                'mistralai/mistral-large-3-675b-instruct-2512',
+                'z-ai/glm-5.2',
                 'openai/gpt-oss-120b',
             ];
 
@@ -2651,7 +2651,7 @@ export const generateMotionGraphic = inngest.createFunction(
         if (candidatesToAnimate.length > 0) {
             console.log(`🎬 Generating ${candidatesToAnimate.length} Wan 2.2 video clips in separate steps for scenes: ${candidatesToAnimate.map((c: any) => c.index + 1).join(', ')}`);
 
-            // Get an API key for Mistral prompt generation
+            // Get an API key for GLM-5.2 prompt generation
             const mgKeys = (process.env.NVIDIA_API_KEY || '').split(',').map((k: string) => k.trim()).filter(Boolean);
             const promptApiKey = mgKeys[0] || '';
 

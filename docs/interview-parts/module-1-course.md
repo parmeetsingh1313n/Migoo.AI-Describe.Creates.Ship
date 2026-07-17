@@ -21,7 +21,7 @@
 | App framework | **Next.js 16** (App Router, route handlers, RSC) |
 | Auth | **Clerk** (`currentUser()`, ownership guards on every mutating route) |
 | Durable background jobs | **Inngest** (`step.run` orchestration, concurrency limits, event fan-out) |
-| LLMs | **OpenRouter** — `mistralai/mistral-large-3-675b` (course layout), `z-ai/glm-5.2` (slides, topic expansion, regen) |
+| LLMs | **OpenRouter** — `z-ai/glm-5.2` (course layout, slides, topic expansion, regen) |
 | RAG grounding | **Tavily** (`fetchSlideResearch`) — live web facts per slide |
 | TTS | **Sarvam AI** (`bulbul:v3`, `en-IN`, MP3 output, multi-key rotation) |
 | Slides engine | **reveal.js** (self-hosted `/public/reveal`) + KaTeX, Mermaid, Chart.js, mark.js, Typed.js |
@@ -37,7 +37,7 @@
 ### 3. Pipeline, stage by stage (exact file + function)
 
 **Stage 0 — Course config**
-`app/api/generate-course-layout/route.ts` → `POST`. Validates input (Zod), calls `openrouter.json(COURSE_CONFIG_PROMPT, userInput, { model: "mistralai/mistral-large-3-675b-instruct-2512" })`, validates the chapter/subContent shape, inserts into `coursesTable`, and fires `/api/generate-thumbnail` fire-and-forget.
+`app/api/generate-course-layout/route.ts` → `POST`. Validates input (Zod), calls `openrouter.json(COURSE_CONFIG_PROMPT, userInput, { model: "z-ai/glm-5.2" })`, validates the chapter/subContent shape, inserts into `coursesTable`, and fires `/api/generate-thumbnail` fire-and-forget.
 
 **Stage 1 — Images (per slide, in parallel)**
 `inngest/course-functions.ts` → `generateCourseImagesFn` (event `course/images.generate`). Expands each chapter's `subContent` via `expandChapterTopics()`, computes a **global slide index** `chIdx * MAX_SLIDES_PER_CHAPTER + slideIdx` (25) so each slide maps 1:1 to its own image, generates in batches of 6, uploads webp to Appwrite, inserts into `courseImages`, then runs a **retroactive injection pass** to replace `{{IMAGE_PLACEHOLDER}}` tokens in any slides already written.
@@ -78,7 +78,7 @@ The **cinematic director** (`CINEMATIC_DIRECTOR_SCRIPT` in `lib/reveal-doc.ts`, 
 | File | What it does | Why it exists |
 |---|---|---|
 | `app/_components/Hero.tsx` | Topic/type/voice input; `POST /api/generate-course-layout`; routes to course page | Course-creation entry point |
-| `app/api/generate-course-layout/route.ts` | LLM course config (Mistral-large) → `coursesTable`; fires thumbnail | Stage 0 — curriculum |
+| `app/api/generate-course-layout/route.ts` | LLM course config (GLM-5.2) → `coursesTable`; fires thumbnail | Stage 0 — curriculum |
 | `app/api/course/route.ts` | Fetch course + its slides (with legacy-DB fallback) | Reads course/slide data for the viewer |
 | `app/api/course-layout/route.ts` | `PATCH` a chapter's `subContent` in the layout JSON | Persists Outline Editor edits pre-generation |
 | `app/api/generate-images/route.ts` | Thin dispatcher → `course/images.generate` | Non-blocking image kickoff |

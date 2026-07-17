@@ -26,7 +26,7 @@
 
 - **Sarvam AI** — the single vendor for both **TTS** (`bulbul:v3` model, `/text-to-speech`) and **STT/captions** (`saaras:v3` batch Speech-to-Text job with `withTimestamps: true`). Wrapped in `config/sarvam.ts` and re-implemented inline in `inngest/functions.ts` (`callSarvamTTS`).
 - **Word-level caption alignment** — Sarvam batch STT returns per-word timestamps; the pipeline groups them into ~6-word segments. (Note: the prompt mentions AssemblyAI, but this codebase uses **Sarvam `saaras:v3`** for word timestamps.)
-- **Script LLM** — NVIDIA NIM (`lib/shorts-llm.ts`): Mistral-Large-3-675B primary, GPT-oss-120b + Llama-3.3-70B fallbacks, with in-process API-key rotation.
+- **Script LLM** — NVIDIA NIM (`lib/shorts-llm.ts`): GLM-5.2 primary, GPT-oss-120b + Llama-3.3-70B fallbacks, with in-process API-key rotation and a CJK/Cyrillic "language leakage" guard (English-expected outputs are discarded and the next model tried; translation is exempt).
 - **Image generation** — Apify actor `fayoussef/bulk-ai-image-generator` running Gemini 2.5 Flash Image ("Nano Banana"), fallback Gemini 3.1 Flash preview, ultimate fallback WaveSpeed GPT-Image-2 (`lib/apify-image.ts`).
 - **Image-to-video** — currently **Apify Wan 2.2 I2V-A14B-Lightning** (`lib/apify-video.ts`, actor `p215uhRBVXpONQfS8`). Legacy provider modules for **Pollo Seedance** (`pollo.ts`/`pollo-video.ts`), **Leonardo Kling 2.5 Turbo** (`leonardo-video.ts`), and **Runway** (`runway.ts`) remain in the repo. The Inngest code calls `submitSeedanceVideoTask`/`checkPolloVideoTaskStatus` names that are now **drop-in stubs exported from `apify-video.ts`** — the provider was swapped without renaming call sites.
 - **Inngest** — multi-step durable pipeline (`generateShortVideo`) that survives Vercel's serverless timeout by checkpointing each step; **`shortVideoProgress`** DB table gives cross-retry idempotency for paid video tasks.
@@ -46,7 +46,7 @@ Handler: **`generateShortVideo`** in `inngest/functions.ts` (id `generate-short-
 | 1.5 | `fetch-covered-topics`, `research-topic-ideas`, `pick-unique-topic` | Fetch already-covered titles, fast Tavily+Wikipedia snippet research, then an LLM picks a unique non-repeated topic (skipped if `customTopic`/studio title given). |
 | 1.8 | `run-web-research`, `distill-fact-sheet` | Deep-crawl RAG (crawl separated from LLM distillation so each gets a fresh timeout window) → verified fact sheet. |
 | 2a | `generate-video-script-reasoning` | Phase-1 free-form reasoning pass (6 scenes, narrative arc, bridging, honorifics rules). |
-| 2b | `generate-video-script` | Phase-2 JSON pass with **key1** (Mistral then GPT-120b, one shot each). Returns `null` to signal retry. |
+| 2b | `generate-video-script` | Phase-2 JSON pass with **key1** (GLM-5.2 then GPT-120b, one shot each). Returns `null` to signal retry. |
 | 2c | `generate-video-script-retry` | Fires only if 2b returned null — retries with **key2** in a fresh Vercel invocation. |
 | 2.5 | `translate-title`, `translate-scene-narration-{i}` | Per-scene translation steps if `language` isn't English. |
 | 3 | `generate-voice-scene-{i}` → `merge-and-upload-audio` | **One Sarvam TTS step per scene** (checkpointed), chunked at 2200 chars, WAV buffers merged. |
