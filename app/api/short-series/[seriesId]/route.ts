@@ -1,5 +1,5 @@
 import { db } from '@/config/db';
-import { shortVideoSeries } from '@/config/schema';
+import { shortVideoSeries, shortVideoAssets, shortVideoProgress } from '@/config/schema';
 import { eq } from 'drizzle-orm';
 import fs from 'fs';
 import { NextRequest, NextResponse } from 'next/server';
@@ -100,6 +100,11 @@ export async function DELETE(
                 console.log(`🗑️ Deleted thumbnail: ${localFile}`);
             }
         }
+
+        // Delete child rows first — these tables FK-reference short_video_series.seriesId,
+        // so the parent delete fails with a 23503 constraint violation unless they go first.
+        await db.delete(shortVideoAssets).where(eq(shortVideoAssets.seriesId, seriesId));
+        await db.delete(shortVideoProgress).where(eq(shortVideoProgress.seriesId, seriesId));
 
         // Delete from DB
         await db
