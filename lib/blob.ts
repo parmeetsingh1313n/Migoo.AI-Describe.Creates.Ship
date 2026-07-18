@@ -282,3 +282,54 @@ export async function putWithRotation(
         }
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// AUTHENTICATED READ HELPER
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Fetch an Appwrite storage file that putWithRotation produced. The stored
+ * files inherit bucket-level permissions which are NOT guaranteed to be
+ * public-read, and the account can hit its bandwidth quota (HTTP 402) — a bare
+ * `fetch(url)` then fails. This resolves the API key for the URL's project (from
+ * the same env configs used to upload) and sends it as X-Appwrite-Key so the
+ * read is authenticated. Falls back to an unauthenticated fetch if the project
+ * can't be matched (e.g. a legacy non-Appwrite URL).
+ *
+ * @param url  A `.../storage/buckets/<b>/files/<id>/view?project=<p>` URL.
+ * @returns    The response body as a Buffer.
+ */
+export async function fetchAppwriteFile(url: string): Promise<Buffer> {
+    // Find the API key whose project matches this URL's ?project= param.
+    let apiKey: string | undefined;
+    try {
+        const projectId = new URL(url).searchParams.get("project") ?? undefined;
+        if (projectId) {
+            const match = getAppwriteConfigs().find((c) => c.projectId === projectId);
+            apiKey = match?.apiKey;
+        }
+    } catch { /* not a parseable URL — fall through to plain fetch */ }
+
+    const headers: Record<string, string> = {};
+    if (apiKey) {
+        const projectId = new URL(url).searchParams.get("project") ?? "";
+        headers["X-Appwrite-Project"] = projectId;
+        headers["X-Appwrite-Key"] = apiKey;
+    }
+
+    // Retry transient failures (network / 429 / 5xx) a few times.
+    let lastErr: any = null;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+            const res = await fetch(url, { headers });
+            if (res.ok) return Buffer.from(await res.arrayBuffer());
+            lastErr = new Error(`HTTP ${res.status}: ${(await res.text().catch(() => "")).slice(0, 160)}`);
+            // 401/403/402 won't fix themselves on retry; bail immediately.
+            if ([401, 402, 403, 404].includes(res.status)) break;
+        } catch (e: any) {
+            lastErr = e;
+        }
+        if (attempt < 3) await new Promise((r) => setTimeout(r, 1500 * attempt));
+    }
+    throw new Error(`Failed to fetch Appwrite file ${url} — ${lastErr?.message ?? lastErr}`);
+}

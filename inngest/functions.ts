@@ -1,7 +1,7 @@
 import { aiFallback } from "@/config/ai-fallback";
 import { db } from "@/config/db";
 import { shortVideoAssets, shortVideoProgress, shortVideoSeries } from "@/config/schema";
-import { putWithRotation } from "@/lib/blob";
+import { putWithRotation, fetchAppwriteFile } from "@/lib/blob";
 import { generateNanoBananaImage, generateNanoBananaImagesParallel, generateApifyImage, generateApifyImagesParallel } from "@/lib/apify-image";
 import { submitSeedanceVideoTask, checkPolloVideoTaskStatus, processSeedanceVideoResult } from "@/lib/apify-video";
 import { getMusicUrl } from "@/lib/music-urls";
@@ -1299,9 +1299,10 @@ OUTPUT: JSON object wrapped in <json> and </json> tags.`;
 
             const audioBuffers: Buffer[] = [];
             for (const url of validUrls) {
-                const res = await fetch(url);
-                if (!res.ok) throw new Error(`Failed to fetch scene audio: ${url}`);
-                audioBuffers.push(Buffer.from(await res.arrayBuffer()));
+                // Authenticated read — these Appwrite files may not be public and
+                // the account can hit its bandwidth quota (402); fetchAppwriteFile
+                // sends the matching project's API key and retries transient errors.
+                audioBuffers.push(await fetchAppwriteFile(url));
             }
 
             const finalAudio = mergeWavBuffers(audioBuffers);
@@ -1345,13 +1346,9 @@ OUTPUT: JSON object wrapped in <json> and </json> tags.`;
             const sttKeys = getSarvamKeys();
             if (sttKeys.length === 0) throw new Error('No SARVAM_API_KEY found in environment variables');
 
-            // Step A: Download the audio from Vercel Blob
+            // Step A: Download the merged audio (Appwrite — authenticated read)
             console.log(`📥 Downloading audio from: ${voiceData.audioUrl}`);
-            const audioRes = await fetch(voiceData.audioUrl);
-            if (!audioRes.ok) {
-                throw new Error(`Failed to download audio: ${audioRes.status}`);
-            }
-            const audioBuffer = Buffer.from(await audioRes.arrayBuffer());
+            const audioBuffer = await fetchAppwriteFile(voiceData.audioUrl);
             console.log(`✅ Downloaded audio: ${audioBuffer.length} bytes`);
 
             // Step B: Write audio to a temp file (SDK needs file path)
