@@ -45,26 +45,11 @@ async function upload() {
     process.exit(1);
   }
 
-  // ── Appwrite upload (PRIMARY) ─────────────────────────────────────────────
-  // Upload the MP4 to Appwrite using the APPWRITE_VIDEO_* credentials. The
-  // resulting Appwrite link (or chunked metadata) is stored as videoUrl and is
-  // what the download button streams from.
-  if (endpoint && projectId && apiKey && bucketId) {
-    try {
-      const videoUrl = await uploadToAppwrite({ filePath, chapterId, endpoint, projectId, apiKey, bucketId });
-      console.log('✅ Appwrite upload complete. videoUrl:', videoUrl);
-      await notify(webhookUrl, chapterId, videoUrl, 'completed', null);
-      console.log('🎉 Done!');
-      process.exit(0);
-    } catch (err) {
-      console.error('❌ Appwrite upload failed:', err?.message ?? err);
-      console.log('⚠️  Falling back to GitHub Release upload...');
-    }
-  } else {
-    console.warn('⚠️  Appwrite env vars missing (APPWRITE_VIDEO_ENDPOINT / PROJECT_ID / API_KEY / BUCKET_ID) — trying GitHub Release fallback...');
-  }
-
-  // ── GitHub Release upload (FALLBACK) ──────────────────────────────────────
+  // ── GitHub Release upload (PRIMARY) ───────────────────────────────────────
+  // Public repo → free, unlimited-bandwidth delivery with a single direct URL
+  // (no chunking, no proxy streaming). Preferred over Appwrite, whose free-tier
+  // bandwidth quota is quickly exhausted by ~400 MB videos (HTTP 402 on
+  // download). videoUrl is a plain https link the browser downloads directly.
   const repo    = process.env.GITHUB_REPOSITORY;
   const ghToken = process.env.GITHUB_TOKEN;
 
@@ -93,12 +78,32 @@ async function upload() {
       process.exit(0);
     } catch (err) {
       console.error('❌ GitHub upload failed:', err?.message ?? err);
+      console.log('⚠️  Falling back to Appwrite upload...');
     }
+  } else {
+    console.warn('⚠️  GITHUB_TOKEN / GITHUB_REPOSITORY missing — trying Appwrite fallback...');
+  }
+
+  // ── Appwrite upload (FALLBACK) ────────────────────────────────────────────
+  // Used only if the GitHub Release upload is unavailable. Note: downloads may
+  // hit Appwrite's bandwidth quota (HTTP 402) on the free tier.
+  if (endpoint && projectId && apiKey && bucketId) {
+    try {
+      const videoUrl = await uploadToAppwrite({ filePath, chapterId, endpoint, projectId, apiKey, bucketId });
+      console.log('✅ Appwrite upload complete. videoUrl:', videoUrl);
+      await notify(webhookUrl, chapterId, videoUrl, 'completed', null);
+      console.log('🎉 Done!');
+      process.exit(0);
+    } catch (err) {
+      console.error('❌ Appwrite upload failed:', err?.message ?? err);
+    }
+  } else {
+    console.warn('⚠️  Appwrite env vars missing (APPWRITE_VIDEO_ENDPOINT / PROJECT_ID / API_KEY / BUCKET_ID)');
   }
 
   // ── Both paths failed ─────────────────────────────────────────────────────
-  console.error('❌ All upload paths failed (Appwrite + GitHub Release)');
-  await notify(webhookUrl, chapterId, null, 'failed', 'Upload failed — Appwrite and GitHub Release both unavailable');
+  console.error('❌ All upload paths failed (GitHub Release + Appwrite)');
+  await notify(webhookUrl, chapterId, null, 'failed', 'Upload failed — GitHub Release and Appwrite both unavailable');
   process.exit(1);
 }
 
@@ -116,11 +121,13 @@ async function uploadToAppwrite({ filePath, chapterId, endpoint, projectId, apiK
   const sidecarPath = filePath.replace('.mp4', '-chunks.json');
   let chunkFiles = [];
   let chunksDir = '';
+  let totalBytes = 0;
   if (fs.existsSync(sidecarPath)) {
     try {
       const sidecar = JSON.parse(fs.readFileSync(sidecarPath, 'utf-8'));
       chunksDir = path.join(path.dirname(filePath), `chapter-${chapterId}-chunks`);
       chunkFiles = sidecar.chunkFiles || [];
+      totalBytes = sidecar.totalBytes || 0;
     } catch (err) {
       console.warn('⚠️ Failed to parse chunk sidecar:', err.message);
     }
@@ -150,6 +157,7 @@ async function uploadToAppwrite({ filePath, chapterId, endpoint, projectId, apiK
       rawBinary: true,   // raw byte split — NOT independent MP4 containers
       count: chunkFiles.length,
       ids: chunkIds,
+      totalBytes,        // full MP4 size — lets the download send Content-Length
       bucketId,
       endpoint,
       projectId,

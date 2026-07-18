@@ -5,6 +5,12 @@ import { eq } from 'drizzle-orm';
 import fs from 'fs';
 import path from 'path';
 
+// Streaming ~400 MB of chunks through this function takes well over the
+// default 10s serverless limit. Allow up to 5 min (Vercel Pro cap) so the
+// browser download completes instead of the function being killed mid-stream.
+export const maxDuration = 300;
+export const dynamic = 'force-dynamic';
+
 export async function GET(
   req: NextRequest,
   { params }: { params: any }
@@ -70,27 +76,41 @@ export async function GET(
       try {
         const metadata = JSON.parse(videoUrlStr);
         if (metadata.chunked && Array.isArray(metadata.ids)) {
-          const { ids, bucketId, endpoint, projectId, rawBinary } = metadata;
+          const { ids, bucketId, endpoint, projectId, rawBinary, totalBytes } = metadata;
           const apiKey = process.env.APPWRITE_VIDEO_API_KEY || process.env.APPWRITE_API_KEY;
 
+          if (!apiKey) {
+            console.error(`No Appwrite API key available to stream chunks for ${chapterId}`);
+            return new Response('Server missing Appwrite credentials for video download', { status: 500 });
+          }
+
+          // Pre-flight the first chunk so a broken upload / bad key fails with a
+          // clear HTTP error BEFORE we start a 200 streaming response (which the
+          // browser would otherwise render as a silent 0-byte download).
+          const firstUrl = `${endpoint}/storage/buckets/${bucketId}/files/${ids[0]}/download?project=${projectId}`;
+          const preflight = await fetch(firstUrl, {
+            headers: { 'X-Appwrite-Project': projectId, 'X-Appwrite-Key': apiKey },
+          });
+          if (!preflight.ok) {
+            const detail = await preflight.text().catch(() => '');
+            console.error(`Preflight for chunk ${ids[0]} failed: HTTP ${preflight.status} ${detail.slice(0, 200)}`);
+            return new Response(`Video chunk unavailable on Appwrite (HTTP ${preflight.status})`, { status: 502 });
+          }
+
           // Stream chunks sequentially on-the-fly to the browser.
-          // If rawBinary=true: chunks are raw byte splits of the original MP4.
-          // Streaming them sequentially gives the browser the exact original bytes
-          // → original header with correct full duration is preserved!
-          // If rawBinary=false (old FFmpeg segment mode): same stream but
-          // duration will be wrong since chunks have independent headers.
+          // rawBinary=true: chunks are raw byte splits of the original MP4, so
+          // concatenating them yields the exact original bytes (header + full
+          // duration intact). We already hold the first chunk's response.
           const stream = new ReadableStream({
             async start(controller) {
               try {
-                for (const fileId of ids) {
-                  // Always use /download (not /view) to get raw bytes from Appwrite
-                  const url = `${endpoint}/storage/buckets/${bucketId}/files/${fileId}/download?project=${projectId}`;
-                  const res = await fetch(url, {
-                    headers: {
-                      'X-Appwrite-Project': projectId,
-                      'X-Appwrite-Key': apiKey || '',
-                    },
-                  });
+                for (let i = 0; i < ids.length; i++) {
+                  const fileId = ids[i];
+                  const res = i === 0
+                    ? preflight
+                    : await fetch(`${endpoint}/storage/buckets/${bucketId}/files/${fileId}/download?project=${projectId}`, {
+                        headers: { 'X-Appwrite-Project': projectId, 'X-Appwrite-Key': apiKey },
+                      });
 
                   if (!res.ok) {
                     throw new Error(`Failed to fetch chunk ${fileId}: HTTP ${res.status}`);
@@ -115,15 +135,21 @@ export async function GET(
             },
           });
 
-          return new Response(stream, {
-            headers: {
-              'Content-Type': 'video/mp4',
-              'Content-Disposition': `attachment; filename="${filename}"`,
-            },
-          });
+          const headers: Record<string, string> = {
+            'Content-Type': 'video/mp4',
+            'Content-Disposition': `attachment; filename="${filename}"`,
+            'Cache-Control': 'no-store',
+          };
+          // Advertise the full size so the browser shows real download progress.
+          if (typeof totalBytes === 'number' && totalBytes > 0) {
+            headers['Content-Length'] = String(totalBytes);
+          }
+
+          return new Response(stream, { headers });
         }
       } catch (jsonErr: any) {
         console.error('Failed to parse/stream videoUrl metadata:', jsonErr.message);
+        return new Response(`Error preparing chunked download: ${jsonErr.message}`, { status: 500 });
       }
     }
 
