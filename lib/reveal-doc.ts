@@ -417,6 +417,20 @@ export const REVEAL_INIT_SCRIPT = `
       window.__deck.slide(0, 0, -1);
     } else if (msg.type === 'SCROLL_CODE') {
       scrollCodeToProgress(msg.progress);
+    } else if (msg.type === 'INIT_CINE') {
+      // Live-preview parity: the parent (Remotion) hands us the same cinematic
+      // timeline the video render uses, so window.__seekTo(t) drives the exact
+      // same camera. No-op if CINEMATIC_DIRECTOR_SCRIPT wasn't injected.
+      window.__cineTimeline = Array.isArray(msg.timeline) ? msg.timeline : [];
+      window.__cineDuration = msg.duration || 0;
+    } else if (msg.type === 'SEEK') {
+      // Time-driven camera + reveal, identical to the recorded video. Falls back
+      // to a plain fragment nav if the cinematic director isn't present.
+      if (typeof window.__seekTo === 'function') {
+        window.__seekTo(msg.time);
+      } else if (typeof msg.index === 'number') {
+        window.__deck.slide(0, 0, msg.index);
+      }
     }
   });
 

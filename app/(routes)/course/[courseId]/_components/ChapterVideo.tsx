@@ -8,7 +8,7 @@ import {
   useCurrentFrame,
   useVideoConfig,
 } from "remotion";
-import { revealAssetTags, wrapInRevealDeck, REVEAL_INIT_SCRIPT, REVEAL_CUSTOM_FRAGMENT_STYLES, COMPONENT_STYLESHEET } from "@/lib/reveal-doc";
+import { revealAssetTags, wrapInRevealDeck, REVEAL_INIT_SCRIPT, REVEAL_CUSTOM_FRAGMENT_STYLES, COMPONENT_STYLESHEET, CINEMATIC_DIRECTOR_SCRIPT, COMPONENT_ANIMATION_STYLES } from "@/lib/reveal-doc";
 
 /* -------------------------------- Types -------------------------------- */
 
@@ -551,6 +551,7 @@ export const injectRevealDeckRuntime = (html: string): string => {
   ${headContent}
   ${revealAssetTags('')}
   ${REVEAL_CUSTOM_FRAGMENT_STYLES}
+  ${COMPONENT_ANIMATION_STYLES}
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Outfit:wght@300;400;500;600;700;800;900&family=Poppins:wght@300;400;500;600;700;800;900&family=Space+Grotesk:wght@400;500;600;700&family=Playfair+Display:ital,wght@0,400..900;1,400..900&family=Instrument+Serif:ital@0;1&family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&display=swap');
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -568,6 +569,7 @@ export const injectRevealDeckRuntime = (html: string): string => {
 <body style="margin:0; padding:0; width:1440px; height:720px; overflow:hidden;">
   ${wrapInRevealDeck(content)}
   ${REVEAL_INIT_SCRIPT}
+  ${CINEMATIC_DIRECTOR_SCRIPT}
 </body>
 </html>`;
 };
@@ -673,6 +675,33 @@ const SlideIFrameWithReveal = ({ slide }: { slide: Slide }) => {
     }
   }, [slide.slideId, slide.revealData, slide.fragmentData, slide.caption]);
 
+  // Cinematic camera timeline — mirrors the video render's cineTimeline shape
+  // ([{ index, startSec, endSec }]). Prefer the backend fragmentTimeline (same
+  // source the MP4 uses); else derive one from revealPlan so the preview camera
+  // moves identically to the downloaded video. Legacy string-ID slides get no
+  // camera (they don't in the render either).
+  const slideDurationSec = durationInFrames / fps;
+  const cineTimeline = useMemo(() => {
+    if (isLegacy) return [];
+    const backend = (slide.caption as any)?.fragmentTimeline;
+    if (Array.isArray(backend) && backend.length > 0) {
+      return backend
+        .filter((iv: any) => typeof iv?.index === 'number' && iv.index >= 0)
+        .map((iv: any) => ({
+          index: iv.index,
+          startSec: iv.startSec ?? 0,
+          endSec: iv.endSec ?? slideDurationSec,
+        }));
+    }
+    // Derive from revealPlan: each fragment runs until the next one begins.
+    const withIndex = revealPlan.filter((p: any) => typeof p.index === 'number' && p.index >= 0);
+    return withIndex.map((p: any, i: number) => ({
+      index: p.index as number,
+      startSec: p.at as number,
+      endSec: i + 1 < withIndex.length ? (withIndex[i + 1] as any).at : slideDurationSec,
+    }));
+  }, [isLegacy, slide.caption, revealPlan, slideDurationSec]);
+
   // Listen for REVEAL_READY from iframe
   useEffect(() => {
     const handleMessage = (e: MessageEvent) => {
@@ -701,6 +730,15 @@ const SlideIFrameWithReveal = ({ slide }: { slide: Slide }) => {
     hasShownHeading.current = false;
     lastTimeRef.current = 0;
   }, [slide.slideId, ready]);
+
+  // Hand the cinematic timeline to the iframe once it's ready, so window.__seekTo
+  // drives the SAME camera the video render uses.
+  useEffect(() => {
+    if (!ready || isLegacy) return;
+    const win = iframeRef.current?.contentWindow;
+    if (!win) return;
+    win.postMessage({ type: 'INIT_CINE', timeline: cineTimeline, duration: slideDurationSec }, '*');
+  }, [ready, isLegacy, cineTimeline, slideDurationSec]);
 
   // Drive reveals/fragments based on current time
   useEffect(() => {
@@ -743,21 +781,27 @@ const SlideIFrameWithReveal = ({ slide }: { slide: Slide }) => {
         sentRevealIds.current.add('r1');
       }
     } else {
-      // NEW FRAGMENT: send NAVIGATE_FRAGMENT with highest visible index
-      let targetIndex = -1;
-      for (const item of revealPlan) {
-        if ('index' in item && time >= item.at) {
-          targetIndex = item.index;
+      // NEW FRAGMENT: drive the cinematic director by TIME every frame so the
+      // camera pans/zooms smoothly — identical to the recorded video. __seekTo
+      // both reveals fragments up to `time` AND moves the camera. If the slide
+      // has no cine timeline (or the director isn't present), __seekTo still
+      // just reveals fragments, and the fallback below keeps plain nav working.
+      if (cineTimeline.length > 0) {
+        win.postMessage({ type: 'SEEK', time }, '*');
+      } else {
+        let targetIndex = -1;
+        for (const item of revealPlan) {
+          if ('index' in item && time >= item.at) {
+            targetIndex = item.index;
+          }
+        }
+        if (targetIndex !== lastIndexRef.current || isBackward) {
+          win.postMessage({ type: 'SEEK', time, index: targetIndex }, '*');
+          lastIndexRef.current = targetIndex;
         }
       }
-
-      // Only post if index changed or we seeked backward
-      if (targetIndex !== lastIndexRef.current || isBackward) {
-        win.postMessage({ type: 'NAVIGATE_FRAGMENT', index: targetIndex }, '*');
-        lastIndexRef.current = targetIndex;
-      }
     }
-  }, [time, ready, revealPlan]);
+  }, [time, ready, revealPlan, cineTimeline]);
 
   // Auto-scroll long code cards in sync with narration progress across the
   // slide's whole on-screen duration (independent of fragment reveal state).
