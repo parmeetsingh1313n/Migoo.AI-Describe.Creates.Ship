@@ -3,6 +3,7 @@ import { useUser } from '@clerk/nextjs'
 import { motion } from 'framer-motion'
 import {
     ArrowRight,
+    AlertTriangle,
     Calendar,
     Clapperboard,
     Edit3,
@@ -58,6 +59,10 @@ function ShortGeneratorPage() {
     const [loading, setLoading] = useState(true)
     const [openPopover, setOpenPopover] = useState<string | null>(null)
     const [deletingId, setDeletingId] = useState<string | null>(null)
+    // GitHub-style delete confirmation: the series pending deletion + the text
+    // the user has typed to confirm (must exactly match the series title).
+    const [confirmDelete, setConfirmDelete] = useState<ShortSeries | null>(null)
+    const [confirmText, setConfirmText] = useState('')
     const [generatingThumbnail, setGeneratingThumbnail] = useState<string | null>(null)
     const [generatingVideo, setGeneratingVideo] = useState<string | null>(null)
     const attemptedThumbnails = useRef<Set<string>>(new Set())
@@ -160,6 +165,8 @@ function ShortGeneratorPage() {
             if (res.ok && data.success) {
                 setSeries(prev => prev.filter(item => item.seriesId !== seriesId))
                 toast.success('Series deleted')
+                setConfirmDelete(null)
+                setConfirmText('')
             } else {
                 toast.error(data?.error || `Failed to delete series (HTTP ${res.status})`)
             }
@@ -450,15 +457,10 @@ function ShortGeneratorPage() {
                                                         </button>
                                                         <div className="h-px bg-border/40 my-1" />
                                                         <button
-                                                            onClick={() => handleDelete(s.seriesId)}
-                                                            disabled={deletingId === s.seriesId}
+                                                            onClick={() => { setOpenPopover(null); setConfirmText(''); setConfirmDelete(s); }}
                                                             className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-destructive hover:bg-destructive/5 transition-colors cursor-pointer disabled:opacity-50"
                                                         >
-                                                            {deletingId === s.seriesId ? (
-                                                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                                            ) : (
-                                                                <Trash2 className="w-3.5 h-3.5" />
-                                                            )}
+                                                            <Trash2 className="w-3.5 h-3.5" />
                                                             Delete
                                                         </button>
                                                     </div>
@@ -512,6 +514,88 @@ function ShortGeneratorPage() {
                         Soon you&apos;ll be able to turn your generated video courses into bite-sized shorts — perfect as quick revision content for each chapter.
                     </p>
                 </motion.div>
+            )}
+
+            {/* ── Delete confirmation modal (GitHub-style: type the name to confirm) ── */}
+            {confirmDelete && (
+                <div
+                    className="fixed inset-0 z-[100] flex items-center justify-center p-4"
+                    onMouseDown={() => { if (deletingId !== confirmDelete.seriesId) { setConfirmDelete(null); setConfirmText('') } }}
+                >
+                    {/* Backdrop */}
+                    <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
+
+                    {/* Card */}
+                    <motion.div
+                        initial={{ opacity: 0, scale: 0.95, y: 10 }}
+                        animate={{ opacity: 1, scale: 1, y: 0 }}
+                        transition={{ duration: 0.2, ease: [0.23, 1, 0.32, 1] }}
+                        onMouseDown={(e) => e.stopPropagation()}
+                        className="relative w-full max-w-md bg-white rounded-2xl border border-border/60 shadow-2xl shadow-black/20 overflow-hidden"
+                    >
+                        {/* Header */}
+                        <div className="flex items-start gap-4 p-6 pb-4">
+                            <div className="shrink-0 w-11 h-11 rounded-xl bg-destructive/10 flex items-center justify-center">
+                                <AlertTriangle className="w-5 h-5 text-destructive" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                                <h2 className="text-lg font-semibold text-foreground">Delete series</h2>
+                                <p className="text-sm text-muted-foreground mt-1">
+                                    This action is <span className="font-semibold text-foreground">permanent</span> and cannot be undone. All generated videos, assets, and progress for this series will be deleted.
+                                </p>
+                            </div>
+                        </div>
+
+                        {/* Confirm input */}
+                        <div className="px-6 pb-2">
+                            <label className="block text-sm text-muted-foreground mb-2">
+                                To confirm, type <span className="font-semibold text-foreground break-all">{confirmDelete.title}</span> below:
+                            </label>
+                            <input
+                                autoFocus
+                                type="text"
+                                value={confirmText}
+                                onChange={(e) => setConfirmText(e.target.value)}
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter' && confirmText.trim() === confirmDelete.title.trim() && deletingId !== confirmDelete.seriesId) {
+                                        handleDelete(confirmDelete.seriesId)
+                                    }
+                                    if (e.key === 'Escape') { setConfirmDelete(null); setConfirmText('') }
+                                }}
+                                placeholder={confirmDelete.title}
+                                className="w-full px-3.5 py-2.5 rounded-xl border border-border bg-muted/30 text-sm text-foreground outline-none focus:border-destructive/60 focus:ring-2 focus:ring-destructive/15 transition-all"
+                            />
+                        </div>
+
+                        {/* Footer */}
+                        <div className="flex items-center justify-end gap-2.5 p-6 pt-4">
+                            <button
+                                onClick={() => { setConfirmDelete(null); setConfirmText('') }}
+                                disabled={deletingId === confirmDelete.seriesId}
+                                className="px-4 py-2 rounded-xl text-sm font-medium border border-border text-foreground hover:bg-muted/50 transition-colors cursor-pointer disabled:opacity-50"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={() => handleDelete(confirmDelete.seriesId)}
+                                disabled={confirmText.trim() !== confirmDelete.title.trim() || deletingId === confirmDelete.seriesId}
+                                className="px-4 py-2 rounded-xl text-sm font-semibold bg-destructive text-white shadow-sm hover:bg-destructive/90 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
+                            >
+                                {deletingId === confirmDelete.seriesId ? (
+                                    <>
+                                        <Loader2 className="w-4 h-4 animate-spin" />
+                                        Deleting…
+                                    </>
+                                ) : (
+                                    <>
+                                        <Trash2 className="w-4 h-4" />
+                                        Delete this series
+                                    </>
+                                )}
+                            </button>
+                        </div>
+                    </motion.div>
+                </div>
             )}
         </div>
     )
