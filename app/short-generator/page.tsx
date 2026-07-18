@@ -61,7 +61,6 @@ function ShortGeneratorPage() {
     const [generatingThumbnail, setGeneratingThumbnail] = useState<string | null>(null)
     const [generatingVideo, setGeneratingVideo] = useState<string | null>(null)
     const attemptedThumbnails = useRef<Set<string>>(new Set())
-    const popoverRef = useRef<HTMLDivElement>(null)
 
     const userId = user?.primaryEmailAddress?.emailAddress
 
@@ -115,12 +114,14 @@ function ShortGeneratorPage() {
 
 
 
-    // Close popover on outside click
+    // Close popover on outside click. Use a data-attribute check (not a
+    // conditional ref) so it's immune to ref-timing: a click anywhere inside
+    // ANY popover root (trigger + menu) never closes prematurely.
     useEffect(() => {
         const handler = (e: MouseEvent) => {
-            if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
-                setOpenPopover(null)
-            }
+            const target = e.target as Element | null
+            if (target && target.closest('[data-series-popover]')) return
+            setOpenPopover(null)
         }
         document.addEventListener('mousedown', handler)
         return () => document.removeEventListener('mousedown', handler)
@@ -129,23 +130,25 @@ function ShortGeneratorPage() {
     // Pause/Resume
     const handleToggleStatus = async (s: ShortSeries) => {
         const newStatus = s.status === 'paused' ? 'active' : 'paused'
+        setOpenPopover(null)
         try {
             const res = await fetch(`/api/short-series/${s.seriesId}`, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ status: newStatus }),
             })
-            const data = await res.json()
-            if (data.success) {
+            const data = await res.json().catch(() => ({}))
+            if (res.ok && data.success) {
                 setSeries(prev => prev.map(item =>
                     item.seriesId === s.seriesId ? { ...item, status: newStatus } : item
                 ))
                 toast.success(newStatus === 'paused' ? 'Series paused' : 'Series resumed')
+            } else {
+                toast.error(data?.error || `Failed to update status (HTTP ${res.status})`)
             }
-        } catch {
-            toast.error('Failed to update status')
+        } catch (err: any) {
+            toast.error(`Failed to update status: ${err?.message ?? 'network error'}`)
         }
-        setOpenPopover(null)
     }
 
     // Delete
@@ -153,13 +156,15 @@ function ShortGeneratorPage() {
         setDeletingId(seriesId)
         try {
             const res = await fetch(`/api/short-series/${seriesId}`, { method: 'DELETE' })
-            const data = await res.json()
-            if (data.success) {
+            const data = await res.json().catch(() => ({}))
+            if (res.ok && data.success) {
                 setSeries(prev => prev.filter(item => item.seriesId !== seriesId))
                 toast.success('Series deleted')
+            } else {
+                toast.error(data?.error || `Failed to delete series (HTTP ${res.status})`)
             }
-        } catch {
-            toast.error('Failed to delete series')
+        } catch (err: any) {
+            toast.error(`Failed to delete series: ${err?.message ?? 'network error'}`)
         }
         setDeletingId(null)
         setOpenPopover(null)
@@ -408,7 +413,7 @@ function ShortGeneratorPage() {
                                             </h3>
 
                                             {/* Popover trigger */}
-                                            <div className="relative" ref={openPopover === s.seriesId ? popoverRef : null}>
+                                            <div className="relative" data-series-popover>
                                                 <button
                                                     onClick={() => setOpenPopover(openPopover === s.seriesId ? null : s.seriesId)}
                                                     className="shrink-0 w-7 h-7 rounded-lg hover:bg-muted/60 flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
@@ -418,9 +423,10 @@ function ShortGeneratorPage() {
 
                                                 {/* Popover */}
                                                 {openPopover === s.seriesId && (
-                                                    <div className="absolute right-0 top-8 z-20 w-40 bg-white rounded-xl border border-border/60 shadow-xl shadow-black/10 py-1.5 animate-fade-in-up">
+                                                    <div className="absolute right-0 top-8 z-50 w-40 bg-white rounded-xl border border-border/60 shadow-xl shadow-black/10 py-1.5 animate-fade-in-up">
                                                         <Link
                                                             href={`/short-generator/create?edit=${s.seriesId}`}
+                                                            onClick={() => setOpenPopover(null)}
                                                             className="flex items-center gap-2.5 px-3 py-2 text-sm text-foreground hover:bg-muted/50 transition-colors"
                                                         >
                                                             <Edit3 className="w-3.5 h-3.5" />
