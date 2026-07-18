@@ -115,28 +115,31 @@ export default function DocumentUploadZone({ onResult }: Props) {
             const createData = await createRes.json()
             if (!createRes.ok) throw new Error(createData.error || "Failed to create job")
             const newJobId: string = createData.job_id
+            // Key index the server rotated to — thread it through the rest of the
+            // stateful job so upload/start/status all use the SAME Sarvam key.
+            const keyIndex: number = createData.key_index ?? 0
 
             setState("uploading")
             const fileData  = await fileToBase64(docFile)
             const uploadRes = await fetch("/api/sarvam-doc", {
                 method: "POST", headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ action: "upload", job_id: newJobId, fileName: docFile.name, fileData }),
+                body: JSON.stringify({ action: "upload", job_id: newJobId, key_index: keyIndex, fileName: docFile.name, fileData }),
             })
             if (!uploadRes.ok) throw new Error((await uploadRes.json()).error || "Upload failed")
 
             setState("processing")
             await fetch("/api/sarvam-doc", {
                 method: "POST", headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ action: "start", job_id: newJobId }),
+                body: JSON.stringify({ action: "start", job_id: newJobId, key_index: keyIndex }),
             })
-            pollJob(newJobId)
+            pollJob(newJobId, keyIndex)
         } catch (err: any) {
             toast.error(err.message || "Document processing failed")
             setState("error")
         }
     }
 
-    const pollJob = (jid: string) => {
+    const pollJob = (jid: string, keyIndex = 0) => {
         let attempts = 0
         pollRef.current = setInterval(async () => {
             if (++attempts > 60) {
@@ -144,7 +147,7 @@ export default function DocumentUploadZone({ onResult }: Props) {
                 toast.error("Document processing timed out"); return
             }
             try {
-                const res  = await fetch(`/api/sarvam-doc?action=status&job_id=${jid}`)
+                const res  = await fetch(`/api/sarvam-doc?action=status&job_id=${jid}&key_index=${keyIndex}`)
                 const data = await res.json()
                 if (data.state === "Completed" || data.state === "PartiallyCompleted") {
                     clearInterval(pollRef.current!)

@@ -2,8 +2,35 @@ import { NextRequest, NextResponse } from "next/server";
 import { unzipSarvamOutput } from "./unzip-helper";
 
 
-const SARVAM_KEY = process.env.SARVAM_API_KEY!;
 const SARVAM_BASE = "https://api.sarvam.ai";
+
+/** Read all Sarvam API keys from env: SARVAM_API_KEY, SARVAM_API_KEY_2 … _10 */
+function getSarvamKeys(): string[] {
+    const keys: string[] = [];
+    if (process.env.SARVAM_API_KEY) keys.push(process.env.SARVAM_API_KEY);
+    for (let i = 2; i <= 10; i++) {
+        const k = process.env[`SARVAM_API_KEY_${i}`];
+        if (k) keys.push(k);
+    }
+    return keys;
+}
+
+/** Resolve the key for a given index, falling back to the primary key. A doc
+ *  job is stateful across requests, so once create-job picks a working key the
+ *  client threads its index (key_index) back on upload/start/status. */
+function sarvamKeyAt(index?: number): string {
+    const keys = getSarvamKeys();
+    if (keys.length === 0) throw new Error("No SARVAM_API_KEY configured");
+    if (typeof index === "number" && index >= 0 && index < keys.length) return keys[index];
+    return keys[0];
+}
+
+/** Credit/auth/rate-limit errors that warrant rotating to the next key. */
+function isSarvamKeyError(status: number, body: string): boolean {
+    return status === 401 || status === 402 || status === 403 || status === 429 ||
+        body.includes('Insufficient credits') || body.includes('insufficient_credits') ||
+        body.includes('add more credits');
+}
 
 // ── Appwrite ──────────────────────────────────────────────────────────────────
 const APPWRITE_ENDPOINT = process.env.APPWRITE_ENDPOINT!;
@@ -13,10 +40,10 @@ const APPWRITE_BUCKET   = process.env.APPWRITE_BUCKET_ID!;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /api/sarvam-doc
-// body: { action: 'create-job', language?, format? }               → { job_id }
-//       { action: 'upload',     job_id, fileName, fileData(b64) }  → { uploadUrl }
-//       { action: 'start',      job_id }                           → { ok: true }
-// GET  /api/sarvam-doc?action=status&job_id=xxx
+// body: { action: 'create-job', language?, format? }                        → { job_id, key_index }
+//       { action: 'upload',     job_id, key_index, fileName, fileData(b64) } → { ok }
+//       { action: 'start',      job_id, key_index }                          → { ok: true }
+// GET  /api/sarvam-doc?action=status&job_id=xxx&key_index=n
 //       → { state, markdown?, images? }
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -42,40 +69,56 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const action  = searchParams.get("action");
     const job_id  = searchParams.get("job_id");
+    const keyIdx  = searchParams.get("key_index");
 
     if (action === "status" && job_id) {
-        return pollStatus(job_id);
+        return pollStatus(job_id, keyIdx ? parseInt(keyIdx, 10) : 0);
     }
     return NextResponse.json({ error: "Unknown GET action" }, { status: 400 });
 }
 
-// ── 1. Create job ─────────────────────────────────────────────────────────────
+// ── 1. Create job (rotates keys to find a working one) ────────────────────────
 async function createJob({ language = "en-IN", format = "md" }: any) {
-    const res = await fetch(`${SARVAM_BASE}/doc-digitization/job/v1`, {
-        method: "POST",
-        headers: {
-            "api-subscription-key": SARVAM_KEY,
-            "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-            job_parameters: { language, output_format: format },
-        }),
-    });
-    if (!res.ok) {
+    const keys = getSarvamKeys();
+    if (keys.length === 0) throw new Error("No SARVAM_API_KEY configured");
+
+    let lastErr = "";
+    for (let ki = 0; ki < keys.length; ki++) {
+        const keyLabel = ki === 0 ? "primary" : `key_${ki + 1}`;
+        const res = await fetch(`${SARVAM_BASE}/doc-digitization/job/v1`, {
+            method: "POST",
+            headers: {
+                "api-subscription-key": keys[ki],
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+                job_parameters: { language, output_format: format },
+            }),
+        });
+        if (res.ok) {
+            const data = await res.json();
+            // Return key_index so the client threads the SAME key through the job.
+            return NextResponse.json({ job_id: data.job_id, state: data.job_state, key_index: ki });
+        }
         const txt = await res.text();
-        throw new Error(`Sarvam create-job failed: ${res.status} ${txt}`);
+        lastErr = `${res.status} ${txt.slice(0, 120)}`;
+        if (isSarvamKeyError(res.status, txt) && ki < keys.length - 1) {
+            console.warn(`⚠️ sarvam-doc create-job [${keyLabel}] ${lastErr} — rotating key...`);
+            continue;
+        }
+        throw new Error(`Sarvam create-job failed: ${lastErr}`);
     }
-    const data = await res.json();
-    return NextResponse.json({ job_id: data.job_id, state: data.job_state });
+    throw new Error(`Sarvam create-job: all ${keys.length} key(s) exhausted (${lastErr})`);
 }
 
 // ── 2. Get upload URL + upload file ──────────────────────────────────────────
-async function uploadFile({ job_id, fileName, fileData }: any) {
+async function uploadFile({ job_id, key_index, fileName, fileData }: any) {
+    const key = sarvamKeyAt(key_index);
     // Step A: get presigned URL from Sarvam
     const urlRes = await fetch(`${SARVAM_BASE}/doc-digitization/job/v1/upload-files`, {
         method: "POST",
         headers: {
-            "api-subscription-key": SARVAM_KEY,
+            "api-subscription-key": key,
             "Content-Type": "application/json",
         },
         body: JSON.stringify({ job_id, files: [fileName] }),
@@ -107,10 +150,11 @@ async function uploadFile({ job_id, fileName, fileData }: any) {
 }
 
 // ── 3. Start job ──────────────────────────────────────────────────────────────
-async function startJob({ job_id }: any) {
+async function startJob({ job_id, key_index }: any) {
+    const key = sarvamKeyAt(key_index);
     const res = await fetch(`${SARVAM_BASE}/doc-digitization/job/v1/${job_id}/start`, {
         method: "POST",
-        headers: { "api-subscription-key": SARVAM_KEY, "Content-Type": "application/json" },
+        headers: { "api-subscription-key": key, "Content-Type": "application/json" },
         body: "{}",
     });
     if (!res.ok) {
@@ -121,9 +165,10 @@ async function startJob({ job_id }: any) {
 }
 
 // ── 4. Poll status → extract markdown + images ───────────────────────────────
-async function pollStatus(job_id: string) {
+async function pollStatus(job_id: string, key_index = 0) {
+    const key = sarvamKeyAt(key_index);
     const res = await fetch(`${SARVAM_BASE}/doc-digitization/job/v1/${job_id}/status`, {
-        headers: { "api-subscription-key": SARVAM_KEY },
+        headers: { "api-subscription-key": key },
     });
     if (!res.ok) {
         throw new Error(`Sarvam status failed: ${res.status}`);
@@ -139,7 +184,7 @@ async function pollStatus(job_id: string) {
     // Download output ZIP
     const dlRes = await fetch(`${SARVAM_BASE}/doc-digitization/job/v1/${job_id}/download-files`, {
         method: "POST",
-        headers: { "api-subscription-key": SARVAM_KEY, "Content-Type": "application/json" },
+        headers: { "api-subscription-key": key, "Content-Type": "application/json" },
         body: "{}",
     });
     if (!dlRes.ok) {

@@ -16,6 +16,24 @@ interface TTSOptions {
     chunkSize?: number;
 }
 
+/** Read all Sarvam API keys from env: SARVAM_API_KEY, SARVAM_API_KEY_2 … _10 */
+function getSarvamKeys(): string[] {
+    const keys: string[] = [];
+    if (process.env.SARVAM_API_KEY) keys.push(process.env.SARVAM_API_KEY);
+    for (let i = 2; i <= 10; i++) {
+        const k = process.env[`SARVAM_API_KEY_${i}`];
+        if (k) keys.push(k);
+    }
+    return keys;
+}
+
+/** Credit/auth/rate-limit errors that warrant rotating to the next key. */
+function isSarvamKeyError(status: number, body: string): boolean {
+    return status === 401 || status === 402 || status === 403 || status === 429 ||
+        body.includes('Insufficient credits') || body.includes('insufficient_credits') ||
+        body.includes('add more credits');
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // TEXT SANITIZATION
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -191,41 +209,56 @@ async function generateAudioWithSarvamRetry(
         async () => {
             console.log(`🎤 Calling Sarvam API: ${text.length} chars`);
 
-            const response = await fetch('https://api.sarvam.ai/text-to-speech', {
-                method: 'POST',
-                headers: {
-                    'api-subscription-key': process.env.SARVAM_API_KEY!,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    text: text,
-                    target_language_code: languageCode,
-                    speaker: "kabir",
-                    pace: 1.05,
-                    speech_sample_rate: 22050,
-                    enable_preprocessing: true,
-                    model: "bulbul:v3",
-                    temperature: 0.6,
-                    output_audio_codec: "wav"
-                }),
-                signal: AbortSignal.timeout(30000) // 30 second timeout
-            });
+            const keys = getSarvamKeys();
+            if (keys.length === 0) throw new Error('No SARVAM_API_KEY configured in environment variables');
 
-            if (!response.ok) {
-                const errorText = await response.text();
-                throw new Error(`Sarvam TTS failed (${response.status}): ${errorText}`);
+            let lastErr = '';
+            for (let ki = 0; ki < keys.length; ki++) {
+                const keyLabel = ki === 0 ? 'primary' : `key_${ki + 1}`;
+                const response = await fetch('https://api.sarvam.ai/text-to-speech', {
+                    method: 'POST',
+                    headers: {
+                        'api-subscription-key': keys[ki],
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        text: text,
+                        target_language_code: languageCode,
+                        speaker: "kabir",
+                        pace: 1.05,
+                        speech_sample_rate: 22050,
+                        enable_preprocessing: true,
+                        model: "bulbul:v3",
+                        temperature: 0.6,
+                        output_audio_codec: "wav"
+                    }),
+                    signal: AbortSignal.timeout(30000) // 30 second timeout
+                });
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    lastErr = `${response.status}: ${errorText.slice(0, 120)}`;
+                    // Rotate to next key on credit/auth/rate-limit errors.
+                    if (isSarvamKeyError(response.status, errorText) && ki < keys.length - 1) {
+                        console.warn(`⚠️ Sarvam TTS [${keyLabel}] ${lastErr} — rotating key...`);
+                        continue;
+                    }
+                    throw new Error(`Sarvam TTS failed (${response.status}): ${errorText}`);
+                }
+
+                const result = await response.json();
+
+                if (!result.audios || result.audios.length === 0) {
+                    throw new Error('No audio data from Sarvam AI');
+                }
+
+                const audioBuffer = Buffer.from(result.audios[0], 'base64');
+                console.log(`✅ Audio generated: ${audioBuffer.length} bytes${ki > 0 ? ` (via ${keyLabel})` : ''}`);
+
+                return audioBuffer;
             }
 
-            const result = await response.json();
-
-            if (!result.audios || result.audios.length === 0) {
-                throw new Error('No audio data from Sarvam AI');
-            }
-
-            const audioBuffer = Buffer.from(result.audios[0], 'base64');
-            console.log(`✅ Audio generated: ${audioBuffer.length} bytes`);
-
-            return audioBuffer;
+            throw new Error(`Sarvam TTS: all ${keys.length} key(s) exhausted (${lastErr})`);
         },
         retryConfig,
         `Sarvam TTS (${text.substring(0, 50)}...)`

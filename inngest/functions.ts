@@ -1341,10 +1341,9 @@ OUTPUT: JSON object wrapped in <json> and </json> tags.`;
             const os = require('os');
             const { SarvamAIClient } = require('sarvamai');
 
-            // Initialize Sarvam SDK client
-            const sarvamClient = new SarvamAIClient({
-                apiSubscriptionKey: process.env.SARVAM_API_KEY!,
-            });
+            // All available Sarvam keys (SARVAM_API_KEY, _2 … _10) for rotation.
+            const sttKeys = getSarvamKeys();
+            if (sttKeys.length === 0) throw new Error('No SARVAM_API_KEY found in environment variables');
 
             // Step A: Download the audio from Vercel Blob
             console.log(`📥 Downloading audio from: ${voiceData.audioUrl}`);
@@ -1363,17 +1362,36 @@ OUTPUT: JSON object wrapped in <json> and </json> tags.`;
             console.log(`📝 Temp file created: ${tempFilePath}`);
 
             try {
-                // Step C: Create batch STT job
+                // Step C: Create batch STT job — rotate keys until one is accepted.
                 console.log(`🔄 Creating Sarvam batch STT job...`);
-                const job = await sarvamClient.speechToTextJob.createJob({
-                    model: "saaras:v3",
-                    // @ts-ignore
-                    mode: "transcribe",
-                    languageCode: selectedLanguage || "en-IN",
-                    withTimestamps: true,
-                    withDiarization: false,
-                    numSpeakers: 1,
-                });
+                let job: any = null;
+                let sttKeyErr = '';
+                for (let ki = 0; ki < sttKeys.length; ki++) {
+                    const keyLabel = ki === 0 ? 'primary' : `key_${ki + 1}`;
+                    try {
+                        const sarvamClient = new SarvamAIClient({ apiSubscriptionKey: sttKeys[ki] });
+                        job = await sarvamClient.speechToTextJob.createJob({
+                            model: "saaras:v3",
+                            // @ts-ignore
+                            mode: "transcribe",
+                            languageCode: selectedLanguage || "en-IN",
+                            withTimestamps: true,
+                            withDiarization: false,
+                            numSpeakers: 1,
+                        });
+                        if (ki > 0) console.log(`✅ Sarvam STT job created with [${keyLabel}] after rotation`);
+                        break;
+                    } catch (e: any) {
+                        sttKeyErr = e?.message ?? String(e);
+                        const rotatable = /40[0-3]|429|credit|quota|insufficient/i.test(sttKeyErr);
+                        if (rotatable && ki < sttKeys.length - 1) {
+                            console.warn(`⚠️ Sarvam STT [${keyLabel}] ${sttKeyErr.slice(0, 100)} — rotating key...`);
+                            continue;
+                        }
+                        throw e;
+                    }
+                }
+                if (!job) throw new Error(`Sarvam STT: all ${sttKeys.length} key(s) exhausted (${sttKeyErr})`);
                 console.log(`✅ Batch job created`);
 
                 // Step D: Upload audio file to job
