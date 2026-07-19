@@ -3,7 +3,7 @@
  *
  * Apify-based image generation for ALL contexts:
  *  - Short video scenes (9:16 portrait)
- *  - Thumbnails (9:16 portrait)
+ *  - Series thumbnails (16:9 landscape)
  *  - Notes/course cover images (16:9 landscape)
  *
  * Models:
@@ -512,10 +512,11 @@ export async function generateApifyShortImage(
 }
 
 /**
- * Generate a thumbnail image (9:16 portrait for Shorts).
+ * Generate a series thumbnail image (16:9 landscape — the standard video
+ * thumbnail shape, NOT the 9:16 shape of the short itself).
  */
 export async function generateApifyImageForThumbnail(prompt: string): Promise<string> {
-  return generateApifyImage(prompt, { aspectRatio: "9:16", sceneIndex: -1 });
+  return generateApifyImage(prompt, { aspectRatio: "16:9", sceneIndex: -1 });
 }
 
 /**
