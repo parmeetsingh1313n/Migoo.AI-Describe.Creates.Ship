@@ -25,15 +25,26 @@ const isPublicRoute = createRouteMatcher([
 const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
 
 /**
- * Simple rate limiter for middleware layer.
- * Limits each IP to 60 requests per minute for API routes.
+ * Simple rate limiter for the middleware layer.
+ *
+ * Read (GET/HEAD) and write (POST/PUT/PATCH/DELETE) requests get SEPARATE
+ * budgets keyed per IP, because the app legitimately polls several status
+ * endpoints at once (course image-readiness every 4s, chapter status every 3s,
+ * per-chapter render polls). A single 60/min cap made those polls trip a 429,
+ * which blocked the UI from SEEING generated images (generation itself runs in
+ * Inngest and was never rate-limited). Reads get a high ceiling; writes stay
+ * strict to keep abuse protection on the endpoints that actually mutate data.
  */
-function checkRateLimit(ip: string): { allowed: boolean; remaining: number } {
+const READ_LIMIT = 300;   // GET/HEAD per minute per IP — covers heavy polling
+const WRITE_LIMIT = 60;   // POST/PUT/PATCH/DELETE per minute per IP
+
+function checkRateLimit(ip: string, isWrite: boolean): { allowed: boolean; remaining: number } {
     const now = Date.now();
     const windowMs = 60_000; // 1 minute
-    const maxRequests = 60;
+    const maxRequests = isWrite ? WRITE_LIMIT : READ_LIMIT;
+    const mapKey = `${isWrite ? 'w' : 'r'}:${ip}`;
 
-    const entry = rateLimitMap.get(ip);
+    const entry = rateLimitMap.get(mapKey);
 
     // Cleanup old entries periodically
     if (rateLimitMap.size > 10000) {
@@ -43,7 +54,7 @@ function checkRateLimit(ip: string): { allowed: boolean; remaining: number } {
     }
 
     if (!entry || now > entry.resetTime) {
-        rateLimitMap.set(ip, { count: 1, resetTime: now + windowMs });
+        rateLimitMap.set(mapKey, { count: 1, resetTime: now + windowMs });
         return { allowed: true, remaining: maxRequests - 1 };
     }
 
@@ -62,7 +73,9 @@ export default clerkMiddleware(async (auth, req) => {
             ?? req.headers.get('x-real-ip')
             ?? 'unknown';
 
-        const { allowed, remaining } = checkRateLimit(ip);
+        const isWrite = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method);
+        const limit = isWrite ? WRITE_LIMIT : READ_LIMIT;
+        const { allowed, remaining } = checkRateLimit(ip, isWrite);
 
         if (!allowed) {
             return NextResponse.json(
@@ -71,7 +84,7 @@ export default clerkMiddleware(async (auth, req) => {
                     status: 429,
                     headers: {
                         'Retry-After': '60',
-                        'X-RateLimit-Limit': '60',
+                        'X-RateLimit-Limit': String(limit),
                         'X-RateLimit-Remaining': '0',
                     },
                 }
@@ -80,7 +93,7 @@ export default clerkMiddleware(async (auth, req) => {
 
         // Add rate limit headers to response
         const response = NextResponse.next();
-        response.headers.set('X-RateLimit-Limit', '60');
+        response.headers.set('X-RateLimit-Limit', String(limit));
         response.headers.set('X-RateLimit-Remaining', String(remaining));
     }
 
