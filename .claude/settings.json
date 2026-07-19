@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git add *)",
+      "Bash(git commit -m 'feat\\(motion-graphics\\): advanced scene engine, 10 new components, AI prompt enhancer + scene-targeted chat *)",
+      "Bash(git push *)",
+      "Bash(git checkout *)",
+      "Bash(git cherry-pick *)",
+      "Bash(git commit -m 'fix\\(motion-graphics\\): play chunked renders + keep sub-50MB uploads single-file *)",
+      "Bash(npx remotion *)",
+      "Bash(git commit -m 'fix\\(motion-graphics\\): rotating dotted globe for map_reveal + fix card_stack_3d & timeline_reveal *)",
+      "Bash(git commit -m ' *)",
+      "Bash(npx tsc *)",
+      "Bash(git commit -m 'feat\\(shorts\\): GitHub-style type-to-confirm delete dialog *)",
+      "Bash(git commit -m 'fix\\(sarvam\\): add up-to-10-key rotation to the 4 modules that lacked it *)",
+      "Bash(git fetch *)",
+      "Bash(git branch *)",
+      "Bash(git commit -m 'fix\\(shorts\\): authenticate Appwrite audio reads in merge + STT steps *)",
+      "Bash(git commit -m 'fix+feat\\(shorts\\): fix JCS surrogate crash + deepen web research *)",
+      "Bash(git commit -m 'fix\\(shorts\\): stream download to disk instead of buffering blob \\(fixes OOM\\) *)",
+      "Bash(git commit -m 'fix\\(middleware\\): separate read/write rate limits to stop polling 429s *)",
+      "Bash(git merge *)",
+      "Bash(node -e ' *)"
+    ]
+  }
+}

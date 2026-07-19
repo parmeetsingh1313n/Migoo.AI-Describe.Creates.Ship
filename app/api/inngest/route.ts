@@ -1,5 +1,6 @@
 import { inngest } from "@/inngest/client";
 import { generateCourseImagesFn, generateCourseThumbnailFn, generateCourseSlidesFn, generateCourseAudioFn } from "@/inngest/course-functions";
+import { generateCourseSlidesParallelFn } from "@/inngest/course-functions-parallel";
 import { generateMotionGraphic, generateShortVideo, generateShortSeriesThumbnailFn, helloWorld, renderMotionGraphicOnly } from "@/inngest/functions";
 import { serve } from "inngest/next";
 
@@ -23,6 +24,7 @@ export const { GET, POST, PUT } = serve({
         generateCourseThumbnailFn,
         generateCourseImagesFn,
         generateCourseSlidesFn,
+        generateCourseSlidesParallelFn,  // EXPERIMENTAL: plan-then-parallel (trigger with course/slides.generate.parallel)
         generateCourseAudioFn,
     ],
 });
