@@ -11,7 +11,7 @@ import { and, desc, eq, like, or } from "drizzle-orm";
 import { inngest } from "./client";
 import { groq } from "@/config/groq";
 import { shortsLLM, parseScriptJSON, callSpecificModelWithKey } from "@/lib/shorts-llm";
-import { distillFactSheet, searchWeb } from "@/lib/web-search";
+import { distillFactSheet, searchWeb, stripLoneSurrogates } from "@/lib/web-search";
 
 // ─── Lightweight MP4 duration prober (works on serverless, no ffprobe) ────────
 // Fetches up to 2 MB of the file and walks MP4 box headers looking for
@@ -717,15 +717,20 @@ Return ONLY a valid JSON object matching the schema above.`;
         const rawResearchSources = await step.run("run-web-research", async () => {
             if (studioPayload?.scriptData) return null;
             console.log(`🌐 Deep-Crawl RAG research on: "${chosenTopic}"...`);
-            // skipDistillation:true — crawl pages but defer the LLM fact-distillation to next step
-            const webResearch = await searchWeb(chosenTopic, { deepCrawl: true, skipDistillation: true });
+            // skipDistillation:true — crawl pages but defer the LLM fact-distillation to
+            // the next step. multiAngle:true — still expand into several research angles
+            // here so the crawl covers the topic deeply (distillation runs next step).
+            const webResearch = await searchWeb(chosenTopic, { deepCrawl: true, skipDistillation: true, multiAngle: true });
             console.log(`✅ Crawl complete: ${webResearch.sources.length} sources`);
-            // Return only what we need — avoid serialising huge fullText between steps
+            // Return only what we need — avoid serialising huge fullText between steps.
+            // Strip lone UTF-16 surrogates from every crawled string: Inngest
+            // canonicalizes step returns with JCS, which throws "Missing surrogate"
+            // on broken Unicode from web pages and kills the whole job.
             return webResearch.sources.map((s: any) => ({
-                title:    s.title,
-                url:      s.url,
-                snippet:  s.snippet,
-                fullText: s.fullText ? s.fullText.slice(0, 8000) : undefined,
+                title:    stripLoneSurrogates(s.title ?? ''),
+                url:      stripLoneSurrogates(s.url ?? ''),
+                snippet:  stripLoneSurrogates(s.snippet ?? ''),
+                fullText: s.fullText ? stripLoneSurrogates(s.fullText.slice(0, 8000)) : undefined,
                 source:   s.source,
             }));
         });
@@ -759,7 +764,7 @@ ${factSheet}
 6. Do NOT introduce any fact not present in this research block.
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 `;
-            return { webContext, factCount, sourcesCount: rawResearchSources.length };
+            return { webContext: stripLoneSurrogates(webContext), factCount, sourcesCount: rawResearchSources.length };
         });
 
         // Step 2a: Generate Video Script Reasoning (Phase 1)

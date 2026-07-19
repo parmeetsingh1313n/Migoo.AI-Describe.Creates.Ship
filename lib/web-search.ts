@@ -23,6 +23,7 @@ export interface WebSource {
     snippet:     string;   // ~200 chars from search API
     fullText?:   string;   // full crawled page text (up to 8000 chars)
     source:      'tavily' | 'wikipedia';
+    score?:      number;   // Tavily relevance score (0-1) — used to rank crawl order
 }
 
 export interface WebResearchResult {
@@ -34,6 +35,24 @@ export interface WebResearchResult {
 }
 
 // ─── HTML Text Extractor ──────────────────────────────────────────────────────
+
+/**
+ * Remove lone (unpaired) UTF-16 surrogate code units from a string. Crawled web
+ * pages sometimes yield text with half of a surrogate pair (a truncated emoji or
+ * a bad byte), which is valid in a JS string but NOT valid Unicode. Inngest
+ * canonicalizes step return values with JCS, which throws
+ * "error transforming request with JCS: Missing surrogate" on such input — that
+ * crashes the whole generation job right after crawling. Stripping them keeps
+ * the text JSON/JCS-safe.
+ */
+export function stripLoneSurrogates(input: string): string {
+    if (!input) return input;
+    // High surrogate (D800–DBFF) NOT followed by a low surrogate → drop.
+    // Low surrogate (DC00–DFFF) NOT preceded by a high surrogate → drop.
+    return input
+        .replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/g, '')
+        .replace(/(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '');
+}
 
 /**
  * Strip HTML tags and extract clean text from a web page response.
@@ -73,7 +92,7 @@ function extractTextFromHtml(html: string): string {
             .map(l => l.trim())
             .filter(l => l.length > 40); // only lines with real content
 
-        return lines.join('\n').slice(0, 12000); // max 12k chars per page
+        return stripLoneSurrogates(lines.join('\n').slice(0, 12000)); // max 12k chars per page
     } catch {
         return '';
     }
@@ -136,6 +155,39 @@ async function crawlPage(url: string): Promise<string> {
     }
 }
 
+// ─── Query Expansion (multi-angle research) ───────────────────────────────────
+
+/**
+ * Turn one topic into several focused research sub-questions so we cover the
+ * subject from multiple angles (history, key figures, surprising facts, impact)
+ * instead of a single generic query. Deeper, less repetitive coverage. Fast,
+ * capped LLM call; falls back to heuristic angles if the LLM is unavailable.
+ */
+export async function expandResearchQueries(topic: string): Promise<string[]> {
+    const heuristicFallback = [
+        topic,
+        `${topic} history origin timeline key dates`,
+        `${topic} surprising lesser-known facts significance`,
+    ];
+    try {
+        const sys = `You generate focused web-search queries for deep documentary research. Given a topic, output EXACTLY 4 distinct search queries (one per line, no numbering, no quotes) that together cover: (1) core facts & definition, (2) history/origin/timeline, (3) key people/places/events, (4) surprising or lesser-known angles. Each query must be specific and self-contained.`;
+        const out = await shortsLLM.text(sys, `Topic: "${topic}"`, { temperature: 0.4, maxTokens: 200 });
+        const queries = out
+            .split('\n')
+            .map(l => l.replace(/^[\s\-\*\d\.\)]+/, '').replace(/^["']|["']$/g, '').trim())
+            .filter(l => l.length > 3)
+            .slice(0, 4);
+        // Always include the original topic as the first, highest-priority query.
+        const merged = [topic, ...queries.filter(q => q.toLowerCase() !== topic.toLowerCase())];
+        const deduped = Array.from(new Set(merged)).slice(0, 4);
+        console.log(`🧭 Expanded "${topic.slice(0, 40)}" → ${deduped.length} research angles`);
+        return deduped.length >= 2 ? deduped : heuristicFallback;
+    } catch (err: any) {
+        console.warn(`⚠️ Query expansion failed (${err.message}) — using heuristic angles`);
+        return heuristicFallback;
+    }
+}
+
 // ─── Tavily Search ────────────────────────────────────────────────────────────
 
 async function searchTavily(query: string): Promise<WebSource[]> {
@@ -153,7 +205,7 @@ async function searchTavily(query: string): Promise<WebSource[]> {
                 api_key:             apiKey,
                 query,
                 search_depth:        'advanced',
-                max_results:         10,          // more candidates to crawl
+                max_results:         12,          // more candidates to rank & crawl
                 include_answer:      true,
                 include_raw_content: true,
             }),
@@ -176,6 +228,7 @@ async function searchTavily(query: string): Promise<WebSource[]> {
             url:     r.url || '',
             snippet: (r.raw_content || r.content || '').slice(0, 3000), // raised to 3k for richer context
             source:  'tavily' as const,
+            score:   typeof r.score === 'number' ? r.score : 0,
         }));
 
         // Prepend Tavily AI answer as a synthetic source if available
@@ -185,6 +238,7 @@ async function searchTavily(query: string): Promise<WebSource[]> {
                 url:     'https://tavily.com',
                 snippet: data.answer,
                 source:  'tavily',
+                score:   1, // synthesized answer — treat as top relevance
             });
         }
 
@@ -267,9 +321,9 @@ async function searchWikipedia(query: string): Promise<WebSource[]> {
             if (!seen.has(t)) { seen.add(t); uniqueTitles.push(t); uniqueUrls.push(allUrls[i]); }
         }
 
-        // Step 3: Fetch full article text for top 3 unique matches
+        // Step 3: Fetch full article text for top 4 unique matches
         const sources: WebSource[] = [];
-        for (let i = 0; i < Math.min(uniqueTitles.length, 3); i++) {
+        for (let i = 0; i < Math.min(uniqueTitles.length, 4); i++) {
             try {
                 const fullText = await getWikipediaFullArticle(uniqueTitles[i]);
                 if (fullText && fullText.length > 200) {
@@ -299,10 +353,12 @@ async function searchWikipedia(query: string): Promise<WebSource[]> {
  * Returns sources enriched with fullText.
  */
 async function deepCrawlSources(sources: WebSource[]): Promise<WebSource[]> {
-    // Filter to crawlable Tavily sources — Wikipedia already has fullText via API
+    // Filter to crawlable Tavily sources — Wikipedia already has fullText via API.
+    // Rank by Tavily relevance score so we spend crawl budget on the best pages.
     const crawlable = sources
         .filter(s => s.source === 'tavily' && s.url && !s.url.includes('tavily.com'))
-        .slice(0, 6); // crawl up to 6 pages (raised from 4)
+        .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
+        .slice(0, 8); // crawl up to 8 top-ranked pages (raised from 6)
 
     if (crawlable.length === 0) return sources;
 
@@ -359,51 +415,60 @@ export async function distillFactSheet(query: string, sources: WebSource[]): Pro
             .sort((a, b) => (b.fullText?.length || b.snippet.length) - (a.fullText?.length || a.snippet.length)),
     ];
 
-    // Aggregate all content — raised to 6k per source, 28k total
+    // Aggregate all content — raised to 7k per source, 40k total for deeper coverage
     const allContent = sorted
         .map((s, i) => {
             const content = s.fullText || s.snippet;
             const label   = s.source === 'wikipedia' ? '⭐ WIKIPEDIA (authoritative)' : `Web Source`;
-            return `\n--- SOURCE ${i + 1} [${label}]: ${s.title} ---\nURL: ${s.url}\n${content.slice(0, 6000)}`;
+            return `\n--- SOURCE ${i + 1} [${label}]: ${s.title} ---\nURL: ${s.url}\n${content.slice(0, 7000)}`;
         })
         .join('\n\n')
-        .slice(0, 28000);
+        .slice(0, 40000);
 
     console.log(`\n🧠 Distilling fact sheet from ${sorted.length} sources (${allContent.length} chars)...`);
 
-    const systemPrompt = `You are a research analyst, fact extractor, AND narrative architect. You will be given raw web content from multiple sources (Wikipedia marked ⭐ is most authoritative). Your job is to:
-1. Extract specific, verifiable facts (real dates, names, numbers, measurements).
+    const systemPrompt = `You are a documentary research analyst, fact extractor, AND narrative architect. You will be given raw web content from multiple sources (Wikipedia marked ⭐ is most authoritative). Your job is to produce a rich, deeply factual research brief that a scriptwriter can turn into a gripping short documentary.
+
+Do all of this:
+1. Extract specific, verifiable facts (real dates, names, numbers, measurements, places).
 2. Identify a CENTRAL NARRATIVE THREAD — one overarching story that connects the facts.
 3. Arrange facts so they build on each other logically (cause → effect, before → after, problem → solution).
+4. Surface the most SURPRISING / counter-intuitive facts — the ones that make a viewer stop scrolling.
+5. Capture VIVID DETAILS and any memorable quotes/phrasings that make narration cinematic.
 
 Rules:
 - WIKIPEDIA facts take priority over web sources when they conflict.
 - Extract ONLY facts confirmed by at least one source (never hallucinate).
 - If 2+ sources confirm a fact, mark it (confirmed ✓).
-- Group facts into CHRONOLOGICAL or THEMATIC categories that flow naturally into each other.
-- End with a "NARRATIVE THREAD" section: 3-5 sentences describing the story arc these facts tell.
-- Do NOT include vague opinions. Every bullet must have a date, name, or number.
+- Group facts into CHRONOLOGICAL or THEMATIC categories that flow naturally.
+- Every bullet must contain a date, name, number, or concrete detail — no vague opinions.
 
-Output format:
+Output format (use these exact section headers):
 CENTRAL NARRATIVE: [2-3 sentence story arc that ties all facts together]
+
+SURPRISING HOOKS:
+• [3-5 of the most surprising/counter-intuitive facts — each a potential opening line]
 
 CATEGORY: [Name — ordered chronologically or thematically]
 • [Specific fact with date/name/number] (Source: source name)[confirmed ✓ if multi-source]
 
 CATEGORY: [Next logical chapter]
-• [...]`;
+• [...]
+
+VIVID DETAILS & QUOTES:
+• [Sensory details, memorable numbers, or direct quotes that make narration cinematic]`;
 
     const userPrompt = `Topic: "${query}"
 
 Raw web content from ${sorted.length} sources (⭐ = Wikipedia, highest authority):
 ${allContent}
 
-Extract 30-45 specific facts grouped into 5-7 chronological/thematic categories. Start with a CENTRAL NARRATIVE paragraph. Mark facts confirmed by multiple sources. Prioritise Wikipedia data. Focus on facts that are surprising, specific, and would flow naturally in a short documentary narration.`;
+Extract 40-55 specific facts grouped into 5-8 chronological/thematic categories. Begin with CENTRAL NARRATIVE, then SURPRISING HOOKS, then the categories, then VIVID DETAILS & QUOTES. Mark facts confirmed by multiple sources. Prioritise Wikipedia data. Focus on facts that are surprising, specific, and would flow naturally in a short documentary narration.`;
 
     try {
         const factSheet = await shortsLLM.text(systemPrompt, userPrompt, {
             temperature: 0.2, // very low — factual extraction, not creativity
-            maxTokens: 4000, // raised to capture more facts
+            maxTokens: 5000, // raised to capture more facts + hooks + vivid details
         });
 
         const factCount = factSheet.split('\n').filter(l => /^[•\-\*]/.test(l.trim())).length;
@@ -427,8 +492,11 @@ Extract 30-45 specific facts grouped into 5-7 chronological/thematic categories.
  * @param options.deepCrawl - Whether to crawl full page content (default: true)
  * @returns WebResearchResult with distilled fact sheet and context block
  */
-export async function searchWeb(query: string, options: { deepCrawl?: boolean; skipDistillation?: boolean } = {}): Promise<WebResearchResult> {
+export async function searchWeb(query: string, options: { deepCrawl?: boolean; skipDistillation?: boolean; multiAngle?: boolean } = {}): Promise<WebResearchResult> {
     const { deepCrawl = true, skipDistillation = false } = options;
+    // Default multi-angle ON for full research runs, OFF for fast topic-discovery
+    // (skipDistillation) calls — but an explicit `multiAngle` always wins.
+    const multiAngle = options.multiAngle ?? !skipDistillation;
 
     if (!query || query.trim().length < 3) {
         return { query, sources: [], factSheet: '', contextBlock: '', searchedAt: new Date().toISOString() };
@@ -439,16 +507,25 @@ export async function searchWeb(query: string, options: { deepCrawl?: boolean; s
     console.log(`${'═'.repeat(70)}`);
     const startTime = Date.now();
 
-    // ── Step 1: Run Tavily + Wikipedia in parallel ───────────────────────────
-    const [tavilyResults, wikiResults] = await Promise.all([
-        searchTavily(query),
+    // ── Step 0: Multi-angle query expansion ──────────────────────────────────
+    // Research the topic from several angles (core / history / people / surprises)
+    // for deeper, less repetitive coverage.
+    const angles = multiAngle ? await expandResearchQueries(query) : [query];
+
+    // ── Step 1: Run Tavily (per angle) + Wikipedia (once) in parallel ────────
+    const tavilyPromises = angles.map(a => searchTavily(a));
+    const [wikiResults, ...tavilyPerAngle] = await Promise.all([
         searchWikipedia(query),
+        ...tavilyPromises,
     ]);
+    const tavilyResults = tavilyPerAngle.flat();
 
     // Combine: Tavily first (diverse, current), then Wikipedia (authoritative)
     let allSources = [...tavilyResults, ...wikiResults];
 
-    // Deduplicate by domain
+    // Deduplicate by domain — but keep the HIGHEST-scoring page per domain so a
+    // strong page isn't dropped in favour of a weaker one from the same site.
+    allSources.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
     const seen = new Set<string>();
     allSources = allSources.filter(s => {
         try {
@@ -461,7 +538,7 @@ export async function searchWeb(query: string, options: { deepCrawl?: boolean; s
         }
     });
 
-    console.log(`📊 Total sources before crawl: ${allSources.length}`);
+    console.log(`📊 Total sources before crawl: ${allSources.length} (from ${angles.length} angle(s))`);
 
     // ── Step 2: Deep-Crawl top web pages ────────────────────────────────────
     let enrichedSources = allSources;
@@ -519,7 +596,7 @@ ${factSheet || fallbackSnippets}
 
     return {
         query,
-        sources:      enrichedSources.slice(0, 10),
+        sources:      enrichedSources.slice(0, 14),
         factSheet,
         contextBlock,
         searchedAt:   new Date().toISOString(),
