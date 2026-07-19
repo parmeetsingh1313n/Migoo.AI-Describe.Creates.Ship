@@ -3,6 +3,11 @@ import { db } from '@/config/db';
 import { shortVideoAssets } from '@/config/schema';
 import { eq } from 'drizzle-orm';
 
+// Streaming a full video can exceed the default serverless limit; allow up to
+// 5 min (Vercel cap) so the browser download completes instead of being killed.
+export const maxDuration = 300;
+export const dynamic = 'force-dynamic';
+
 export async function GET(
   req: NextRequest,
   { params }: { params: any }

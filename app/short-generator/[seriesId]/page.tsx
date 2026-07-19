@@ -888,34 +888,28 @@ function VideoPlayerDialog({ video, series, onClose }: { video: VideoAsset | nul
 
     if (!video) return null;
 
-    const handleDownload = async () => {
+    const handleDownload = () => {
         if (!videoUrl || isDownloading) return;
         setIsDownloading(true);
         try {
-            const response = await fetch(`/api/download-video/${video.videoId}`);
-            if (!response.ok) {
-                const errText = await response.text().catch(() => `HTTP ${response.status}`);
-                throw new Error(errText || `HTTP ${response.status}`);
-            }
-            const blob = await response.blob();
-            const objectUrl = URL.createObjectURL(blob);
+            // Navigate directly to the streaming download endpoint. The server
+            // sends Content-Disposition: attachment, so the browser streams the
+            // MP4 straight to disk. We deliberately DON'T fetch()+blob() here —
+            // buffering a large video into a JS Blob + object URL doubles it in
+            // RAM and crashes the tab with "Out of Memory" on big files.
             const a = document.createElement('a');
-            a.href = objectUrl;
-            // Build a safe filename from the video title (keep unicode / hinglish chars)
-            const safeTitle = (video.videoTitle || 'video')
-                .replace(/[\/\\:*?"<>|]/g, '')
-                .replace(/\s+/g, '_')
-                .trim() || 'video';
-            a.download = `${safeTitle}.mp4`;
+            a.href = `/api/download-video/${video.videoId}`;
+            a.rel = 'noopener';
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
-            setTimeout(() => URL.revokeObjectURL(objectUrl), 2000);
         } catch (err: any) {
             console.error('Download error:', err);
             toast.error(`Download failed: ${err.message}`);
         } finally {
-            setIsDownloading(false);
+            // The browser takes over the download immediately; clear the spinner
+            // shortly after so the button doesn't get stuck.
+            setTimeout(() => setIsDownloading(false), 1500);
         }
     };
 
