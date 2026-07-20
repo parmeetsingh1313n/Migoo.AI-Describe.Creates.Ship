@@ -20,7 +20,9 @@
       "Bash(git commit -m 'fix\\(shorts\\): stream download to disk instead of buffering blob \\(fixes OOM\\) *)",
       "Bash(git commit -m 'fix\\(middleware\\): separate read/write rate limits to stop polling 429s *)",
       "Bash(git merge *)",
-      "Bash(node -e ' *)"
+      "Bash(node -e ' *)",
+      "Bash(git commit -m 'feat\\(slides\\): add experimental plan-then-parallel slide generation *)",
+      "Bash(git commit -m 'fix\\(images\\): reuse persisted expansion so re-runs don'\\\\''t regenerate images *)"
     ]
   }
 }
