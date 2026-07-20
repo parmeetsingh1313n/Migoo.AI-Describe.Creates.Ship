@@ -28,7 +28,7 @@ import { inngest } from "./client";
 // HELPERS — Dynamic per-chapter slide topic expansion
 // ─────────────────────────────────────────────────────────────────────────────
 
-const MAX_SLIDES_PER_CHAPTER = 25;
+export const MAX_SLIDES_PER_CHAPTER = 25;
 
 export type ChapterTopic = { topic: string; needsCode: boolean };
 
@@ -42,7 +42,7 @@ export type ChapterTopic = { topic: string; needsCode: boolean };
  * list (1:1, needsCode via keyword heuristic) on any failure — expansion is
  * an enhancement, never a blocker for chapter generation.
  */
-async function expandChapterTopics(chapterTitle: string, subContent: string[]): Promise<ChapterTopic[]> {
+export async function expandChapterTopics(chapterTitle: string, subContent: string[]): Promise<ChapterTopic[]> {
     if (subContent.length === 0) return [{ topic: chapterTitle, needsCode: false }];
     try {
         const input = JSON.stringify({ chapterTitle, subContent });
@@ -688,7 +688,7 @@ export const generateCourseImagesFn = inngest.createFunction(
 // ─────────────────────────────────────────────────────────────────────────────
 // SHARED — status upsert helper factory (both slides + audio functions use it)
 // ─────────────────────────────────────────────────────────────────────────────
-function makeUpsertStatus(courseId: string, chapterId: string) {
+export function makeUpsertStatus(courseId: string, chapterId: string) {
     return async (patch: {
         status?: string;
         slidesComplete?: number;
