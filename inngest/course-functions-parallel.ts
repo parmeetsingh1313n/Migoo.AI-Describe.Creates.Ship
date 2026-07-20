@@ -31,7 +31,7 @@ import {
     pickArchetype, pickNonCodeArchetype, componentName,
     isCodeArchetype, isCodeCompanionArchetype, codeSlideBudget
 } from "@/data/slide-design";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { inngest } from "./client";
 import { makeUpsertStatus, expandChapterTopics, MAX_SLIDES_PER_CHAPTER, type ChapterTopic } from "./course-functions";
 
@@ -191,17 +191,30 @@ export const generateCourseSlidesParallelFn = inngest.createFunction(
             return map;
         });
 
-        // ── PHASE 3: Generate all slides in parallel ──────────────────────────
-        const slidesData = await step.run("generate-all-slides-parallel", async () => {
-            console.log(`🎬 ${TAG} Generating ${totalSlides} slides in parallel...`);
+        // ── PHASE 3: Generate slides — each in its OWN step, bounded concurrency ──
+        // CRITICAL: every slide is its own step.run() so Inngest checkpoints each
+        // one independently. If a Vercel 300s timeout hits, only the in-flight
+        // slides retry — every slide already saved is memoized and NEVER
+        // regenerated. (The old single mega-step regenerated ALL slides on any
+        // timeout — that's the duplicate-generation bug.)
+        //
+        // Concurrency is capped at CONCURRENCY (not all-at-once) to avoid the
+        // NVIDIA 429 "thundering herd" that made every call back off for minutes.
+        const CONCURRENCY = 3;
 
-            const slidePromises = subTopics.map(async (topic, si) => {
-                // Skip if DB already has this slide
-                const existing = existingSlides.find(s => s.slideIndex === si + 1);
-                if (existing) {
-                    console.log(`Slide ${si + 1}/${totalSlides} - reusing from DB`);
-                    let existingHtml = existing.html ?? null;
-                    if (existingHtml && allImages.length > 0 && existingHtml.includes('{{IMAGE_PLACEHOLDER}}')) {
+        const generateOneSlide = async (topic: string, si: number) => {
+            return await step.run(`generate-slide-${si}`, async () => {
+                // Fresh per-slide DB check — never regenerate an existing slide,
+                // even across a completely fresh re-trigger of the function.
+                const [existing] = await db.select().from(chapterContentSlides)
+                    .where(and(
+                        eq(chapterContentSlides.chapterId, chapterId),
+                        eq(chapterContentSlides.slideIndex, si + 1),
+                    ));
+                if (existing && existing.html) {
+                    console.log(`⏭️  ${TAG} Slide ${si + 1}/${totalSlides} already exists — skipping`);
+                    let existingHtml = existing.html;
+                    if (allImages.length > 0 && existingHtml.includes('{{IMAGE_PLACEHOLDER}}')) {
                         const gIdx = chapterIndex * MAX_SLIDES_PER_CHAPTER + si;
                         let extra = 0;
                         existingHtml = existingHtml.replace(/\{\{IMAGE_PLACEHOLDER\}\}/g, () => {
@@ -311,12 +324,32 @@ export const generateCourseSlidesParallelFn = inngest.createFunction(
                 console.log(`💾 ${TAG} Slide ${si + 1}/${totalSlides} saved ✅`);
                 return slideContent;
             });
+        };
 
-            // Wait for all slides to complete
-            const results = await Promise.all(slidePromises);
-            console.log(`✅ ${TAG} All ${results.length} slides generated in parallel`);
-            return results;
-        });
+        // Run slides in bounded-concurrency waves (3 at a time). Each slide is an
+        // independent Inngest step, so a timeout only ever re-runs the unfinished
+        // ones — completed slides stay memoized.
+        console.log(`🎬 ${TAG} Generating ${totalSlides} slides (${CONCURRENCY} at a time)...`);
+        const slidesData: any[] = new Array(totalSlides);
+        for (let start = 0; start < totalSlides; start += CONCURRENCY) {
+            const wave = subTopics
+                .map((topic, si) => ({ topic, si }))
+                .slice(start, start + CONCURRENCY);
+            const waveResults = await Promise.all(wave.map(({ topic, si }) => generateOneSlide(topic, si)));
+            wave.forEach(({ si }, k) => { slidesData[si] = waveResults[k]; });
+            // Progress update after each wave
+            await step.run(`progress-after-slide-${start}`, async () => {
+                const done = Math.min(start + CONCURRENCY, totalSlides);
+                await upsertStatus({
+                    status: "generating:slides",
+                    slidesTotal: totalSlides,
+                    slidesComplete: done,
+                    audioComplete: existingAudioCount,
+                });
+                return { done };
+            });
+        }
+        console.log(`✅ ${TAG} All ${totalSlides} slides generated`);
 
         // ── Final image injection pass (race-condition guard) ─────────────────
         await step.run("slides-image-injection", async () => {
