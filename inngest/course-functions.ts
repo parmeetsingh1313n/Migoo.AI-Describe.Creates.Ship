@@ -549,11 +549,28 @@ export const generateCourseImagesFn = inngest.createFunction(
         // Canonical per-chapter expansion we persist so generateCourseSlidesFn reuses
         // the EXACT same slide-topic list → identical globalIdx mapping (no drift).
         const slideTopicsByChapter: Record<string, ChapterTopic[]> = {};
+
+        // Load any ALREADY-PERSISTED expansion first. expandChapterTopics calls GLM
+        // which is NOT deterministic (8 points → 9 slides one run, 11 the next), so
+        // re-running the image job with a fresh expansion shifts every globalIdx and
+        // makes already-present images look "missing" → phantom regeneration. Reusing
+        // the persisted expansion keeps the index mapping STABLE across re-runs.
+        const persistedExpansion = await step.run("load-persisted-expansion", async () => {
+            const [course] = await db.select({ slideTopics: coursesTable.slideTopics })
+                .from(coursesTable).where(eq(coursesTable.courseId, courseId));
+            return (course?.slideTopics as Record<string, ChapterTopic[]>) ?? {};
+        });
+
         for (let chIdx = 0; chIdx < chapters.length; chIdx++) {
             const chapter = chapters[chIdx];
             const chapterTitle = chapter.chapterTitle || `Chapter ${chIdx + 1}`;
             const rawSubContent: string[] = chapter.subContent?.slice(0, MAX_SLIDES_PER_CHAPTER) || [chapterTitle];
-            const chapterTopics: ChapterTopic[] = await step.run(`expand-topics-for-images-${chIdx}`, () => expandChapterTopics(chapterTitle, rawSubContent));
+            // Reuse the persisted expansion for this chapter if it exists; only call
+            // GLM for chapters that have never been expanded yet.
+            const already = chapter.chapterId ? persistedExpansion[chapter.chapterId] : null;
+            const chapterTopics: ChapterTopic[] = (Array.isArray(already) && already.length > 0)
+                ? already
+                : await step.run(`expand-topics-for-images-${chIdx}`, () => expandChapterTopics(chapterTitle, rawSubContent));
             if (chapter.chapterId) slideTopicsByChapter[chapter.chapterId] = chapterTopics;
             chapterTopics.forEach(({ topic }, slideIdx) => {
                 const globalIdx = chIdx * MAX_SLIDES_PER_CHAPTER + slideIdx;
@@ -579,12 +596,17 @@ export const generateCourseImagesFn = inngest.createFunction(
             return { chapters: Object.keys(merged).length };
         });
 
-        // If we already have an image for every planned slide, skip.
-        if (existing.length >= imageJobs.length && imageJobs.length > 0) {
-            console.log(`✅ ${existing.length} images already exist for ${courseId} (≥ ${imageJobs.length} slides) — skipping`);
+        // If we already have an image for every planned globalIdx, skip. Check by
+        // INDEX COVERAGE (not just count) — a raw count can be misled by stale
+        // indices from an old expansion. With the persisted-expansion reuse above,
+        // the planned indices are now stable, so this reliably short-circuits
+        // re-runs of an already-imaged course.
+        const existingIdx = new Set(existing.map(e => e.imageIndex));
+        const allPlannedPresent = imageJobs.length > 0 && imageJobs.every(j => existingIdx.has(j.globalIdx));
+        if (allPlannedPresent) {
+            console.log(`✅ All ${imageJobs.length} planned images already exist for ${courseId} — skipping`);
             return { skipped: true, count: existing.length };
         }
-        const existingIdx = new Set(existing.map(e => e.imageIndex));
         const pending = imageJobs.filter(j => !existingIdx.has(j.globalIdx));
         console.log(`📸 Generating ${pending.length} slide images (${imageJobs.length} slides, ${existing.length} already present) for ${courseId}`);
 
