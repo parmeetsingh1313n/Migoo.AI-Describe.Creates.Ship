@@ -999,11 +999,17 @@ export const generateCourseSlidesFn = inngest.createFunction(
                 let slideContent: any = null;
                 let slideError: any = null;
                 const MAX_RETRIES = 3;
-                const MODEL = "z-ai/glm-5.2";
+                // Slide generation ONLY: use gpt-oss-120b as primary instead of
+                // GLM-5.2. GLM's default "thinking" mode made a single slide take
+                // ~5 min (Vercel 300s timeout); gpt-oss-120b returns the same-sized
+                // slide much faster. openrouter.json still auto-falls back to the
+                // configured fallback models on failure. (Topic expansion + all
+                // other calls keep GLM-5.2 — this change is scoped to slides.)
+                const MODEL = "openai/gpt-oss-120b";
                 for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
                     try {
                         console.log(`🎬 ${TAG} Slide ${si + 1}/${totalSlides} via ${MODEL} (attempt ${attempt}/${MAX_RETRIES})...`);
-                        slideContent = await openrouter.json(GENERATE_SINGLE_SLIDE_PROMPT, slideInput, { model: MODEL, temperature: 0.75, maxTokens: 12000, disableThinking: true });
+                        slideContent = await openrouter.json(GENERATE_SINGLE_SLIDE_PROMPT, slideInput, { model: MODEL, temperature: 0.75, maxTokens: 12000 });
                         if (Array.isArray(slideContent)) slideContent = slideContent[0];
                         break;
                     } catch (e: any) {
