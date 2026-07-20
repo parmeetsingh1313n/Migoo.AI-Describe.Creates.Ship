@@ -191,18 +191,22 @@ export const generateCourseSlidesParallelFn = inngest.createFunction(
             return map;
         });
 
-        // ── PHASE 3: Generate slides — each in its OWN step, bounded concurrency ──
+        // ── PHASE 3: Generate slides — each in its OWN step, dedicated key each ──
         // CRITICAL: every slide is its own step.run() so Inngest checkpoints each
         // one independently. If a Vercel 300s timeout hits, only the in-flight
         // slides retry — every slide already saved is memoized and NEVER
         // regenerated. (The old single mega-step regenerated ALL slides on any
         // timeout — that's the duplicate-generation bug.)
         //
-        // Concurrency is capped at CONCURRENCY (not all-at-once) to avoid the
-        // NVIDIA 429 "thundering herd" that made every call back off for minutes.
-        const CONCURRENCY = 3;
+        // KEY STRATEGY (5 NVIDIA keys total): run 4 slides at a time, each slide
+        // pinned to its OWN dedicated key (positions 0→key0, 1→key1, 2→key2,
+        // 3→key3). Key index 4 (the 5th key) is the shared BACKUP — used only if
+        // a slide's dedicated key fails/429s. This eliminates the "thundering
+        // herd" where 4 slides fought over one rotating index and all got 429s.
+        const CONCURRENCY = 4;       // 4 dedicated keys → 4 slides in parallel
+        const BACKUP_KEY_INDEX = 4;  // 5th key reserved as fallback
 
-        const generateOneSlide = async (topic: string, si: number) => {
+        const generateOneSlide = async (topic: string, si: number, keyIndex: number) => {
             return await step.run(`generate-slide-${si}`, async () => {
                 // Fresh per-slide DB check — never regenerate an existing slide,
                 // even across a completely fresh re-trigger of the function.
@@ -268,7 +272,7 @@ export const generateCourseSlidesParallelFn = inngest.createFunction(
                 });
 
                 const MODEL = "z-ai/glm-5.2";
-                console.log(`🎬 ${TAG} Slide ${si + 1}/${totalSlides} via ${MODEL}...`);
+                console.log(`🎬 ${TAG} Slide ${si + 1}/${totalSlides} via ${MODEL} (key #${keyIndex + 1}, backup #${BACKUP_KEY_INDEX + 1})...`);
 
                 let slideContent: any = null;
                 for (let attempt = 1; attempt <= 3; attempt++) {
@@ -277,6 +281,10 @@ export const generateCourseSlidesParallelFn = inngest.createFunction(
                             model: MODEL,
                             temperature: 0.75,
                             maxTokens: 12000,
+                            // Dedicated key for this parallel slot + shared backup —
+                            // avoids the 429 storm from 4 slides sharing one rotation.
+                            pinnedKeyIndex: keyIndex,
+                            backupKeyIndex: BACKUP_KEY_INDEX,
                         });
                         if (Array.isArray(slideContent)) slideContent = slideContent[0];
                         break;
@@ -326,16 +334,19 @@ export const generateCourseSlidesParallelFn = inngest.createFunction(
             });
         };
 
-        // Run slides in bounded-concurrency waves (3 at a time). Each slide is an
-        // independent Inngest step, so a timeout only ever re-runs the unfinished
-        // ones — completed slides stay memoized.
-        console.log(`🎬 ${TAG} Generating ${totalSlides} slides (${CONCURRENCY} at a time)...`);
+        // Run slides in waves of CONCURRENCY. Within each wave, a slide's position
+        // (0..3) IS its dedicated key index — so the 4 concurrent slides never
+        // share a key. Each slide is an independent Inngest step, so a timeout only
+        // re-runs the unfinished ones; completed slides stay memoized.
+        console.log(`🎬 ${TAG} Generating ${totalSlides} slides (${CONCURRENCY} at a time, dedicated key each)...`);
         const slidesData: any[] = new Array(totalSlides);
         for (let start = 0; start < totalSlides; start += CONCURRENCY) {
             const wave = subTopics
                 .map((topic, si) => ({ topic, si }))
                 .slice(start, start + CONCURRENCY);
-            const waveResults = await Promise.all(wave.map(({ topic, si }) => generateOneSlide(topic, si)));
+            const waveResults = await Promise.all(
+                wave.map(({ topic, si }, posInWave) => generateOneSlide(topic, si, posInWave))
+            );
             wave.forEach(({ si }, k) => { slidesData[si] = waveResults[k]; });
             // Progress update after each wave
             await step.run(`progress-after-slide-${start}`, async () => {

@@ -171,10 +171,18 @@ class OpenRouterClient {
         model?: string;
         temperature?: number;
         maxTokens?: number;
+        // Pin this call to a SPECIFIC key index (0-based) so parallel callers each
+        // own a dedicated key instead of fighting over the shared rotation (which
+        // causes 429 storms). On failure the call falls back to backupKeyIndex
+        // only — it never touches the shared currentKeyIndex used by other calls.
+        pinnedKeyIndex?: number;
+        backupKeyIndex?: number;
     }): Promise<any> {
         const primaryModel = options?.model || this.model;
         const temperature  = options?.temperature ?? 0.7;
         const maxTokens    = options?.maxTokens ?? 8000;
+        const pinnedKeyIndex = options?.pinnedKeyIndex;
+        const backupKeyIndex = options?.backupKeyIndex;
 
         const outputRules = `\n\n---\nCRITICAL OUTPUT RULES:\n1. Return ONLY valid JSON. No markdown. No explanations.\n2. HTML fields MUST use ONLY single quotes for ALL attributes.\n3. CSS font stacks: font-family: 'Inter', sans-serif\n4. All JSON strings must be properly escaped.\n5. Single quotes in HTML never need escaping.`;
 
@@ -226,9 +234,20 @@ CRITICAL STRUCTURAL & DESIGN MANDATES (override defaults):
                 activeSystemPrompt += fallbackBooster;
             }
 
-            // Try every available key for this model before giving up on it
-            for (let keyAttempt = 0; keyAttempt < allKeys.length; keyAttempt++) {
-                const apiKey = this.getActiveKey();
+            // Key sequence for this model. When a pinned key is provided, this
+            // call ONLY uses [pinned, backup] and never touches the shared
+            // rotation index — so parallel callers each own their own key.
+            const pinnedMode = typeof pinnedKeyIndex === 'number';
+            const keySequence: number[] = pinnedMode
+                ? [pinnedKeyIndex!, ...(typeof backupKeyIndex === 'number' ? [backupKeyIndex!] : [])]
+                      .filter(i => i >= 0 && i < allKeys.length)
+                : [];
+            const keyTries = pinnedMode ? keySequence.length : allKeys.length;
+
+            // Try keys for this model before giving up on it
+            for (let keyAttempt = 0; keyAttempt < keyTries; keyAttempt++) {
+                const apiKey = pinnedMode ? allKeys[keySequence[keyAttempt]] : this.getActiveKey();
+                const keyLabel = pinnedMode ? `pinned#${keySequence[keyAttempt] + 1}` : `${keyAttempt + 1}/${allKeys.length}`;
                 // Model-specific token caps — use max supported to avoid ANY truncation
                 const modelMaxTokens = model.includes('gpt-oss-120b') || model.includes('llama-3.3')
                     ? 65536
@@ -237,7 +256,7 @@ CRITICAL STRUCTURAL & DESIGN MANDATES (override defaults):
                         : model.includes('nemotron-3-ultra') || model.includes('glm-5.2') || model.includes('deepseek-v4-pro')
                             ? 100000
                             : maxTokens;
-                console.log(`🔑 NvidiaAPI: model=${model}, key=${keyAttempt + 1}/${allKeys.length}, maxTokens=${modelMaxTokens}`);
+                console.log(`🔑 NvidiaAPI: model=${model}, key=${keyLabel}, maxTokens=${modelMaxTokens}`);
 
                 try {
                     const { rawText, finishReason } = await this.callModel(
@@ -265,8 +284,10 @@ CRITICAL STRUCTURAL & DESIGN MANDATES (override defaults):
                 } catch (error: any) {
                     lastError = error;
                     if (error.isRateLimit) {
-                        // Rotate to next key and retry same model
-                        this.rotateKey();
+                        // In pinned mode, just advance to the backup key (next in
+                        // keySequence) — do NOT touch the shared rotation. In normal
+                        // mode, rotate the shared index and retry the same model.
+                        if (!pinnedMode) this.rotateKey();
                         continue;
                     }
                     // Non-rate-limit error (network, parse, etc.) — move to next model
