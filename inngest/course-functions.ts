@@ -1003,7 +1003,7 @@ export const generateCourseSlidesFn = inngest.createFunction(
                 for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
                     try {
                         console.log(`🎬 ${TAG} Slide ${si + 1}/${totalSlides} via ${MODEL} (attempt ${attempt}/${MAX_RETRIES})...`);
-                        slideContent = await openrouter.json(GENERATE_SINGLE_SLIDE_PROMPT, slideInput, { model: MODEL, temperature: 0.75, maxTokens: 12000 });
+                        slideContent = await openrouter.json(GENERATE_SINGLE_SLIDE_PROMPT, slideInput, { model: MODEL, temperature: 0.75, maxTokens: 12000, disableThinking: true });
                         if (Array.isArray(slideContent)) slideContent = slideContent[0];
                         break;
                     } catch (e: any) {

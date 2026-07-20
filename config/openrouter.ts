@@ -87,6 +87,7 @@ class OpenRouterClient {
         temperature: number,
         maxTokens: number,
         apiKey: string,
+        disableThinking: boolean = false,
     ): Promise<{ rawText: string; finishReason: string | undefined }> {
         const url = `${this.baseUrl}/chat/completions`;
         const controller = new AbortController();
@@ -108,6 +109,13 @@ class OpenRouterClient {
                 ],
                 temperature,
                 max_tokens: maxTokens,
+                // GLM-5.2 on NVIDIA NIM has "thinking" mode ON by default, which
+                // makes it spend MINUTES on hidden reasoning before writing — the
+                // cause of the 5-min-per-slide timeouts (the visible output is only
+                // ~5k tokens). Disabling it drops a slide from ~5 min to ~60-90s.
+                // Only sent when requested (slide generation), so planning/other
+                // calls that benefit from reasoning are unaffected.
+                ...(disableThinking ? { chat_template_kwargs: { enable_thinking: false } } : {}),
             }),
             signal: controller.signal,
         });
@@ -177,12 +185,17 @@ class OpenRouterClient {
         // only — it never touches the shared currentKeyIndex used by other calls.
         pinnedKeyIndex?: number;
         backupKeyIndex?: number;
+        // Disable GLM's default "thinking" mode for this call. GLM-5.2 on NIM
+        // reasons for minutes before writing even a small answer; turning it off
+        // makes slide generation ~3-5x faster with a well-specified prompt.
+        disableThinking?: boolean;
     }): Promise<any> {
         const primaryModel = options?.model || this.model;
         const temperature  = options?.temperature ?? 0.7;
         const maxTokens    = options?.maxTokens ?? 8000;
         const pinnedKeyIndex = options?.pinnedKeyIndex;
         const backupKeyIndex = options?.backupKeyIndex;
+        const disableThinking = options?.disableThinking ?? false;
 
         const outputRules = `\n\n---\nCRITICAL OUTPUT RULES:\n1. Return ONLY valid JSON. No markdown. No explanations.\n2. HTML fields MUST use ONLY single quotes for ALL attributes.\n3. CSS font stacks: font-family: 'Inter', sans-serif\n4. All JSON strings must be properly escaped.\n5. Single quotes in HTML never need escaping.`;
 
@@ -260,7 +273,7 @@ CRITICAL STRUCTURAL & DESIGN MANDATES (override defaults):
 
                 try {
                     const { rawText, finishReason } = await this.callModel(
-                        activeSystemPrompt, userMessage, model, temperature, modelMaxTokens, apiKey,
+                        activeSystemPrompt, userMessage, model, temperature, modelMaxTokens, apiKey, disableThinking,
                     );
                     // Some models (e.g. owl-alpha) return finishReason=null even
                     // when the output was silently truncated mid-string.
