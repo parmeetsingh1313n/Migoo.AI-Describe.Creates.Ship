@@ -136,6 +136,29 @@ export async function GET(req: NextRequest) {
                     row.renderProgress = 0;
                 }
             }
+
+            // Check for a stale SLIDE/AUDIO generation phase. A slides job that
+            // dies mid-run (Vercel timeout, interrupted deploy) leaves the chapter
+            // stuck in generating:slides forever, so the UI keeps showing a phantom
+            // "Designing slides 0/N" the user never started. If the row hasn't
+            // updated in 15 min, auto-reset to idle so the card returns to normal.
+            if (['generating:slides', 'generating:audio', 'queued'].includes(row.status ?? '')) {
+                const GEN_STALE_MS = 15 * 60 * 1000; // 15 minutes
+                const lastUpdate = row.updatedAt ? new Date(row.updatedAt).getTime() : 0;
+                const isStale = Date.now() - lastUpdate > GEN_STALE_MS;
+
+                if (isStale) {
+                    console.log(`⏰ Stale slide/audio generation for chapter ${row.chapterId} (status="${row.status}", last update: ${row.updatedAt ?? 'never'}). Auto-resetting to idle.`);
+                    try {
+                        await db
+                            .update(chapterGenerationStatus)
+                            .set({ status: 'idle', errorMessage: null, updatedAt: new Date() })
+                            .where(eq(chapterGenerationStatus.chapterId, row.chapterId));
+                    } catch { /* ignore — legacy DB is read-only */ }
+
+                    row.status = 'idle';
+                }
+            }
         }
 
         return apiSuccess({ statuses });
