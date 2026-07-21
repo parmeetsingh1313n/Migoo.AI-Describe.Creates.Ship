@@ -33,7 +33,7 @@ export async function GET(req: NextRequest) {
             .where(eq(chapterGenerationStatus.courseId, courseId));
 
         let actualSlides = await db
-            .select()
+            .select({ chapterId: chapterContentSlides.chapterId })
             .from(chapterContentSlides)
             .where(eq(chapterContentSlides.courseId, courseId));
 
@@ -60,7 +60,7 @@ export async function GET(req: NextRequest) {
             console.log(`📦 No slides in primary DB for ${courseId} — checking legacy DB...`);
             try {
                 const legacySlides = await dbLegacy
-                    .select()
+                    .select({ chapterId: chapterContentSlides.chapterId })
                     .from(chapterContentSlides)
                     .where(eq(chapterContentSlides.courseId, courseId));
                 if (legacySlides.length > 0) {
