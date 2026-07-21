@@ -104,64 +104,78 @@ const AUTO_SCALE_SCRIPT = `
     return children[0];
   }
 
+  var OBSERVE_OPTS = { childList: true, subtree: true, attributes: true };
+
   function applyScale() {
     var wrapper = getWrapper();
     if (!wrapper) return;
 
-    // Reset transform for measurement
-    wrapper.style.transform = 'none';
-    wrapper.style.width = VIEWPORT_W + 'px';
-    wrapper.style.minHeight = '0';
-    wrapper.style.height = 'auto';
-    wrapper.style.overflow = 'visible';
-    wrapper.style.position = 'relative';
+    // ── BREAK THE FEEDBACK LOOP ───────────────────────────────────────────────
+    // applyScale writes wrapper.style.* (attribute mutations). The observer below
+    // watches this same wrapper with attributes:true, so those writes would re-
+    // trigger the observer → rAF(applyScale) → more writes → an endless ~60fps
+    // reflow loop. With many iframes mounted at once (e.g. the review filmstrip)
+    // that pegs the main thread and freezes the browser. Disconnect while WE
+    // mutate, reconnect after — so only genuine external changes rescale.
+    if (observer) observer.disconnect();
+    try {
+      // Reset transform for measurement
+      wrapper.style.transform = 'none';
+      wrapper.style.width = VIEWPORT_W + 'px';
+      wrapper.style.minHeight = '0';
+      wrapper.style.height = 'auto';
+      wrapper.style.overflow = 'visible';
+      wrapper.style.position = 'relative';
 
-    void wrapper.offsetHeight;
+      void wrapper.offsetHeight;
 
-    var naturalH = wrapper.scrollHeight;
-    var naturalW = wrapper.scrollWidth;
+      var naturalH = wrapper.scrollHeight;
+      var naturalW = wrapper.scrollWidth;
 
-    // Baseline slide dimensions are 1280x720. If content collapses (e.g. < 100px),
-    // treat the baseline as 720px/1280px.
-    var measureH = naturalH;
-    if (measureH < 100) measureH = VIEWPORT_H;
-    var measureW = naturalW;
-    if (measureW < 100) measureW = VIEWPORT_W;
+      // Baseline slide dimensions are 1280x720. If content collapses (e.g. < 100px),
+      // treat the baseline as 720px/1280px.
+      var measureH = naturalH;
+      if (measureH < 100) measureH = VIEWPORT_H;
+      var measureW = naturalW;
+      if (measureW < 100) measureW = VIEWPORT_W;
 
-    var scaleY = VIEWPORT_H / Math.max(measureH, 1);
-    var scaleX = VIEWPORT_W / Math.max(measureW, 1);
+      var scaleY = VIEWPORT_H / Math.max(measureH, 1);
+      var scaleX = VIEWPORT_W / Math.max(measureW, 1);
 
-    // ── HEIGHT IS THE REAL CONSTRAINT ─────────────────────────────────────────
-    // A single wide element (e.g. a long, unwrapped code line) used to blow up
-    // scrollWidth to ~3000px, which made scaleX tiny and collapsed the WHOLE
-    // slide into a microscopic unreadable column. Content is now forced to wrap
-    // (see .code-card / global wrap rules), so real width ≈ 1440. As a belt-and-
-    // suspenders guard, clamp the width's influence so a stray-wide element can
-    // only ever reduce the scale slightly — it must NEVER nuke the whole slide.
-    scaleX = Math.max(scaleX, 0.82);
-    var scale = Math.min(scaleX, scaleY);
+      // ── HEIGHT IS THE REAL CONSTRAINT ───────────────────────────────────────
+      // A single wide element (e.g. a long, unwrapped code line) used to blow up
+      // scrollWidth to ~3000px, which made scaleX tiny and collapsed the WHOLE
+      // slide into a microscopic unreadable column. Content is now forced to wrap
+      // (see .code-card / global wrap rules), so real width ≈ 1440. As a belt-and-
+      // suspenders guard, clamp the width's influence so a stray-wide element can
+      // only ever reduce the scale slightly — it must NEVER nuke the whole slide.
+      scaleX = Math.max(scaleX, 0.82);
+      var scale = Math.min(scaleX, scaleY);
 
-    // We want to scale DOWN overflowing content, but NEVER scale UP sparse content beyond 1.0
-    // to keep layout clean and readable.
-    scale = Math.min(scale, 1.0);
-    scale = Math.max(scale, MIN_SCALE);
+      // We want to scale DOWN overflowing content, but NEVER scale UP sparse content
+      // beyond 1.0 to keep layout clean and readable.
+      scale = Math.min(scale, 1.0);
+      scale = Math.max(scale, MIN_SCALE);
 
-    if (Math.abs(scale - lastScale) < 0.002) return;
-    lastScale = scale;
+      if (Math.abs(scale - lastScale) < 0.002) return;
+      lastScale = scale;
 
-    var scaledH = measureH * scale;
-    var offsetY = Math.max(0, (VIEWPORT_H - scaledH) / 2);
-    var scaledW = measureW * scale;
-    var offsetX = Math.max(0, (VIEWPORT_W - scaledW) / 2);
+      var scaledH = measureH * scale;
+      var offsetY = Math.max(0, (VIEWPORT_H - scaledH) / 2);
+      var scaledW = measureW * scale;
+      var offsetX = Math.max(0, (VIEWPORT_W - scaledW) / 2);
 
-    wrapper.style.transformOrigin = 'top left';
-    wrapper.style.transform = 'translate(' + offsetX + 'px, ' + offsetY + 'px) scale(' + scale + ')';
-    wrapper.style.width = VIEWPORT_W + 'px';
-    wrapper.style.height = measureH + 'px';
-    wrapper.style.overflow = 'visible';
+      wrapper.style.transformOrigin = 'top left';
+      wrapper.style.transform = 'translate(' + offsetX + 'px, ' + offsetY + 'px) scale(' + scale + ')';
+      wrapper.style.width = VIEWPORT_W + 'px';
+      wrapper.style.height = measureH + 'px';
+      wrapper.style.overflow = 'visible';
+    } finally {
+      if (observer) observer.observe(wrapper, OBSERVE_OPTS);
+    }
   }
 
-  // Observe DOM changes
+  // Observe DOM changes (external only — applyScale disconnects around its own writes)
   var observer = new MutationObserver(function() {
     lastScale = -1;
     requestAnimationFrame(applyScale);
@@ -169,11 +183,7 @@ const AUTO_SCALE_SCRIPT = `
 
   function init() {
     applyBackgrounds(); // ← run backgrounds FIRST, before scaling
-    var wrapper = getWrapper();
-    if (wrapper) {
-      observer.observe(wrapper, { childList: true, subtree: true, attributes: true });
-    }
-    applyScale();
+    applyScale();       // observes the wrapper itself once mutations settle
   }
 
   // Re-scale when images load
