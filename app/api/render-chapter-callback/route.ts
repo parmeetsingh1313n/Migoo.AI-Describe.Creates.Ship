@@ -69,7 +69,22 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ ok: true });
   } catch (dbErr: any) {
-    console.error('DB update error in render-chapter-callback:', dbErr.message);
-    return NextResponse.json({ error: 'DB update failed' }, { status: 500 });
+    // Drizzle wraps the driver error: dbErr.message is the generic
+    // "Failed query: update ..." SQL text, while the REAL reason (e.g. Neon
+    // "402 data transfer quota exceeded", "column does not exist", a timeout)
+    // lives in dbErr.cause. Log BOTH so the log states the actual cause instead
+    // of a wall of SQL that looks like a code bug when it isn't one.
+    const cause = dbErr?.cause;
+    const realReason =
+      cause?.message ||
+      cause?.detail ||
+      (typeof cause === 'string' ? cause : '') ||
+      dbErr?.message ||
+      'unknown DB error';
+    console.error(
+      `DB update error in render-chapter-callback (chapter=${chapterId}, status=${status}): ${realReason}`,
+      cause ? `\n  cause: ${JSON.stringify(cause).slice(0, 500)}` : ''
+    );
+    return NextResponse.json({ error: 'DB update failed', reason: String(realReason).slice(0, 300) }, { status: 500 });
   }
 }

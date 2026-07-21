@@ -873,8 +873,19 @@ export async function GET(req: NextRequest) {
     }
 
     try {
+      // Select ONLY the columns the render actually consumes. The full row also
+      // holds `narration` (a large notNull JSON blob), `imageUrl`, `courseId`,
+      // `createdAt` etc. that the renderer never touches — pulling them on every
+      // render inflated Neon data-transfer (a real quota cost) for no benefit.
       const dbSlides = await db
-        .select()
+        .select({
+          slideId: chapterContentSlides.slideId,
+          html: chapterContentSlides.html,
+          audioUrl: chapterContentSlides.audioUrl,
+          revealData: chapterContentSlides.revealData,
+          captions: chapterContentSlides.captions,
+          audioDuration: chapterContentSlides.audioDuration,
+        })
         .from(chapterContentSlides)
         .where(eq(chapterContentSlides.chapterId, chapterId))
         .orderBy(chapterContentSlides.slideIndex);
@@ -908,7 +919,12 @@ export async function GET(req: NextRequest) {
         baseUrl: appUrl,
       });
     } catch (dbErr: any) {
-      return NextResponse.json({ error: `Failed to fetch chapter data: ${dbErr.message}` }, { status: 500 });
+      // Surface the REAL driver reason (Neon quota 402 / timeout / missing
+      // column), which Drizzle hides in .cause behind a generic "Failed query".
+      const cause = dbErr?.cause;
+      const realReason = cause?.message || cause?.detail || dbErr?.message || 'unknown DB error';
+      console.error(`fetchData DB error (chapter=${chapterId}): ${realReason}`);
+      return NextResponse.json({ error: `Failed to fetch chapter data: ${realReason}` }, { status: 500 });
     }
   }
 
@@ -970,7 +986,14 @@ export async function GET(req: NextRequest) {
     if (row?.renderStatus === 'video:failed') {
       return NextResponse.json({ status: 'failed', error: row.renderError ?? 'Render failed' });
     }
-  } catch { /* DB error — fall through */ }
+  } catch (statusErr: any) {
+    // Don't silently pretend "idle" when the DB itself is unreachable (e.g. Neon
+    // quota 402) — the poller would show a misleading idle state. Log the real
+    // reason so the outage is visible instead of masked.
+    const cause = statusErr?.cause;
+    const realReason = cause?.message || cause?.detail || statusErr?.message || 'unknown DB error';
+    console.error(`render-chapter status read failed (chapter=${chapterId}): ${realReason}`);
+  }
 
   return NextResponse.json({ status: 'idle', progress: 0 });
 }
