@@ -14,6 +14,7 @@
 import { db, dbLegacy, dbRetry } from "@/config/db";
 import { chapterContentSlides, coursesTable } from "@/config/schema";
 import { apiError, apiSuccess } from "@/lib/api-helpers";
+import { resolveSlideHtml } from "@/lib/slide-html";
 import { validateInput, getCourseQuerySchema } from "@/lib/validations";
 import { currentUser } from "@clerk/nextjs/server";
 import { eq, desc, asc } from "drizzle-orm";
@@ -116,12 +117,29 @@ export async function GET(req: NextRequest) {
             console.error("❌ DB error fetching slides:", dbError.message);
         }
 
-        // Fallback: slides not in primary — check legacy DB
+        // Fallback: slides not in primary — check legacy DB.
+        // The legacy DB predates the html_url column, so we must NOT select it
+        // (a bare .select() would emit html_url and error). Select the real
+        // columns explicitly; htmlUrl is absent there and defaults to undefined.
         if (slides.length === 0 && dbLegacy) {
             console.log(`📦 No slides in primary DB for ${courseId} — checking legacy DB...`);
             try {
                 const legacySlides = await dbLegacy
-                    .select()
+                    .select({
+                        id: chapterContentSlides.id,
+                        courseId: chapterContentSlides.courseId,
+                        chapterId: chapterContentSlides.chapterId,
+                        slideId: chapterContentSlides.slideId,
+                        slideIndex: chapterContentSlides.slideIndex,
+                        audioUrl: chapterContentSlides.audioUrl,
+                        imageUrl: chapterContentSlides.imageUrl,
+                        narration: chapterContentSlides.narration,
+                        captions: chapterContentSlides.captions,
+                        html: chapterContentSlides.html,
+                        revealData: chapterContentSlides.revealData,
+                        audioDuration: chapterContentSlides.audioDuration,
+                        createdAt: chapterContentSlides.createdAt,
+                    })
                     .from(chapterContentSlides)
                     .where(eq(chapterContentSlides.courseId, courseId))
                     .orderBy(asc(chapterContentSlides.chapterId), asc(chapterContentSlides.slideIndex));
@@ -132,6 +150,17 @@ export async function GET(req: NextRequest) {
             } catch (legacyErr: any) {
                 console.warn('⚠️ Legacy DB fallback failed (slides):', legacyErr.message?.substring(0, 120));
             }
+        }
+
+        // Resolve HTML (Appwrite htmlUrl → markup, else inline html) so the preview
+        // player receives inline `html` exactly as before. Concurrent; leaves all
+        // other fields untouched.
+        try {
+            slides = await Promise.all(
+                slides.map(async (s) => ({ ...s, html: await resolveSlideHtml(s), htmlUrl: undefined }))
+            );
+        } catch (resolveErr: any) {
+            console.error('❌ Failed resolving slide HTML from Appwrite:', resolveErr?.message?.substring(0, 120));
         }
 
         return apiSuccess({

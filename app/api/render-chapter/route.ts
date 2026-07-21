@@ -7,6 +7,7 @@ import { db } from '@/config/db';
 import { chapterGenerationStatus, chapterContentSlides } from '@/config/schema';
 import { eq } from 'drizzle-orm';
 import { revealAssetTags, wrapInRevealDeck, REVEAL_CUSTOM_FRAGMENT_STYLES, COMPONENT_STYLESHEET } from '@/lib/reveal-doc';
+import { resolveSlideHtml } from '@/lib/slide-html';
 
 const execAsync = promisify(exec);
 
@@ -881,6 +882,7 @@ export async function GET(req: NextRequest) {
         .select({
           slideId: chapterContentSlides.slideId,
           html: chapterContentSlides.html,
+          htmlUrl: chapterContentSlides.htmlUrl,
           audioUrl: chapterContentSlides.audioUrl,
           revealData: chapterContentSlides.revealData,
           captions: chapterContentSlides.captions,
@@ -890,12 +892,17 @@ export async function GET(req: NextRequest) {
         .where(eq(chapterContentSlides.chapterId, chapterId))
         .orderBy(chapterContentSlides.slideIndex);
 
-      const slides = dbSlides.map(slide => {
+      // Resolve HTML for every slide (Appwrite htmlUrl → markup, else inline html)
+      // server-side, so the render worker receives inline `html` exactly as before
+      // and needs no changes. Runs concurrently to keep fetchData fast.
+      const resolvedHtml = await Promise.all(dbSlides.map(s => resolveSlideHtml(s)));
+
+      const slides = dbSlides.map((slide, idx) => {
         const rev = (slide.revealData as any[]) ?? [];
         const hasFragmentData = Array.isArray(rev) && rev.length > 0 && !isNaN(Number(rev[0]));
         return {
           slideId: slide.slideId,
-          html: slide.html,
+          html: resolvedHtml[idx],
           audioFileUrl: slide.audioUrl,
           revealData: slide.revealData,
           fragmentData: hasFragmentData ? rev.map(Number) : undefined,

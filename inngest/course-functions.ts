@@ -18,6 +18,7 @@ import { openrouter } from "@/config/openrouter";
 import { chapterContentSlides, chapterGenerationStatus, courseImages, coursesTable } from "@/config/schema";
 import { GENERATE_SINGLE_SLIDE_PROMPT, PLAN_SLIDE_PROMPT, EXPAND_CHAPTER_TOPICS_PROMPT } from "@/data/Prompt";
 import { putWithRotation } from "@/lib/blob";
+import { uploadSlideHtml, resolveSlideHtml } from "@/lib/slide-html";
 import { generateNanoBananaImage, generateNanoBananaImagesParallel } from "@/lib/apify-image";
 import { fetchSlideResearch } from "@/lib/tavily";
 import { SLIDE_TYPE_PAIRS, SLIDE_ACCENTS, SLIDE_ARCHETYPES, pickArchetype, pickNonCodeArchetype, componentName, isCodeArchetype, isCodeCompanionArchetype, isLikelyCodeTopic, codeSlideBudget } from "@/data/slide-design";
@@ -677,21 +678,33 @@ export const generateCourseImagesFn = inngest.createFunction(
 
             let injected = 0;
             for (const slide of allSlides) {
-                if (!slide.html || !slide.html.includes('{{IMAGE_PLACEHOLDER}}')) continue;
+                // HTML may live in Appwrite (htmlUrl) or inline (legacy) — resolve first.
+                const currentHtml = await resolveSlideHtml(slide);
+                if (!currentHtml || !currentHtml.includes('{{IMAGE_PLACEHOLDER}}')) continue;
 
                 const chPos = chapterPos.get(slide.chapterId) ?? 0;
                 const slideNum = (slide.slideIndex ?? 1) - 1;
                 const globalIdx = chPos * MAX_SLIDES_PER_CHAPTER + slideNum;
                 let extra = 0;
-                const newHtml = slide.html.replace(/\{\{IMAGE_PLACEHOLDER\}\}/g, () => {
+                const newHtml = currentHtml.replace(/\{\{IMAGE_PLACEHOLDER\}\}/g, () => {
                     // Exact per-slide image first; if missing, fall back to a nearby one.
                     const url = byIndex.get(globalIdx)
                         ?? savedImages[(globalIdx + extra++) % savedImages.length].imageUrl;
                     return url;
                 });
 
+                // Re-upload the mutated markup to Appwrite and point htmlUrl at it,
+                // keeping html null. If the upload fails, store inline as a fallback.
+                let newHtmlUrl: string | null = null;
+                let newHtmlInline: string | null = newHtml;
+                try {
+                    newHtmlUrl = await uploadSlideHtml(slide.slideId, newHtml);
+                    newHtmlInline = null;
+                } catch (e: any) {
+                    console.warn(`⚠️ Image-injection HTML re-upload failed for ${slide.slideId}, keeping inline: ${e?.message?.slice(0, 100)}`);
+                }
                 await db.update(chapterContentSlides)
-                    .set({ html: newHtml })
+                    .set({ html: newHtmlInline, htmlUrl: newHtmlUrl })
                     .where(eq(chapterContentSlides.slideId, slide.slideId));
                 injected++;
             }
@@ -874,7 +887,9 @@ export const generateCourseSlidesFn = inngest.createFunction(
                 const reused = await step.run(`reuse-slide-${si}`, async () => {
                     // Re-inject image URLs in case this slide was saved BEFORE
                     // course images were generated (placeholder tokens remain).
-                    let existingHtml = existing.html ?? null;
+                    // HTML may be in Appwrite (htmlUrl) or inline (legacy) — resolve first.
+                    let existingHtml = await resolveSlideHtml(existing);
+                    let existingHtmlUrl: string | null = existing.htmlUrl ?? null;
                     if (existingHtml && allImages.length > 0 && existingHtml.includes('{{IMAGE_PLACEHOLDER}}')) {
                         // Each slide maps to its own image by global index (chapterIndex*15 + si).
                         const gIdx = chapterIndex * MAX_SLIDES_PER_CHAPTER + si;
@@ -884,8 +899,17 @@ export const generateCourseSlidesFn = inngest.createFunction(
                                 ?? allImages[(gIdx + extra++) % allImages.length].imageUrl;
                             return url;
                         });
+                        // Re-upload mutated markup; keep html null unless upload fails.
+                        let inlineFallback: string | null = null;
+                        try {
+                            existingHtmlUrl = await uploadSlideHtml(existing.slideId, existingHtml);
+                        } catch (e: any) {
+                            console.warn(`⚠️ Reuse HTML re-upload failed for ${existing.slideId}, keeping inline: ${e?.message?.slice(0, 100)}`);
+                            inlineFallback = existingHtml;
+                            existingHtmlUrl = null;
+                        }
                         await db.update(chapterContentSlides)
-                            .set({ html: existingHtml })
+                            .set({ html: inlineFallback, htmlUrl: existingHtmlUrl })
                             .where(eq(chapterContentSlides.slideId, existing.slideId));
                         console.log(`Image injected into slide ${si + 1} HTML & saved`);
                     }
@@ -895,6 +919,7 @@ export const generateCourseSlidesFn = inngest.createFunction(
                         slideIndex: existing.slideIndex,
                         narration: existing.narration,
                         html: existingHtml,
+                        htmlUrl: existingHtmlUrl,
                         revealData: existing.revealData,
                         audioUrl: existing.audioUrl,
                         captions: existing.captions,
@@ -1091,22 +1116,35 @@ export const generateCourseSlidesFn = inngest.createFunction(
                     });
                 }
 
-                // Save slide content to DB immediately (audioUrl stays null until TTS runs)
+                // Save slide content to DB immediately (audioUrl stays null until TTS runs).
+                // HTML is offloaded to Appwrite Storage; only its URL is stored in Postgres.
+                // If the upload fails, fall back to inline html so a slide is never lost.
                 const revealData = slideContent.fragmentData ?? slideContent.revealData ?? [];
+                let slideHtmlUrl: string | null = null;
+                let slideHtmlInline: string | null = slideContent.html ?? null;
+                if (slideContent.html) {
+                    try {
+                        slideHtmlUrl = await uploadSlideHtml(slideContent.slideId, slideContent.html);
+                        slideHtmlInline = null; // offloaded — don't duplicate in Postgres
+                    } catch (e: any) {
+                        console.warn(`⚠️ ${TAG} Slide ${si + 1} HTML upload failed, keeping inline: ${e?.message?.slice(0, 100)}`);
+                    }
+                }
                 await db.insert(chapterContentSlides).values({
                     courseId,
                     chapterId,
                     slideId: slideContent.slideId,
                     slideIndex: si + 1,
                     narration: slideContent.narration,
-                    html: slideContent.html ?? null,
+                    html: slideHtmlInline,
+                    htmlUrl: slideHtmlUrl,
                     revealData,
                     audioUrl: null,
                     captions: null,
                     audioDuration: null,
                 }).onConflictDoUpdate({
                     target: chapterContentSlides.slideId,
-                    set: { narration: slideContent.narration, html: slideContent.html ?? null, revealData },
+                    set: { narration: slideContent.narration, html: slideHtmlInline, htmlUrl: slideHtmlUrl, revealData },
                 });
 
                 // Update slides progress counter
@@ -1148,17 +1186,27 @@ export const generateCourseSlidesFn = inngest.createFunction(
 
             let injected = 0;
             for (const slide of chapterSlides) {
-                if (!slide.html || !slide.html.includes('{{IMAGE_PLACEHOLDER}}')) continue;
+                // HTML may be in Appwrite (htmlUrl) or inline (legacy) — resolve first.
+                const currentHtml = await resolveSlideHtml(slide);
+                if (!currentHtml || !currentHtml.includes('{{IMAGE_PLACEHOLDER}}')) continue;
                 const slideNum = (slide.slideIndex ?? 1) - 1;
                 const gIdx = chapterIndex * MAX_SLIDES_PER_CHAPTER + slideNum;
                 let extra = 0;
-                const newHtml = slide.html.replace(/\{\{IMAGE_PLACEHOLDER\}\}/g, () => {
+                const newHtml = currentHtml.replace(/\{\{IMAGE_PLACEHOLDER\}\}/g, () => {
                     const url = finalImages.find(im => im.imageIndex === gIdx)?.imageUrl
                         ?? finalImages[(gIdx + extra++) % finalImages.length].imageUrl;
                     return url;
                 });
+                let newHtmlUrl: string | null = null;
+                let newHtmlInline: string | null = newHtml;
+                try {
+                    newHtmlUrl = await uploadSlideHtml(slide.slideId, newHtml);
+                    newHtmlInline = null;
+                } catch (e: any) {
+                    console.warn(`⚠️ ${TAG} Image-injection HTML re-upload failed for ${slide.slideId}, keeping inline: ${e?.message?.slice(0, 100)}`);
+                }
                 await db.update(chapterContentSlides)
-                    .set({ html: newHtml })
+                    .set({ html: newHtmlInline, htmlUrl: newHtmlUrl })
                     .where(eq(chapterContentSlides.slideId, slide.slideId));
                 injected++;
             }
@@ -1297,7 +1345,9 @@ export const generateCourseAudioFn = inngest.createFunction(
                 }
                 console.log(`🎬 ${TAG} Slide ${i + 1} Captions: ${captions.chunks?.length ?? 0} chunks`);
 
-                // Persist to DB
+                // Persist to DB. HTML already lives in Appwrite (htmlUrl) from the
+                // slide-generation step; carry both through so a fresh insert (rare
+                // here — rows normally already exist) never drops the offloaded URL.
                 const revealData = slide.revealData ?? [];
                 const [inserted] = await db.insert(chapterContentSlides).values({
                     courseId, chapterId,
@@ -1307,6 +1357,7 @@ export const generateCourseAudioFn = inngest.createFunction(
                     narration: slide.narration,
                     captions,
                     html: slide.html ?? null,
+                    htmlUrl: slide.htmlUrl ?? null,
                     revealData,
                 }).onConflictDoUpdate({
                     target: chapterContentSlides.slideId,

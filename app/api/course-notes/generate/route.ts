@@ -9,6 +9,7 @@ import { chapterContentSlides } from "@/config/schema";
 import { eq, and, asc } from "drizzle-orm";
 import { NextRequest, NextResponse } from "next/server";
 import { generateNanoBananaImagesParallel } from "@/lib/apify-image";
+import { resolveSlideHtml } from "@/lib/slide-html";
 
 // ── Extract readable text from slide HTML ────────────────────────────────────
 function extractTextFromHtml(html: string): string {
@@ -116,7 +117,7 @@ export async function POST(req: NextRequest) {
 
         // ── Step 1: Fetch all slides for this chapter ────────────────────────
         const slides = await db
-            .select({ html: chapterContentSlides.html, slideIndex: chapterContentSlides.slideIndex })
+            .select({ html: chapterContentSlides.html, htmlUrl: chapterContentSlides.htmlUrl, slideIndex: chapterContentSlides.slideIndex })
             .from(chapterContentSlides)
             .where(and(
                 eq(chapterContentSlides.courseId, courseId),
@@ -129,8 +130,10 @@ export async function POST(req: NextRequest) {
         }
 
         // ── Step 2: Build content context from slide HTML ────────────────────
+        // HTML lives in Appwrite (htmlUrl) or inline (legacy) — resolve each first.
+        const resolvedHtml = await Promise.all(slides.map(s => resolveSlideHtml(s)));
         const slideContents = slides.map((s, i) => {
-            const text = extractTextFromHtml(s.html || '');
+            const text = extractTextFromHtml(resolvedHtml[i] || '');
             return `--- SLIDE ${i + 1} ---\n${text}`;
         }).join('\n\n');
 

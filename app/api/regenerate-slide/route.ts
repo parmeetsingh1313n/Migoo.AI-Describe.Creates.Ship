@@ -20,6 +20,7 @@ import { chapterContentSlides, courseImages, coursesTable } from "@/config/schem
 import { GENERATE_SINGLE_SLIDE_PROMPT, PLAN_SLIDE_PROMPT } from "@/data/Prompt";
 import { SLIDE_TYPE_PAIRS, SLIDE_ACCENTS, SLIDE_ARCHETYPES, pickArchetype, componentName, isCodeArchetype, isCodeCompanionArchetype, isLikelyCodeTopic } from "@/data/slide-design";
 import { fetchSlideResearch } from "@/lib/tavily";
+import { uploadSlideHtml, resolveSlideHtml } from "@/lib/slide-html";
 import { apiError, apiSuccess, apiOptions } from "@/lib/api-helpers";
 import { validateInput, regenerateSlideSchema } from "@/lib/validations";
 import { currentUser } from "@clerk/nextjs/server";
@@ -202,10 +203,27 @@ fragmentData completely to reflect the requested change. Honour the request prec
         const narration = slideContent.narration ?? { fullText: (target.narration as any)?.fullText ?? "" };
         const revealData = slideContent.fragmentData ?? slideContent.revealData ?? target.revealData ?? [];
 
+        // Final markup: the freshly generated html, or (if the LLM returned none)
+        // the slide's previous markup — which may live in Appwrite, so resolve it.
+        const finalHtml = html || (await resolveSlideHtml(target)) || "";
+
+        // Offload to Appwrite; store only the URL. On upload failure, keep inline.
+        let htmlUrl: string | null = null;
+        let htmlInline: string | null = finalHtml || null;
+        if (finalHtml) {
+            try {
+                htmlUrl = await uploadSlideHtml(slideId, finalHtml);
+                htmlInline = null;
+            } catch (e: any) {
+                console.warn(`⚠️ regenerate-slide HTML upload failed for ${slideId}, keeping inline: ${e?.message?.slice(0, 100)}`);
+            }
+        }
+
         // Persist — clear any stale audio (audio is synthesised after final approval)
         const [updated] = await db.update(chapterContentSlides)
             .set({
-                html: html || target.html,
+                html: htmlInline,
+                htmlUrl,
                 narration,
                 revealData,
                 audioUrl: null,
@@ -219,7 +237,7 @@ fragmentData completely to reflect the requested change. Honour the request prec
             slide: {
                 slideId: updated.slideId,
                 slideIndex: updated.slideIndex,
-                html: updated.html,
+                html: finalHtml, // return resolved markup so the client renders immediately
                 narration: updated.narration,
                 revealData: updated.revealData,
             },

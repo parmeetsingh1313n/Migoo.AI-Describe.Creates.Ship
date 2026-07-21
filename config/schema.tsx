@@ -48,6 +48,10 @@ export const chapterContentSlides = pgTable("chapter_content_slides", {
     narration: json().notNull(),
     captions: json(),
     html: text(),
+    // HTML now lives in Appwrite Storage; `html` above stays for legacy rows and
+    // as a dual-read fallback. New/updated slides upload the markup and store its
+    // URL here, leaving `html` null. Resolve via resolveSlideHtml() in lib/slide-html.
+    htmlUrl: varchar({ length: 500 }),
     revealData: json().notNull(),
     audioDuration: real("audio_duration"),
     createdAt: timestamp("created_at").defaultNow(),
