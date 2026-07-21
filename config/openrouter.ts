@@ -87,13 +87,15 @@ class OpenRouterClient {
         temperature: number,
         maxTokens: number,
         apiKey: string,
-        disableThinking: boolean = false,
+        opts: { disableThinking?: boolean; clearThinking?: boolean; timeoutMs?: number } = {},
     ): Promise<{ rawText: string; finishReason: string | undefined }> {
+        const { disableThinking = false, clearThinking = false, timeoutMs } = opts;
         const url = `${this.baseUrl}/chat/completions`;
         const controller = new AbortController();
-        // GLM-5.2 at high reasoning effort can genuinely take longer than 5 min —
-        // give it a fairer chance to answer before falling back.
-        const timeout = setTimeout(() => controller.abort(), 7 * 60 * 1000);
+        // Default 7-min ceiling (GLM at high reasoning effort can be slow). Callers
+        // running inside a Vercel/Inngest step pass a tighter timeoutMs (e.g. 260s)
+        // so the fetch aborts BEFORE the 300s function limit kills the whole step.
+        const timeout = setTimeout(() => controller.abort(), timeoutMs ?? 7 * 60 * 1000);
 
         const response = await fetch(url, {
             method: 'POST',
@@ -113,9 +115,13 @@ class OpenRouterClient {
                 // makes it spend MINUTES on hidden reasoning before writing — the
                 // cause of the 5-min-per-slide timeouts (the visible output is only
                 // ~5k tokens). Disabling it drops a slide from ~5 min to ~60-90s.
-                // Only sent when requested (slide generation), so planning/other
-                // calls that benefit from reasoning are unaffected.
-                ...(disableThinking ? { chat_template_kwargs: { enable_thinking: false } } : {}),
+                // clear_thinking:true additionally strips any residual reasoning
+                // scaffold so the model emits ONLY the final answer. Both are only
+                // sent when requested (phase-2 slide writing), so the phase-1
+                // planning call that NEEDS reasoning is unaffected.
+                ...(disableThinking
+                    ? { chat_template_kwargs: { enable_thinking: false, ...(clearThinking ? { clear_thinking: true } : {}) } }
+                    : {}),
             }),
             signal: controller.signal,
         });
@@ -189,6 +195,12 @@ class OpenRouterClient {
         // reasons for minutes before writing even a small answer; turning it off
         // makes slide generation ~3-5x faster with a well-specified prompt.
         disableThinking?: boolean;
+        // Additionally strip any residual reasoning scaffold so the model emits
+        // ONLY the final answer (paired with disableThinking on phase-2 writes).
+        clearThinking?: boolean;
+        // Abort the fetch after this many ms so a slow model never runs past the
+        // enclosing Vercel/Inngest step's 300s hard limit (pass e.g. 240000).
+        timeoutMs?: number;
     }): Promise<any> {
         const primaryModel = options?.model || this.model;
         const temperature  = options?.temperature ?? 0.7;
@@ -196,6 +208,8 @@ class OpenRouterClient {
         const pinnedKeyIndex = options?.pinnedKeyIndex;
         const backupKeyIndex = options?.backupKeyIndex;
         const disableThinking = options?.disableThinking ?? false;
+        const clearThinking = options?.clearThinking ?? false;
+        const timeoutMs = options?.timeoutMs;
 
         const outputRules = `\n\n---\nCRITICAL OUTPUT RULES:\n1. Return ONLY valid JSON. No markdown. No explanations.\n2. HTML fields MUST use ONLY single quotes for ALL attributes.\n3. CSS font stacks: font-family: 'Inter', sans-serif\n4. All JSON strings must be properly escaped.\n5. Single quotes in HTML never need escaping.`;
 
@@ -273,7 +287,8 @@ CRITICAL STRUCTURAL & DESIGN MANDATES (override defaults):
 
                 try {
                     const { rawText, finishReason } = await this.callModel(
-                        activeSystemPrompt, userMessage, model, temperature, modelMaxTokens, apiKey, disableThinking,
+                        activeSystemPrompt, userMessage, model, temperature, modelMaxTokens, apiKey,
+                        { disableThinking, clearThinking, timeoutMs },
                     );
                     // Some models (e.g. owl-alpha) return finishReason=null even
                     // when the output was silently truncated mid-string.
@@ -311,6 +326,61 @@ CRITICAL STRUCTURAL & DESIGN MANDATES (override defaults):
         }
 
         console.error('❌ All NvidiaAPI keys and models exhausted.');
+        throw lastError;
+    }
+
+
+    /**
+     * Generate a RAW TEXT response (no designBooster, no JSON parsing, no
+     * foreign-script rejection). Used for the Phase-1 slide PLANNING call where
+     * GLM reasons (thinking ON) and emits a short plain-text scaffold that the
+     * Phase-2 write call then renders into final JSON.
+     *
+     * Mirrors json()'s key-rotation + model-fallback loop, but honours the passed
+     * maxTokens verbatim (does NOT force GLM's 100k cap — plans stay small/fast)
+     * and returns the model's text unmodified.
+     */
+    async text(systemPrompt: string, userInput: string, options?: {
+        model?: string;
+        temperature?: number;
+        maxTokens?: number;
+        disableThinking?: boolean;
+        clearThinking?: boolean;
+        timeoutMs?: number;
+    }): Promise<string> {
+        const primaryModel = options?.model || this.model;
+        const temperature  = options?.temperature ?? 0.7;
+        const maxTokens    = options?.maxTokens ?? 4000;
+        const disableThinking = options?.disableThinking ?? false;
+        const clearThinking = options?.clearThinking ?? false;
+        const timeoutMs = options?.timeoutMs;
+
+        const modelsToTry = [primaryModel, this.fallbackModel, this.lastFallbackModel].filter(m => m && m.trim() !== '');
+        if (modelsToTry.length === 0) throw new Error('No OpenRouter model configured');
+        const allKeys = this.getAllKeys();
+        if (allKeys.length === 0) throw new Error('No NVIDIA_API_KEY found in environment');
+
+        let lastError: any;
+        for (const model of modelsToTry) {
+            if (model !== primaryModel) console.log(`🔀 NvidiaAPI (text) falling back from [${primaryModel}] to [${model}]...`);
+            for (let keyAttempt = 0; keyAttempt < allKeys.length; keyAttempt++) {
+                const apiKey = this.getActiveKey();
+                try {
+                    const { rawText } = await this.callModel(
+                        systemPrompt, userInput, model, temperature, maxTokens, apiKey,
+                        { disableThinking, clearThinking, timeoutMs },
+                    );
+                    return rawText;
+                } catch (error: any) {
+                    lastError = error;
+                    if (error.isRateLimit) { this.rotateKey(); continue; }
+                    console.error(`❌ NvidiaAPI (text) error [${model}]:`, error.message);
+                    break; // move to next model
+                }
+            }
+        }
+
+        console.error('❌ All NvidiaAPI keys and models exhausted (text).');
         throw lastError;
     }
 

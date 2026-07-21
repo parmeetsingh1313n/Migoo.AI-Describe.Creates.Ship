@@ -16,7 +16,7 @@
 import { db } from "@/config/db";
 import { openrouter } from "@/config/openrouter";
 import { chapterContentSlides, chapterGenerationStatus, courseImages, coursesTable } from "@/config/schema";
-import { GENERATE_SINGLE_SLIDE_PROMPT, EXPAND_CHAPTER_TOPICS_PROMPT } from "@/data/Prompt";
+import { GENERATE_SINGLE_SLIDE_PROMPT, PLAN_SLIDE_PROMPT, EXPAND_CHAPTER_TOPICS_PROMPT } from "@/data/Prompt";
 import { putWithRotation } from "@/lib/blob";
 import { generateNanoBananaImage, generateNanoBananaImagesParallel } from "@/lib/apify-image";
 import { fetchSlideResearch } from "@/lib/tavily";
@@ -867,11 +867,11 @@ export const generateCourseSlidesFn = inngest.createFunction(
         const slidesData: any[] = [];
 
         for (let si = 0; si < totalSlides; si++) {
-            const slideResult = await step.run(`generate-slide-${si}`, async () => {
-                // Check if database already has this slide
-                // Check if database already has this slide
-                const existing = existingSlides.find(s => s.slideIndex === si + 1);
-                if (existing) {
+            // ── Existing-slide reuse: NO LLM calls when the slide already exists.
+            // Own memoized step; just re-injects images if placeholders remain. ──
+            const existing = existingSlides.find(s => s.slideIndex === si + 1);
+            if (existing) {
+                const reused = await step.run(`reuse-slide-${si}`, async () => {
                     // Re-inject image URLs in case this slide was saved BEFORE
                     // course images were generated (placeholder tokens remain).
                     let existingHtml = existing.html ?? null;
@@ -903,117 +903,167 @@ export const generateCourseSlidesFn = inngest.createFunction(
                         // usedComponents tracking on a resumed run (see below).
                         archetype: pickArchetype(chapterIndex, si),
                     };
-                }
+                });
+                slidesData.push(reused);
+                continue;
+            }
 
-                // Generate slide content via OpenRouter
-                console.log(`Slide ${si + 1}/${totalSlides} - generating via OpenRouter...`);
-                const previousContext = slidesData.map((s, idx) => ({
-                    slideIndex: idx + 1,
-                    topic: subTopics[idx],
-                    keyConceptsCovered: extractKeyConcepts(s.narration?.fullText ?? ""),
-                    narrationSummary: (s.narration?.fullText ?? "").substring(0, 600) + "...",
-                }));
+            // ── Fresh slide. Compute archetype / usedComponents / previousContext
+            // in the CLOSURE (pure JS off the resolved slidesData accumulator) so
+            // BOTH phases share them. ──
+            const previousContext = slidesData.map((s, idx) => ({
+                slideIndex: idx + 1,
+                topic: subTopics[idx],
+                keyConceptsCovered: extractKeyConcepts(s.narration?.fullText ?? ""),
+                narrationSummary: (s.narration?.fullText ?? "").substring(0, 600) + "...",
+            }));
 
+            // ── Assign the EXACT primary component for this slide + forbid repeats ──
+            // Topic-aware override with a CHAPTER CODE BUDGET: if THIS slide's
+            // topic actually needs a code example, force a code archetype — BUT
+            // only while the chapter is still under its code budget (~40% of
+            // slides). Once the budget is spent, we stop forcing code and swap in
+            // a non-code archetype for variety, so a programming chapter no longer
+            // collapses into wall-to-wall code cards. Conversely, if the natural
+            // rotation lands on code while we're over budget, we swap it out too.
+            const naturalArchetype = pickArchetype(chapterIndex, si);
+            const wantsCode = chapterTopics[si]?.needsCode ?? false;
+            // How many code slides THIS chapter has actually produced so far.
+            const codeSlidesSoFar = slidesData.filter(s => isCodeArchetype(s.archetype ?? "")).length;
+            const codeBudget = codeSlideBudget(totalSlides);
+            const codeBudgetLeft = codeSlidesSoFar < codeBudget;
+
+            let archetype = naturalArchetype;
+            if (wantsCode && codeBudgetLeft && !isCodeArchetype(naturalArchetype)) {
+                // Force a code archetype — rotate across the code family (plain
+                // CODE SNIPPET + the mixed CODE+X variants) so consecutive code
+                // slides look distinct instead of identical.
+                const codeArchetypes = SLIDE_ARCHETYPES.filter(isCodeArchetype);
+                archetype = codeArchetypes[codeSlidesSoFar % codeArchetypes.length] ?? naturalArchetype;
+            } else if (isCodeArchetype(naturalArchetype) && (!wantsCode || !codeBudgetLeft)) {
+                // Natural rotation landed on code but this topic doesn't need it,
+                // or the chapter is out of code budget → swap to a non-code layout.
+                archetype = pickNonCodeArchetype(chapterIndex, si);
+            }
+            const primaryComponent = componentName(archetype);           // e.g. "CODE SNIPPET"
+            const isCodeSlide = isCodeArchetype(archetype);
+            const isCodeCompanion = isCodeCompanionArchetype(archetype);  // code + a companion component
+            // Components ACTUALLY used by earlier slides in THIS chapter (not the
+            // natural rotation — a prior slide may itself have been code-overridden)
+            // — the model must not fall back onto any of them again. Code archetypes
+            // are exempt: a programming chapter legitimately needs several code
+            // slides, and forcing visual variety there fights that goal.
+            const usedComponents = Array.from(
+                new Set(
+                    slidesData
+                        .map(s => componentName(s.archetype ?? ""))
+                        .filter(c => c && !isCodeArchetype(c))
+                )
+            );
+
+            // Build the shared slide-context object. `research` is the Tavily
+            // context (fetched in Phase 1); `plan` is the Phase-1 plan (added only
+            // for the Phase-2 write call). Both phases call this so the constraints
+            // stay identical.
+            const buildSlideContext = (research: string | null, plan: string | null) => ({
+                chapterTitle: chapter.chapterTitle,
+                chapterOverview: chapter.chapterDescription ?? `This chapter covers ${chapter.chapterTitle} comprehensively.`,
+                chapterIndex: chapterIndex + 1,
+                fullChapterOutline: subTopics.map((t: string, i: number) => `Slide ${i + 1}: ${t}`),
+                slideTopic: subTopics[si],
+                slideIndex: si + 1,
+                totalSlides,
+                slidePosition: si === 0 ? "INTRO" : si === totalSlides - 1 ? "CONCLUSION" : "MIDDLE",
+                previousSlidesContext: previousContext,
+                conceptsAlreadyCovered: previousContext.flatMap(p => p.keyConceptsCovered),
+                nextSlideTopic: si + 1 < totalSlides ? subTopics[si + 1] : null,
+                // 🎯 HARD COMMAND — the model MUST build exactly this component.
+                mandatoryComponent: primaryComponent,
+                mandatoryComponentSpec: archetype,
+                doNotReuseComponents: usedComponents,
+                // Code slides must be a real .code-card and MUST NOT contain an image.
+                isCodeSlide,
+                imageAllowed: !isCodeSlide,
+                researchContext: research || null,
+                designHint: `🎯 BUILD THIS EXACT COMPONENT (non-negotiable): ${archetype}. `
+                    + `Do NOT substitute a table/diff/tiles or any of these already-used layouts: [${usedComponents.join(", ") || "none yet"}]. `
+                    + (isCodeCompanion
+                        ? `This is a 2-COLUMN slide: a syntax-highlighted .code-card (header + <pre><code>, real line breaks, a REAL COMPLETE working snippet up to ~20 lines — it auto-scrolls, so never fake-truncate with "// rest omitted" or "...") on ONE side, and a COMPANION component on the OTHER side. Do NOT default to numbered callouts every time — choose the companion that BEST fits this code from the catalog (numbered stepper, definition/callout cards, a metric row, a mini comparison table, concept-vs-example, a feature list, a small chip cloud). The code and the companion are the ONLY two blocks. 🔴 The companion MUST BE DENSE: 3-4 items, and EACH item = a bold title + a real one-line detail (8-14 words) that teaches — NEVER lone 2-word labels. NEVER an image of code, NEVER code in a <table> cell. Do NOT output {{IMAGE_PLACEHOLDER}} or any <img> on this slide. `
+                        : isCodeSlide
+                        ? `This slide's topic genuinely needs a real code example. The ENTIRE body is ONE syntax-highlighted .code-card (header + <pre><code>, real line breaks preserved) — NEVER inline text, NEVER a <table> cell, NEVER an image of code. Write a REAL, COMPLETE, working snippet (up to ~50 lines) — it auto-scrolls in sync with narration, so never fake-truncate with "// rest omitted" or "...". Do NOT output {{IMAGE_PLACEHOLDER}} or any <img> on this slide. `
+                        : `Include ONE {{IMAGE_PLACEHOLDER}} where it genuinely helps, kept SMALL (~28-30% side column, max-height 300px) so it never crowds out real content — or skip it entirely if this component doesn't need one. `)
+                    + `🔴 DENSITY: every item in the component (row / card / step / callout / metric / node) MUST carry a bold title PLUS a real one-line detail (8-14 words) that teaches — bare 2-3 word labels are a FAILED slide. `
+                    + `Type pairing: ${SLIDE_TYPE_PAIRS[(chapterIndex + si) % SLIDE_TYPE_PAIRS.length]}. Accent color: ${SLIDE_ACCENTS[(chapterIndex * 2 + si) % SLIDE_ACCENTS.length]}. Make this slide look clearly different from the previous one (except code slides, which may share a look with earlier code slides in this chapter).`,
+                // Only present on the Phase-2 write call.
+                ...(plan ? { slidePlan: plan } : {}),
+            });
+
+            const SLIDE_MODEL = "z-ai/glm-5.2";
+
+            // ── Phase 1: PLAN (GLM thinking ON, small output). Own step → own
+            // fresh 300s budget, and the plan is memoized so a Phase-2 retry never
+            // re-plans. Best-effort: on timeout/error we return plan=null and fall
+            // through plan-less. Tavily research is fetched here and handed to
+            // Phase 2 so it isn't crawled twice. ──
+            const { plan: slidePlan, research: researchContext } = await step.run(`plan-slide-${si}`, async () => {
                 // ── Tavily RAG: crawl the live web for accurate, up-to-date facts on
                 // this slide's topic, and feed a compact context into the prompt so the
                 // narration + on-screen content is grounded, not hallucinated. Non-fatal.
-                const researchContext = await fetchSlideResearch(
+                const research = await fetchSlideResearch(
                     subTopics[si],
                     `${courseName} · ${chapter.chapterTitle}`,
                 );
 
-                // ── Assign the EXACT primary component for this slide + forbid repeats ──
-                // Topic-aware override with a CHAPTER CODE BUDGET: if THIS slide's
-                // topic actually needs a code example, force a code archetype — BUT
-                // only while the chapter is still under its code budget (~40% of
-                // slides). Once the budget is spent, we stop forcing code and swap in
-                // a non-code archetype for variety, so a programming chapter no longer
-                // collapses into wall-to-wall code cards. Conversely, if the natural
-                // rotation lands on code while we're over budget, we swap it out too.
-                const naturalArchetype = pickArchetype(chapterIndex, si);
-                const wantsCode = chapterTopics[si]?.needsCode ?? false;
-                // How many code slides THIS chapter has actually produced so far.
-                const codeSlidesSoFar = slidesData.filter(s => isCodeArchetype(s.archetype ?? "")).length;
-                const codeBudget = codeSlideBudget(totalSlides);
-                const codeBudgetLeft = codeSlidesSoFar < codeBudget;
-
-                let archetype = naturalArchetype;
-                if (wantsCode && codeBudgetLeft && !isCodeArchetype(naturalArchetype)) {
-                    // Force a code archetype — rotate across the code family (plain
-                    // CODE SNIPPET + the mixed CODE+X variants) so consecutive code
-                    // slides look distinct instead of identical.
-                    const codeArchetypes = SLIDE_ARCHETYPES.filter(isCodeArchetype);
-                    archetype = codeArchetypes[codeSlidesSoFar % codeArchetypes.length] ?? naturalArchetype;
-                } else if (isCodeArchetype(naturalArchetype) && (!wantsCode || !codeBudgetLeft)) {
-                    // Natural rotation landed on code but this topic doesn't need it,
-                    // or the chapter is out of code budget → swap to a non-code layout.
-                    archetype = pickNonCodeArchetype(chapterIndex, si);
+                let plan: string | null = null;
+                try {
+                    console.log(`🧠 ${TAG} Slide ${si + 1}/${totalSlides} PLAN via ${SLIDE_MODEL} (thinking on)...`);
+                    plan = await openrouter.text(PLAN_SLIDE_PROMPT, JSON.stringify(buildSlideContext(research, null)), {
+                        model: SLIDE_MODEL,
+                        disableThinking: false,
+                        maxTokens: 4000,
+                        timeoutMs: 240000,
+                    });
+                } catch (e: any) {
+                    console.warn(`⚠️ ${TAG} slide ${si + 1} Phase-1 plan failed (proceeding plan-less): ${e?.message?.substring(0, 120)}`);
+                    plan = null;
                 }
-                const primaryComponent = componentName(archetype);           // e.g. "CODE SNIPPET"
-                const isCodeSlide = isCodeArchetype(archetype);
-                const isCodeCompanion = isCodeCompanionArchetype(archetype);  // code + a companion component
-                // Components ACTUALLY used by earlier slides in THIS chapter (not the
-                // natural rotation — a prior slide may itself have been code-overridden)
-                // — the model must not fall back onto any of them again. Code archetypes
-                // are exempt: a programming chapter legitimately needs several code
-                // slides, and forcing visual variety there fights that goal.
-                const usedComponents = Array.from(
-                    new Set(
-                        slidesData
-                            .map(s => componentName(s.archetype ?? ""))
-                            .filter(c => c && !isCodeArchetype(c))
-                    )
-                );
+                return { plan, research };
+            });
 
-                const slideInput = JSON.stringify({
-                    chapterTitle: chapter.chapterTitle,
-                    chapterOverview: chapter.chapterDescription ?? `This chapter covers ${chapter.chapterTitle} comprehensively.`,
-                    chapterIndex: chapterIndex + 1,
-                    fullChapterOutline: subTopics.map((t: string, i: number) => `Slide ${i + 1}: ${t}`),
-                    slideTopic: subTopics[si],
-                    slideIndex: si + 1,
-                    totalSlides,
-                    slidePosition: si === 0 ? "INTRO" : si === totalSlides - 1 ? "CONCLUSION" : "MIDDLE",
-                    previousSlidesContext: previousContext,
-                    conceptsAlreadyCovered: previousContext.flatMap(p => p.keyConceptsCovered),
-                    nextSlideTopic: si + 1 < totalSlides ? subTopics[si + 1] : null,
-                    // 🎯 HARD COMMAND — the model MUST build exactly this component.
-                    mandatoryComponent: primaryComponent,
-                    mandatoryComponentSpec: archetype,
-                    doNotReuseComponents: usedComponents,
-                    // Code slides must be a real .code-card and MUST NOT contain an image.
-                    isCodeSlide,
-                    imageAllowed: !isCodeSlide,
-                    researchContext: researchContext || null,
-                    designHint: `🎯 BUILD THIS EXACT COMPONENT (non-negotiable): ${archetype}. `
-                        + `Do NOT substitute a table/diff/tiles or any of these already-used layouts: [${usedComponents.join(", ") || "none yet"}]. `
-                        + (isCodeCompanion
-                            ? `This is a 2-COLUMN slide: a syntax-highlighted .code-card (header + <pre><code>, real line breaks, a REAL COMPLETE working snippet up to ~20 lines — it auto-scrolls, so never fake-truncate with "// rest omitted" or "...") on ONE side, and a COMPANION component on the OTHER side. Do NOT default to numbered callouts every time — choose the companion that BEST fits this code from the catalog (numbered stepper, definition/callout cards, a metric row, a mini comparison table, concept-vs-example, a feature list, a small chip cloud). The code and the companion are the ONLY two blocks. 🔴 The companion MUST BE DENSE: 3-4 items, and EACH item = a bold title + a real one-line detail (8-14 words) that teaches — NEVER lone 2-word labels. NEVER an image of code, NEVER code in a <table> cell. Do NOT output {{IMAGE_PLACEHOLDER}} or any <img> on this slide. `
-                            : isCodeSlide
-                            ? `This slide's topic genuinely needs a real code example. The ENTIRE body is ONE syntax-highlighted .code-card (header + <pre><code>, real line breaks preserved) — NEVER inline text, NEVER a <table> cell, NEVER an image of code. Write a REAL, COMPLETE, working snippet (up to ~50 lines) — it auto-scrolls in sync with narration, so never fake-truncate with "// rest omitted" or "...". Do NOT output {{IMAGE_PLACEHOLDER}} or any <img> on this slide. `
-                            : `Include ONE {{IMAGE_PLACEHOLDER}} where it genuinely helps, kept SMALL (~28-30% side column, max-height 300px) so it never crowds out real content — or skip it entirely if this component doesn't need one. `)
-                        + `🔴 DENSITY: every item in the component (row / card / step / callout / metric / node) MUST carry a bold title PLUS a real one-line detail (8-14 words) that teaches — bare 2-3 word labels are a FAILED slide. `
-                        + `Type pairing: ${SLIDE_TYPE_PAIRS[(chapterIndex + si) % SLIDE_TYPE_PAIRS.length]}. Accent color: ${SLIDE_ACCENTS[(chapterIndex * 2 + si) % SLIDE_ACCENTS.length]}. Make this slide look clearly different from the previous one (except code slides, which may share a look with earlier code slides in this chapter).`,
-                });
+            // ── Phase 2: WRITE (GLM thinking OFF → fast rendering). Own step → own
+            // fresh 300s budget. Renders the Phase-1 plan (when present) into the
+            // final JSON, keeping the html + narration.fragments + fragmentData
+            // contract intact. ──
+            const slideResult = await step.run(`write-slide-${si}`, async () => {
+                const slideInput = JSON.stringify(buildSlideContext(researchContext, slidePlan));
+
+                // When Phase 1 produced a plan, tell the writer to render it (not re-plan).
+                let systemPrompt = GENERATE_SINGLE_SLIDE_PROMPT;
+                if (slidePlan) {
+                    systemPrompt += `\n\nA finished PLAN for this slide is in the input field "slidePlan" — render it faithfully into the final JSON (html + narration.fragments + fragmentData). Do NOT re-plan from scratch.`;
+                }
 
                 let slideContent: any = null;
                 let slideError: any = null;
                 const MAX_RETRIES = 3;
-                // Slide generation ONLY: use gpt-oss-120b as primary instead of
-                // GLM-5.2. GLM's default "thinking" mode made a single slide take
-                // ~5 min (Vercel 300s timeout); gpt-oss-120b returns the same-sized
-                // slide much faster. openrouter.json still auto-falls back to the
-                // configured fallback models on failure. (Topic expansion + all
-                // other calls keep GLM-5.2 — this change is scoped to slides.)
-                const MODEL = "openai/gpt-oss-120b";
                 for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
                     try {
-                        console.log(`🎬 ${TAG} Slide ${si + 1}/${totalSlides} via ${MODEL} (attempt ${attempt}/${MAX_RETRIES})...`);
-                        slideContent = await openrouter.json(GENERATE_SINGLE_SLIDE_PROMPT, slideInput, { model: MODEL, temperature: 0.75, maxTokens: 12000 });
+                        console.log(`🎬 ${TAG} Slide ${si + 1}/${totalSlides} WRITE via ${SLIDE_MODEL} (thinking off, attempt ${attempt}/${MAX_RETRIES})...`);
+                        // Thinking OFF (enable_thinking:false + clear_thinking:true)
+                        // so GLM only renders — the historically fast path. timeoutMs
+                        // aborts the fetch before the 300s step limit kills it.
+                        slideContent = await openrouter.json(systemPrompt, slideInput, {
+                            model: SLIDE_MODEL,
+                            temperature: 0.75,
+                            maxTokens: 12000,
+                            disableThinking: true,
+                            clearThinking: true,
+                            timeoutMs: 240000,
+                        });
                         if (Array.isArray(slideContent)) slideContent = slideContent[0];
                         break;
                     } catch (e: any) {
-                        console.warn(`⚠️ ${TAG} ${MODEL} slide ${si + 1} attempt ${attempt}: ${e.message?.substring(0, 120)}`);
+                        console.warn(`⚠️ ${TAG} ${SLIDE_MODEL} slide ${si + 1} attempt ${attempt}: ${e.message?.substring(0, 120)}`);
                         slideError = e;
                         if (attempt < MAX_RETRIES) {
                             console.log(`🔄 ${TAG} Retrying slide ${si + 1} in 3s...`);

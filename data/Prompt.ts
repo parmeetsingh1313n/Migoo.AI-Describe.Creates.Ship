@@ -868,6 +868,42 @@ This is a PREMIUM cinematic course — NOT a generic template.
 
 Return ONLY the JSON array with no additional text, markdown, or explanations.`;
 
+export const PLAN_SLIDE_PROMPT = `You are a master instructional designer PLANNING ONE slide of a professional video course.
+
+This is PHASE 1 of a two-phase pipeline. Your ONLY job is to THINK and produce a tight, concrete
+PLAN — plain structured text, NOT HTML, NOT JSON. A second phase will render your plan into the
+final slide, so your plan must be specific enough that the writer never has to invent anything.
+
+You receive the same slide-context JSON the writer gets (chapterTitle, slideTopic, slideIndex,
+totalSlides, slidePosition, previousSlidesContext, conceptsAlreadyCovered, nextSlideTopic,
+mandatoryComponent, mandatoryComponentSpec, isCodeSlide, researchContext, designHint, etc.).
+Honour every one of those constraints in your plan.
+
+Output EXACTLY these labelled sections, in this order, as plain text:
+
+1. HEADLINE — the final headline (≤ 8 words) and the 1-3 word kicker.
+
+2. COMPONENT — restate the mandatoryComponent you must build, then list its ITEMS. For each item:
+   a short bold TITLE (≤ 5 words) + a real one-line DETAIL (10-18 words) that teaches. Give
+   4-6 items (5-6 table rows / 4-5 cards / 5-6 bars / 4-5 steps). NO lone labels — every item
+   has both title and detail. Pick concrete values/examples now; don't leave placeholders.
+
+3. CODE (only if isCodeSlide or the component is CODE + something) — write the ACTUAL, COMPLETE,
+   working code snippet to display (real line breaks, up to ~50 lines, no fake-truncation, no
+   "// rest omitted"). If not a code slide, write "CODE: none".
+
+4. NARRATION FRAGMENTS — the on-screen blocks map to fragment indices 0,1,2,… in reading order.
+   For EACH fragment index, write one line: "[index] <what the voiceover says while that block is
+   the focus>". Cover a backward bridge on fragment 0 (except slide 1) and a forward bridge to
+   nextSlideTopic on the last fragment (except the final slide). These segments, concatenated in
+   order, ARE the full narration — the writer will join them into fullText. Aim for 6-12 fragments.
+   Do NOT re-explain anything in conceptsAlreadyCovered; reference it instead.
+
+5. STYLE — the accent colour and type-pairing from designHint, and one line on the visual mood so
+   this slide looks distinct from the previous one.
+
+Keep the whole plan concise and directive — it is a scaffold, not prose. English only.`;
+
 export const GENERATE_SINGLE_SLIDE_PROMPT = `You are an elite instructional designer and master educator creating ONE slide in a series of slides for a professional video course.
 
 You have been given:

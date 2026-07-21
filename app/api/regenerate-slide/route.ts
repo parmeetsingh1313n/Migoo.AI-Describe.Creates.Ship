@@ -17,7 +17,7 @@
 import { db } from "@/config/db";
 import { openrouter } from "@/config/openrouter";
 import { chapterContentSlides, courseImages, coursesTable } from "@/config/schema";
-import { GENERATE_SINGLE_SLIDE_PROMPT } from "@/data/Prompt";
+import { GENERATE_SINGLE_SLIDE_PROMPT, PLAN_SLIDE_PROMPT } from "@/data/Prompt";
 import { SLIDE_TYPE_PAIRS, SLIDE_ACCENTS, SLIDE_ARCHETYPES, pickArchetype, componentName, isCodeArchetype, isCodeCompanionArchetype, isLikelyCodeTopic } from "@/data/slide-design";
 import { fetchSlideResearch } from "@/lib/tavily";
 import { apiError, apiSuccess, apiOptions } from "@/lib/api-helpers";
@@ -96,7 +96,7 @@ export async function POST(req: NextRequest) {
         // Tavily RAG — ground the regenerated narration in accurate, current facts.
         const researchContext = await fetchSlideResearch(slideTopic, `${course.courseName} · ${chapter.chapterTitle}`);
 
-        const slideInput = JSON.stringify({
+        const slideContext: Record<string, any> = {
             chapterTitle: chapter.chapterTitle,
             chapterOverview: chapter.chapterDescription ?? `This chapter covers ${chapter.chapterTitle} comprehensively.`,
             chapterIndex: chapterIndex + 1,
@@ -122,10 +122,31 @@ export async function POST(req: NextRequest) {
                 + `Type pairing: ${SLIDE_TYPE_PAIRS[si % SLIDE_TYPE_PAIRS.length]}. Accent color: ${SLIDE_ACCENTS[si % SLIDE_ACCENTS.length]}.`,
             // ── The user's requested change — the whole point of this endpoint ──
             userChangeRequest: instruction,
-        });
+        };
+
+        // ── Phase 1: PLAN (GLM thinking ON, small output). Best-effort — on
+        // timeout/error we fall through plan-less so a slide is always produced.
+        // This whole route shares ONE 300s budget, so cap Phase 1 at ~100s and
+        // leave the rest for the write. ──
+        let slidePlan: string | null = null;
+        try {
+            slidePlan = await openrouter.text(PLAN_SLIDE_PROMPT, JSON.stringify(slideContext), {
+                model: "z-ai/glm-5.2",
+                disableThinking: false,
+                maxTokens: 4000,
+                timeoutMs: 100000,
+            });
+        } catch (e: any) {
+            console.warn(`⚠️ regenerate-slide Phase-1 plan failed (proceeding plan-less): ${e?.message?.substring(0, 120)}`);
+            slidePlan = null;
+        }
+
+        const slideInput = JSON.stringify(
+            slidePlan ? { ...slideContext, slidePlan } : slideContext
+        );
 
         // Emphasise the change request so the model actually honours it.
-        const systemPrompt = GENERATE_SINGLE_SLIDE_PROMPT +
+        let systemPrompt = GENERATE_SINGLE_SLIDE_PROMPT +
             `\n\n═══════════════════════════════════════════════════════════════════════════════
 🔧 USER REVISION REQUEST (HIGHEST PRIORITY)
 ═══════════════════════════════════════════════════════════════════════════════
@@ -134,12 +155,26 @@ Apply the change described in the input field "userChangeRequest" faithfully whi
 the slide coherent with the rest of the chapter. Regenerate the slide's html, narration and
 fragmentData completely to reflect the requested change. Honour the request precisely.`;
 
+        // When Phase 1 produced a plan, tell the writer to render it (not re-plan).
+        if (slidePlan) {
+            systemPrompt += `\n\nA finished PLAN for this slide is in the input field "slidePlan" — render it faithfully into the final JSON (html + narration.fragments + fragmentData), applying the userChangeRequest on top. Do NOT re-plan from scratch.`;
+        }
+
         let slideContent: any = null;
         const MODEL = "z-ai/glm-5.2";
         let lastErr: any = null;
         for (let attempt = 1; attempt <= 3; attempt++) {
             try {
-                slideContent = await openrouter.json(systemPrompt, slideInput, { model: MODEL, temperature: 0.75, maxTokens: 12000 });
+                // Phase 2: WRITE — thinking OFF so GLM only renders, fast. Cap the
+                // fetch at ~160s so it aborts before the 300s function limit.
+                slideContent = await openrouter.json(systemPrompt, slideInput, {
+                    model: MODEL,
+                    temperature: 0.75,
+                    maxTokens: 12000,
+                    disableThinking: true,
+                    clearThinking: true,
+                    timeoutMs: 160000,
+                });
                 if (Array.isArray(slideContent)) slideContent = slideContent[0];
                 if (slideContent) break;
             } catch (e: any) {
