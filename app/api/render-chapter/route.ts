@@ -8,6 +8,7 @@ import { chapterGenerationStatus, chapterContentSlides } from '@/config/schema';
 import { eq } from 'drizzle-orm';
 import { revealAssetTags, wrapInRevealDeck, REVEAL_CUSTOM_FRAGMENT_STYLES, COMPONENT_STYLESHEET } from '@/lib/reveal-doc';
 import { resolveSlideHtml } from '@/lib/slide-html';
+import { logEgress } from '@/lib/egress-log';
 
 const execAsync = promisify(exec);
 
@@ -919,12 +920,12 @@ export async function GET(req: NextRequest) {
       }
 
       const appUrl = process.env.NEXT_PUBLIC_APP_URL ? process.env.NEXT_PUBLIC_APP_URL.replace(/\/$/, '') : `${req.nextUrl.protocol}//${req.headers.get('host')}`;
-      return NextResponse.json({
+      return NextResponse.json(logEgress("/api/render-chapter?fetchData", {
         chapterId,
         slides,
         durationsBySlideId,
         baseUrl: appUrl,
-      });
+      }, { chapter: chapterId, slides: slides.length }));
     } catch (dbErr: any) {
       // Surface the REAL driver reason (Neon quota 402 / timeout / missing
       // column), which Drizzle hides in .cause behind a generic "Failed query".

@@ -27,6 +27,38 @@ export interface SlideHtmlSource {
     htmlUrl?: string | null;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// htmlUrl → markup cache.
+//
+// Appwrite file URLs are CONTENT-ADDRESSED: every uploadSlideHtml() call creates
+// a brand-new file with a fresh ID.unique(), so a given URL's bytes never change.
+// That makes caching by URL always-correct (no staleness possible) — and it's the
+// key lever for cutting Appwrite egress: a course page reloaded 10× fetches each
+// slide's HTML from Appwrite ONCE, not 10×. Bounded to avoid unbounded memory.
+// ─────────────────────────────────────────────────────────────────────────────
+const HTML_CACHE_MAX = 500;
+const htmlCache = new Map<string, string>();
+
+function cacheGet(url: string): string | undefined {
+    const hit = htmlCache.get(url);
+    if (hit !== undefined) {
+        // LRU touch: re-insert to mark as most-recently used.
+        htmlCache.delete(url);
+        htmlCache.set(url, hit);
+    }
+    return hit;
+}
+
+function cacheSet(url: string, html: string): void {
+    if (htmlCache.has(url)) htmlCache.delete(url);
+    htmlCache.set(url, html);
+    if (htmlCache.size > HTML_CACHE_MAX) {
+        // Evict oldest (first inserted).
+        const oldest = htmlCache.keys().next().value;
+        if (oldest !== undefined) htmlCache.delete(oldest);
+    }
+}
+
 /**
  * Upload a slide's HTML markup to Appwrite Storage and return its view URL.
  * The URL is what gets stored in chapter_content_slides.htmlUrl.
@@ -57,9 +89,15 @@ export async function uploadSlideHtml(slideId: string, html: string): Promise<st
  */
 export async function resolveSlideHtml(row: SlideHtmlSource): Promise<string | null> {
     if (row.htmlUrl) {
+        // Content-addressed URL → cache is always fresh. Serve without a network
+        // round-trip when we've fetched this exact file before.
+        const cached = cacheGet(row.htmlUrl);
+        if (cached !== undefined) return cached;
         try {
             const buf = await fetchAppwriteFile(row.htmlUrl);
-            return buf.toString("utf-8");
+            const html = buf.toString("utf-8");
+            cacheSet(row.htmlUrl, html);
+            return html;
         } catch (err: any) {
             if (row.html) {
                 console.warn(

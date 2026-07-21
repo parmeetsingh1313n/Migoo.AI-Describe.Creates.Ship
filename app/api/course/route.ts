@@ -15,6 +15,7 @@ import { db, dbLegacy, dbRetry } from "@/config/db";
 import { chapterContentSlides, coursesTable } from "@/config/schema";
 import { apiError, apiSuccess } from "@/lib/api-helpers";
 import { resolveSlideHtml } from "@/lib/slide-html";
+import { logEgress } from "@/lib/egress-log";
 import { validateInput, getCourseQuerySchema } from "@/lib/validations";
 import { currentUser } from "@clerk/nextjs/server";
 import { eq, desc, asc } from "drizzle-orm";
@@ -163,10 +164,10 @@ export async function GET(req: NextRequest) {
             console.error('❌ Failed resolving slide HTML from Appwrite:', resolveErr?.message?.substring(0, 120));
         }
 
-        return apiSuccess({
+        return apiSuccess(logEgress("/api/course", {
             ...course[0],
             chapterContentSlides: slides
-        });
+        }, { course: courseId, rows: slides.length }));
 
     } catch (error: any) {
         console.error("❌ Course API Error:", error.message);
