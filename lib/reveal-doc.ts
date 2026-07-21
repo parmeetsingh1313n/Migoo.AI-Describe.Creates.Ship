@@ -105,7 +105,6 @@ export const CINEMATIC_DIRECTOR_SCRIPT = `
   var FONT_THRESHOLD = 15;   // effective body px below which we engage the camera
   var ZOOM_PAD = 90;         // px of breathing room around the focused region
   var MAX_ZOOM = 1.9;        // never magnify a region more than this
-  var DRAG = 0.55;           // fraction of a fragment window spent easing from prev framing
 
   var VW = 1440, VH = 720;
   var camera = null, deckDense = null;
@@ -148,6 +147,8 @@ export const CINEMATIC_DIRECTOR_SCRIPT = `
   }
 
   // The DOM rect (in viewport px) of the fragment with a given index.
+  // NOTE: kept for reference; the seek loop uses targetFrame() which measures in
+  // stable (camera-neutralized) space and caches — see below.
   function fragmentRect(idx) {
     var el = document.querySelector('.reveal .slides section [data-fragment-index="' + idx + '"]')
           || document.querySelectorAll('.reveal .slides section .fragment')[idx];
@@ -173,30 +174,82 @@ export const CINEMATIC_DIRECTOR_SCRIPT = `
 
   function lerp(a, b, t) { return a + (b - a) * t; }
 
-  // Reveal fragments up to time t; tag active/spoken. Returns active ordinal.
-  function applyReveals(t) {
+  // Absolute time (seconds) the camera spends travelling from the previous
+  // fragment's framing to the current one. FIXED — NOT a fraction of the
+  // fragment's on-screen window (the old DRAG behavior) — so the eye moves
+  // promptly then HOLDS perfectly still, instead of drifting for the whole
+  // (often 6–8s) window. That slow drift was the "animation is very very slow".
+  var MOVE_SEC = 0.7;
+
+  // Per-fragment camera-target cache. Each fragment's framing is measured ONCE,
+  // with the camera transform AND the fragment's own entrance transition
+  // neutralized, so the reading is in the untransformed 1440×720 slide space.
+  // The OLD code read the live getBoundingClientRect EVERY frame — but that rect
+  // already included the camera's OWN scale/translate, so the camera fed its own
+  // output back into its next target → an oscillating feedback loop. THAT was the
+  // whole-slide "jittering up and down". Measuring once in stable space kills it.
+  var frameCache = {};
+  var lastRevealOrd = -2;   // ordinal last pushed to reveal.js / tagged
+
+  function fragmentEl(index) {
+    return document.querySelector('.reveal .slides section [data-fragment-index="' + index + '"]')
+        || document.querySelectorAll('.reveal .slides section .fragment')[index] || null;
+  }
+
+  // Framing for a fragment index, measured in stable (untransformed) slide space.
+  function targetFrame(index) {
+    if (frameCache[index]) return frameCache[index];
+    if (!camera) return { s: 1, tx: 0, ty: 0 };
+    var el = fragmentEl(index);
+    if (!el) return { s: 1, tx: 0, ty: 0 };            // not laid out yet — retry next frame
+    var prevCam = camera.style.transform;
+    var prevTrans = el.style.transition;
+    // Neutralize the camera transform AND the element's entrance transition so
+    // the rect we read is its FINAL, untransformed resting box (not a value
+    // mid-slide/mid-fade that would make the camera chase a moving element).
+    camera.style.transform = 'none';
+    el.style.transition = 'none';
+    void camera.offsetHeight;                          // force a synchronous reflow
+    var r = el.getBoundingClientRect();
+    el.style.transition = prevTrans;
+    camera.style.transform = prevCam;
+    if (r.width < 4 || r.height < 4) return { s: 1, tx: 0, ty: 0 };
+    var f = frameFor({ x: r.left, y: r.top, w: r.width, h: r.height });
+    frameCache[index] = f;                             // cache only once genuinely measured
+    return f;
+  }
+
+  // Active ordinal for time t (cheap — pure read, no DOM writes).
+  function activeOrdFor(t) {
+    var tl = timeline(), ord = -1;
+    for (var i = 0; i < tl.length; i++) { if (t >= tl[i].startSec) ord = i; }
+    return ord;
+  }
+
+  // Reveal / tag fragments — DOM writes happen ONLY when the active ordinal
+  // changes, so reveal.js isn't re-slid and classes aren't churned every single
+  // frame (that per-frame churn added its own micro-stutter to the text).
+  function applyReveals(ord) {
     var tl = timeline();
-    if (!window.__deck || tl.length === 0) return -1;
-    var activeOrd = -1;
-    for (var i = 0; i < tl.length; i++) {
-      if (t >= tl[i].startSec) activeOrd = i;
-    }
-    window.__deck.slide(0, 0, activeOrd);
+    if (!window.__deck || tl.length === 0) return;
+    if (ord === lastRevealOrd) return;
+    lastRevealOrd = ord;
+    window.__deck.slide(0, 0, ord);
     var frags = document.querySelectorAll('.reveal .slides section .fragment');
     for (var k = 0; k < frags.length; k++) frags[k].classList.remove('cine-active', 'cine-spoken');
-    for (var j = 0; j <= activeOrd && j < tl.length; j++) {
+    for (var j = 0; j <= ord && j < tl.length; j++) {
       var el = document.querySelector('.reveal .slides section [data-fragment-index="' + tl[j].index + '"]') || frags[tl[j].index];
       if (!el) continue;
-      el.classList.add(j === activeOrd ? 'cine-active' : 'cine-spoken');
+      el.classList.add(j === ord ? 'cine-active' : 'cine-spoken');
     }
-    return activeOrd;
   }
 
   // Master seek — pure function of time.
   window.__seekTo = function (t) {
     ensureCamera();
-    var activeOrd = applyReveals(t);
     var tl = timeline();
+    var activeOrd = activeOrdFor(t);
+    applyReveals(activeOrd);
 
     if (window.__scrollCodeToProgress && duration() > 0) {
       window.__scrollCodeToProgress(t / duration());
@@ -205,8 +258,7 @@ export const CINEMATIC_DIRECTOR_SCRIPT = `
     if (!camera) return;
     // ── EYEBALL IS MANDATORY ON ALL SLIDES ──────────────────────────────────
     // The font-threshold gate (only zoom on dense slides) is DISABLED so every
-    // slide gets the camera. To restore per-slide gating, re-add !measureDense()
-    // to the guard below:
+    // slide gets the camera. To restore per-slide gating, re-add !measureDense():
     //   if (!measureDense() || activeOrd < 0 || tl.length === 0) {
     if (activeOrd < 0 || tl.length === 0) {
       camera.style.transform = 'none';
@@ -215,20 +267,18 @@ export const CINEMATIC_DIRECTOR_SCRIPT = `
 
     var cur = tl[activeOrd];
     var prev = activeOrd > 0 ? tl[activeOrd - 1] : cur;
-    var span = Math.max(0.001, cur.endSec - cur.startSec);
-    var into = Math.max(0, Math.min(1, (t - cur.startSec) / span));
-    var dragT = Math.min(1, into / DRAG);
-    var e = EASE(dragT);
+    // Ease over a FIXED short window, then hold — snappy, not a window-long crawl.
+    var e = EASE(Math.max(0, Math.min(1, (t - cur.startSec) / MOVE_SEC)));
 
-    var fCur = frameFor(fragmentRect(cur.index));
-    var fPrev = frameFor(fragmentRect(prev.index));
+    var fCur = targetFrame(cur.index);
+    var fPrev = targetFrame(prev.index);
     var s = lerp(fPrev.s, fCur.s, e);
     var tx = lerp(fPrev.tx, fCur.tx, e);
     var ty = lerp(fPrev.ty, fCur.ty, e);
     camera.style.transform = 'translate(' + tx.toFixed(2) + 'px,' + ty.toFixed(2) + 'px) scale(' + s.toFixed(4) + ')';
   };
 
-  window.__cineReset = function () { deckDense = null; };
+  window.__cineReset = function () { deckDense = null; frameCache = {}; lastRevealOrd = -2; };
 })();
 </script>`;
 
@@ -435,15 +485,50 @@ export const REVEAL_INIT_SCRIPT = `
   });
 
   // Auto-scroll long .code-card bodies as narration proceeds — driven by a
-  // 0..1 progress value covering this slide's whole on-screen duration, not
-  // reveal.js fragment state. No-op if the code fits without scrolling.
+  // 0..1 progress value covering this slide's whole on-screen duration.
+  //
+  // ── PAGINATED, NOT A GRADUAL CRAWL ────────────────────────────────────────
+  // The old version set scrollTop = maxScroll * progress every frame, so a long
+  // snippet crept up pixel-by-pixel the entire slide — the "revealing the code
+  // slowly" you did NOT want. Instead we treat the viewport as PAGES: show one
+  // full page of code, HOLD it for that page's slice of the slide, then jump the
+  // whole viewport up by exactly one page in one go (a short 0.28s ease so it's
+  // not a hard cut, but no slow drift). No-op if the code fits without scrolling.
   function scrollCodeToProgress(progress) {
     var body = document.querySelector('.code-card-body, .code-card pre');
     if (!body) return;
     var maxScroll = body.scrollHeight - body.clientHeight;
-    if (maxScroll <= 0) return;
+    if (maxScroll <= 0) { body.scrollTop = 0; return; }
     var p = Math.max(0, Math.min(1, progress));
-    body.scrollTop = maxScroll * p;
+    // Page height = one viewport minus a small overlap so the last line of the
+    // previous page stays for context (avoids cutting a line in half).
+    var OVERLAP = 40;
+    var page = Math.max(1, body.clientHeight - OVERLAP);
+    var pages = Math.max(1, Math.ceil(maxScroll / page) + 1);
+    // Which page should be showing at this progress. Snap to whole pages so the
+    // code appears one full block at a time, holds, then swaps to the next block.
+    var pageIndex = Math.min(pages - 1, Math.floor(p * pages));
+    var target = Math.min(maxScroll, pageIndex * page);
+    // One-shot smooth swap between pages (short), applied only when the page
+    // actually changes — otherwise the block sits perfectly still.
+    if (body.getAttribute('data-code-page') !== String(pageIndex)) {
+      body.setAttribute('data-code-page', String(pageIndex));
+      body.style.transition = 'scroll-behavior 0s';
+      body.style.scrollBehavior = 'auto';
+      var startTop = body.scrollTop;
+      var startT = null;
+      var DUR = 280; // ms — quick page swap, not a slow reveal
+      var step = function (ts) {
+        if (startT === null) startT = ts;
+        var k = Math.min(1, (ts - startT) / DUR);
+        var eased = k < 0.5 ? 4*k*k*k : 1 - Math.pow(-2*k+2, 3)/2;
+        body.scrollTop = startTop + (target - startTop) * eased;
+        if (k < 1 && body.getAttribute('data-code-page') === String(pageIndex)) {
+          requestAnimationFrame(step);
+        }
+      };
+      requestAnimationFrame(step);
+    }
   }
   window.__scrollCodeToProgress = scrollCodeToProgress;
 })();

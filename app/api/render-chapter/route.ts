@@ -442,13 +442,20 @@ function buildRevealDeckHtml(html: string, baseUrl: string): string {
       else boot();
       // Same scroll-sync contract as the live-preview REVEAL_INIT_SCRIPT — driven
       // directly via page.evaluate here instead of postMessage (headless page).
+      // PAGINATED to match the preview: snap to whole pages (show a block, then
+      // jump one page) instead of a gradual pixel crawl. Synchronous (no rAF)
+      // because Puppeteer captures a single static frame per interval.
       window.__scrollCodeToProgress = function (progress) {
         var body = document.querySelector('.code-card-body, .code-card pre');
         if (!body) return;
         var maxScroll = body.scrollHeight - body.clientHeight;
-        if (maxScroll <= 0) return;
+        if (maxScroll <= 0) { body.scrollTop = 0; return; }
         var p = Math.max(0, Math.min(1, progress));
-        body.scrollTop = maxScroll * p;
+        var OVERLAP = 40;
+        var page = Math.max(1, body.clientHeight - OVERLAP);
+        var pages = Math.max(1, Math.ceil(maxScroll / page) + 1);
+        var pageIndex = Math.min(pages - 1, Math.floor(p * pages));
+        body.scrollTop = Math.min(maxScroll, pageIndex * page);
       };
     })();
   `;
