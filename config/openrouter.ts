@@ -63,6 +63,15 @@ class OpenRouterClient {
         return keys[this.currentKeyIndex];
     }
 
+    /**
+     * Public: how many NVIDIA API keys are currently configured. Lets callers
+     * size a parallel worker pool (e.g. one key per concurrent slide) and pick a
+     * dedicated fallback key index, instead of hard-coding "5".
+     */
+    public getKeyCount(): number {
+        return this.getAllKeys().length;
+    }
+
     /** Rotate to the next key and return it */
     private rotateKey(): string {
         const keys = this.getAllKeys();
@@ -347,6 +356,12 @@ CRITICAL STRUCTURAL & DESIGN MANDATES (override defaults):
         disableThinking?: boolean;
         clearThinking?: boolean;
         timeoutMs?: number;
+        // Pin this call to a SPECIFIC key index (0-based), with an optional backup,
+        // so parallel callers each own a dedicated key instead of fighting over the
+        // shared rotation (mirrors json()). When set, the call ONLY uses
+        // [pinned, backup] and never touches the shared currentKeyIndex.
+        pinnedKeyIndex?: number;
+        backupKeyIndex?: number;
     }): Promise<string> {
         const primaryModel = options?.model || this.model;
         const temperature  = options?.temperature ?? 0.7;
@@ -354,17 +369,27 @@ CRITICAL STRUCTURAL & DESIGN MANDATES (override defaults):
         const disableThinking = options?.disableThinking ?? false;
         const clearThinking = options?.clearThinking ?? false;
         const timeoutMs = options?.timeoutMs;
+        const pinnedKeyIndex = options?.pinnedKeyIndex;
+        const backupKeyIndex = options?.backupKeyIndex;
 
         const modelsToTry = [primaryModel, this.fallbackModel, this.lastFallbackModel].filter(m => m && m.trim() !== '');
         if (modelsToTry.length === 0) throw new Error('No OpenRouter model configured');
         const allKeys = this.getAllKeys();
         if (allKeys.length === 0) throw new Error('No NVIDIA_API_KEY found in environment');
 
+        // Pinned mode: this call owns [pinned, backup] only — same semantics as json().
+        const pinnedMode = typeof pinnedKeyIndex === 'number';
+        const keySequence: number[] = pinnedMode
+            ? [pinnedKeyIndex!, ...(typeof backupKeyIndex === 'number' ? [backupKeyIndex!] : [])]
+                  .filter(i => i >= 0 && i < allKeys.length)
+            : [];
+        const keyTries = pinnedMode ? keySequence.length : allKeys.length;
+
         let lastError: any;
         for (const model of modelsToTry) {
             if (model !== primaryModel) console.log(`🔀 NvidiaAPI (text) falling back from [${primaryModel}] to [${model}]...`);
-            for (let keyAttempt = 0; keyAttempt < allKeys.length; keyAttempt++) {
-                const apiKey = this.getActiveKey();
+            for (let keyAttempt = 0; keyAttempt < keyTries; keyAttempt++) {
+                const apiKey = pinnedMode ? allKeys[keySequence[keyAttempt]] : this.getActiveKey();
                 try {
                     const { rawText } = await this.callModel(
                         systemPrompt, userInput, model, temperature, maxTokens, apiKey,
@@ -373,7 +398,12 @@ CRITICAL STRUCTURAL & DESIGN MANDATES (override defaults):
                     return rawText;
                 } catch (error: any) {
                     lastError = error;
-                    if (error.isRateLimit) { this.rotateKey(); continue; }
+                    if (error.isRateLimit) {
+                        // Pinned mode: advance to backup (next in keySequence), never
+                        // touch the shared rotation. Normal mode: rotate shared index.
+                        if (!pinnedMode) this.rotateKey();
+                        continue;
+                    }
                     console.error(`❌ NvidiaAPI (text) error [${model}]:`, error.message);
                     break; // move to next model
                 }

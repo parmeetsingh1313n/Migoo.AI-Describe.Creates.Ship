@@ -879,12 +879,29 @@ export const generateCourseSlidesFn = inngest.createFunction(
         // ── Phase 1: Generate slide CONTENT (HTML + narration) ────────────────
         const slidesData: any[] = [];
 
-        for (let si = 0; si < totalSlides; si++) {
-            // ── Existing-slide reuse: NO LLM calls when the slide already exists.
-            // Own memoized step; just re-injects images if placeholders remain. ──
-            const existing = existingSlides.find(s => s.slideIndex === si + 1);
-            if (existing) {
-                const reused = await step.run(`reuse-slide-${si}`, async () => {
+        // ── Parallel key assignment ──────────────────────────────────────────
+        // Each concurrently-generated slide OWNS a dedicated NVIDIA key for BOTH
+        // its Phase-1 (plan) and Phase-2 (write) calls, so up to 4 slides render at
+        // once without fighting over the shared key rotation (which caused 429
+        // storms). The LAST key is reserved as a shared FALLBACK for any slide whose
+        // own key errors/rate-limits. With 5 keys: slides use keys 1-4, key 5 = fallback.
+        const KEY_COUNT = openrouter.getKeyCount();
+        const FALLBACK_KEY_INDEX = KEY_COUNT >= 2 ? KEY_COUNT - 1 : -1;
+        // Workers = keys usable for slides (all but the reserved fallback), capped at 4.
+        const SLIDE_WORKERS = Math.max(1, Math.min(4, FALLBACK_KEY_INDEX >= 0 ? FALLBACK_KEY_INDEX : KEY_COUNT));
+        console.log(`🔑 ${TAG} Slide generation: ${SLIDE_WORKERS} parallel worker key(s), fallback key index=${FALLBACK_KEY_INDEX} (of ${KEY_COUNT} keys)`);
+
+        // Running archetype ledger for the WHOLE chapter, index-aligned to slide
+        // index (0-based). Archetype assignment is pure JS — it depends ONLY on the
+        // archetypes of PRIOR slides, never on generated text — so we precompute it
+        // deterministically per wave BEFORE firing any LLM calls.
+        const assignedArchetypes: string[] = [];
+        const existingFor = (si: number) => existingSlides.find(s => s.slideIndex === si + 1);
+
+        // ── reuseSlide: an already-generated slide, NO LLM. Re-injects images if
+        // placeholders remain. Returns the slide object (caller pushes in order). ──
+        const reuseSlide = async (si: number, existing: any) => {
+            return await step.run(`reuse-slide-${si}`, async () => {
                     // Re-inject image URLs in case this slide was saved BEFORE
                     // course images were generated (placeholder tokens remain).
                     // HTML may be in Appwrite (htmlUrl) or inline (legacy) — resolve first.
@@ -929,32 +946,19 @@ export const generateCourseSlidesFn = inngest.createFunction(
                         archetype: pickArchetype(chapterIndex, si),
                     };
                 });
-                slidesData.push(reused);
-                continue;
-            }
+        };
 
-            // ── Fresh slide. Compute archetype / usedComponents / previousContext
-            // in the CLOSURE (pure JS off the resolved slidesData accumulator) so
-            // BOTH phases share them. ──
-            const previousContext = slidesData.map((s, idx) => ({
-                slideIndex: idx + 1,
-                topic: subTopics[idx],
-                keyConceptsCovered: extractKeyConcepts(s.narration?.fullText ?? ""),
-                narrationSummary: (s.narration?.fullText ?? "").substring(0, 600) + "...",
-            }));
-
-            // ── Assign the EXACT primary component for this slide + forbid repeats ──
-            // Topic-aware override with a CHAPTER CODE BUDGET: if THIS slide's
-            // topic actually needs a code example, force a code archetype — BUT
-            // only while the chapter is still under its code budget (~40% of
-            // slides). Once the budget is spent, we stop forcing code and swap in
-            // a non-code archetype for variety, so a programming chapter no longer
-            // collapses into wall-to-wall code cards. Conversely, if the natural
-            // rotation lands on code while we're over budget, we swap it out too.
+        // ── assignArchetypeFor(si): deterministic PLANNING pass (pure JS, NO LLM).
+        // Computes the archetype for slide `si` from the archetypes already assigned
+        // to earlier slides (the ledger), honouring the chapter code budget, records
+        // it, and returns it. MUST be called in strict slide-index order. Because it
+        // depends only on prior archetypes (never on generated text), the whole wave
+        // can be planned up front, before any parallel generation starts. ──
+        const assignArchetypeFor = (si: number): string => {
             const naturalArchetype = pickArchetype(chapterIndex, si);
             const wantsCode = chapterTopics[si]?.needsCode ?? false;
-            // How many code slides THIS chapter has actually produced so far.
-            const codeSlidesSoFar = slidesData.filter(s => isCodeArchetype(s.archetype ?? "")).length;
+            // How many code slides THIS chapter has planned so far (from the ledger).
+            const codeSlidesSoFar = assignedArchetypes.filter(a => isCodeArchetype(a)).length;
             const codeBudget = codeSlideBudget(totalSlides);
             const codeBudgetLeft = codeSlidesSoFar < codeBudget;
 
@@ -970,18 +974,30 @@ export const generateCourseSlidesFn = inngest.createFunction(
                 // or the chapter is out of code budget → swap to a non-code layout.
                 archetype = pickNonCodeArchetype(chapterIndex, si);
             }
+            assignedArchetypes[si] = archetype;
+            return archetype;
+        };
+
+        // ── generateSlide(si, keyIndex, previousContext): a FRESH slide — Phase 1
+        // (plan) + Phase 2 (write), BOTH pinned to this slide's OWN NVIDIA key so
+        // parallel slides never fight over the shared rotation (the old 429 storm).
+        // `previousContext` is narration continuity from COMPLETED prior waves only.
+        // Returns the slide object (the wave driver pushes it in order). ──
+        const generateSlide = async (si: number, keyIndex: number, previousContext: any[]) => {
+            // Archetype was already planned into the ledger by assignArchetypeFor.
+            const archetype = assignedArchetypes[si];
             const primaryComponent = componentName(archetype);           // e.g. "CODE SNIPPET"
             const isCodeSlide = isCodeArchetype(archetype);
             const isCodeCompanion = isCodeCompanionArchetype(archetype);  // code + a companion component
-            // Components ACTUALLY used by earlier slides in THIS chapter (not the
-            // natural rotation — a prior slide may itself have been code-overridden)
-            // — the model must not fall back onto any of them again. Code archetypes
-            // are exempt: a programming chapter legitimately needs several code
-            // slides, and forcing visual variety there fights that goal.
+            // Components used by EARLIER slides in THIS chapter — the model must not
+            // fall back onto any of them again. Read from the ledger (so within-wave
+            // earlier slides count too, even before they finish generating). Code
+            // archetypes are exempt: a programming chapter legitimately needs several.
             const usedComponents = Array.from(
                 new Set(
-                    slidesData
-                        .map(s => componentName(s.archetype ?? ""))
+                    assignedArchetypes
+                        .slice(0, si)
+                        .map(a => componentName(a ?? ""))
                         .filter(c => c && !isCodeArchetype(c))
                 )
             );
@@ -1047,6 +1063,10 @@ export const generateCourseSlidesFn = inngest.createFunction(
                         disableThinking: false,
                         maxTokens: 4000,
                         timeoutMs: 240000,
+                        // This slide OWNS keyIndex for both phases; fall back to the
+                        // reserved shared fallback key only if its own key 429s.
+                        pinnedKeyIndex: keyIndex,
+                        backupKeyIndex: FALLBACK_KEY_INDEX >= 0 ? FALLBACK_KEY_INDEX : undefined,
                     });
                 } catch (e: any) {
                     console.warn(`⚠️ ${TAG} slide ${si + 1} Phase-1 plan failed (proceeding plan-less): ${e?.message?.substring(0, 120)}`);
@@ -1084,6 +1104,9 @@ export const generateCourseSlidesFn = inngest.createFunction(
                             disableThinking: true,
                             clearThinking: true,
                             timeoutMs: 240000,
+                            // Same dedicated key as Phase 1 (fallback behind it).
+                            pinnedKeyIndex: keyIndex,
+                            backupKeyIndex: FALLBACK_KEY_INDEX >= 0 ? FALLBACK_KEY_INDEX : undefined,
                         });
                         if (Array.isArray(slideContent)) slideContent = slideContent[0];
                         break;
@@ -1147,19 +1170,78 @@ export const generateCourseSlidesFn = inngest.createFunction(
                     set: { narration: slideContent.narration, html: slideHtmlInline, htmlUrl: slideHtmlUrl, revealData },
                 });
 
-                // Update slides progress counter
-                await upsertStatus({
-                    status: "generating:slides",
-                    slidesTotal: totalSlides,
-                    slidesComplete: si + 1,
-                    audioComplete: existingAudioCount,
-                });
-
                 console.log(`💾 ${TAG} Slide ${si + 1}/${totalSlides} content saved to database ✅`);
                 return slideContent;
             });
 
-            slidesData.push(slideResult);
+            return slideResult;
+        };
+
+        // ── Wave driver ───────────────────────────────────────────────────────
+        // Walk slides in strict index order in waves of SLIDE_WORKERS. For each
+        // wave: (1) PLAN archetypes for every fresh slide in the wave sequentially
+        // (pure JS, logged) so within-wave anti-repeat is correct, THEN (2) fire all
+        // fresh slides' Phase 1 + Phase 2 in PARALLEL, each pinned to its own key.
+        // Reused (already-generated) slides need no LLM and are resolved inline.
+        // Narration continuity: a wave only sees narration from PRIOR waves (fix A),
+        // captured once here before the wave fans out. Results land in slidesData in
+        // slide-index order so the on-screen sequence stays intact.
+        for (let waveStart = 0; waveStart < totalSlides; waveStart += SLIDE_WORKERS) {
+            const waveEnd = Math.min(waveStart + SLIDE_WORKERS, totalSlides);
+            const waveIndices = Array.from({ length: waveEnd - waveStart }, (_, k) => waveStart + k);
+
+            // Narration continuity from COMPLETED prior waves only (fix A). Snapshot
+            // once so every slide in this wave sees the identical prior context.
+            const previousContext = slidesData.map((s, idx) => ({
+                slideIndex: idx + 1,
+                topic: subTopics[idx],
+                keyConceptsCovered: extractKeyConcepts(s.narration?.fullText ?? ""),
+                narrationSummary: (s.narration?.fullText ?? "").substring(0, 600) + "...",
+            }));
+
+            // (1) PLAN archetypes for this wave, in order (fresh slides only). Reused
+            // slides get their archetype approximated so the ledger stays index-aligned.
+            const freshInWave: { si: number; keyIndex: number }[] = [];
+            for (const si of waveIndices) {
+                const existing = existingFor(si);
+                if (existing) {
+                    // Keep the ledger index-aligned for downstream usedComponents.
+                    assignedArchetypes[si] = pickArchetype(chapterIndex, si);
+                    continue;
+                }
+                const archetype = assignArchetypeFor(si);
+                const keyIndex = freshInWave.length; // 0-based worker slot → key index
+                freshInWave.push({ si, keyIndex });
+                console.log(`🎨 ${TAG} Wave [${waveStart + 1}-${waveEnd}] planned slide ${si + 1}: archetype="${archetype}" → key #${keyIndex + 1}`);
+            }
+
+            // (2) Resolve the wave. Reused slides inline (no LLM); fresh slides fan
+            // out in parallel, each on its own key. Then commit in slide-index order.
+            const waveResults: { si: number; slide: any }[] = [];
+            const reusedPromises = waveIndices
+                .filter(si => existingFor(si))
+                .map(async si => ({ si, slide: await reuseSlide(si, existingFor(si)) }));
+            const freshPromises = freshInWave.map(async ({ si, keyIndex }) =>
+                ({ si, slide: await generateSlide(si, keyIndex, previousContext) })
+            );
+            const settled = await Promise.all([...reusedPromises, ...freshPromises]);
+            waveResults.push(...settled);
+
+            // Commit in slide-index order so slidesData stays sequential.
+            waveResults.sort((a, b) => a.si - b.si);
+            for (const { slide } of waveResults) slidesData.push(slide);
+
+            // Progress once per wave — monotonic (parallel slides finish out of order,
+            // so a per-slide counter would bounce around). Fresh slides already wrote
+            // their own rows inside the write step; this only advances the counter.
+            await upsertStatus({
+                status: "generating:slides",
+                slidesTotal: totalSlides,
+                slidesComplete: slidesData.length,
+                audioComplete: existingAudioCount,
+            });
+
+            console.log(`🌊 ${TAG} Wave [${waveStart + 1}-${waveEnd}] complete — ${slidesData.length}/${totalSlides} slides ready`);
         }
 
         if (!slidesData?.length) {
