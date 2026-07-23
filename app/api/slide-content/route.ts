@@ -16,6 +16,7 @@
 import { db } from "@/config/db";
 import { chapterContentSlides, coursesTable } from "@/config/schema";
 import { apiError, apiSuccess, apiOptions } from "@/lib/api-helpers";
+import { uploadSlideNarration, resolveSlideNarration } from "@/lib/slide-narration";
 import { validateInput, updateSlideNarrationSchema } from "@/lib/validations";
 import { currentUser } from "@clerk/nextjs/server";
 import { and, eq } from "drizzle-orm";
@@ -45,13 +46,25 @@ export async function PATCH(req: NextRequest) {
             .where(and(eq(chapterContentSlides.courseId, courseId), eq(chapterContentSlides.slideId, slideId)));
         if (!slide) return apiError("Slide not found", 404, "NOT_FOUND");
 
-        const prevNarration = (slide.narration as any) ?? {};
+        // Resolve existing narration (may be in Appwrite) so we can merge fullText.
+        const prevNarration = (await resolveSlideNarration(slide)) ?? {};
         const nextNarration = { ...prevNarration, fullText: narration.trim() };
+
+        // Offload updated narration to Appwrite; store only the URL.
+        let narrationUrl: string | null = null;
+        let narrationInline: any | null = nextNarration;
+        try {
+            narrationUrl = await uploadSlideNarration(slideId, nextNarration);
+            narrationInline = null;
+        } catch (e: any) {
+            console.warn(`⚠️ slide-content narration upload failed for ${slideId}, keeping inline: ${e?.message?.slice(0, 100)}`);
+        }
 
         // Persist edited narration; clear stale audio (regenerated after approval)
         const [updated] = await db.update(chapterContentSlides)
             .set({
-                narration: nextNarration,
+                narration: narrationInline,
+                narrationUrl,
                 audioUrl: null,
                 captions: null,
                 audioDuration: null,
@@ -63,7 +76,7 @@ export async function PATCH(req: NextRequest) {
             slide: {
                 slideId: updated.slideId,
                 slideIndex: updated.slideIndex,
-                narration: updated.narration,
+                narration: nextNarration,
             },
         });
     } catch (error: any) {

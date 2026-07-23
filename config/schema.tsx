@@ -45,7 +45,10 @@ export const chapterContentSlides = pgTable("chapter_content_slides", {
     slideIndex: integer().notNull(),
     audioUrl: varchar({ length: 500 }),
     imageUrl: varchar({ length: 500 }),
-    narration: json().notNull(),
+    // narration is nullable for new rows — content lives in Appwrite (narrationUrl).
+    // Legacy rows keep inline JSON. Resolve via resolveSlideNarration() in lib/slide-narration.
+    narration: json(),
+    narrationUrl: varchar({ length: 500 }),
     captions: json(),
     html: text(),
     // HTML now lives in Appwrite Storage; `html` above stays for legacy rows and

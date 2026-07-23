@@ -19,6 +19,7 @@ import { chapterContentSlides, chapterGenerationStatus, courseImages, coursesTab
 import { GENERATE_SINGLE_SLIDE_PROMPT, PLAN_SLIDE_PROMPT, EXPAND_CHAPTER_TOPICS_PROMPT } from "@/data/Prompt";
 import { putWithRotation } from "@/lib/blob";
 import { uploadSlideHtml, resolveSlideHtml } from "@/lib/slide-html";
+import { uploadSlideNarration, resolveSlideNarration } from "@/lib/slide-narration";
 import { generateNanoBananaImage, generateNanoBananaImagesParallel } from "@/lib/apify-image";
 import { fetchSlideResearch } from "@/lib/tavily";
 import { SLIDE_TYPE_PAIRS, SLIDE_ACCENTS, SLIDE_ARCHETYPES, pickArchetype, pickNonCodeArchetype, componentName, isCodeArchetype, isCodeCompanionArchetype, isLikelyCodeTopic, codeSlideBudget } from "@/data/slide-design";
@@ -1140,8 +1141,9 @@ export const generateCourseSlidesFn = inngest.createFunction(
                 }
 
                 // Save slide content to DB immediately (audioUrl stays null until TTS runs).
-                // HTML is offloaded to Appwrite Storage; only its URL is stored in Postgres.
-                // If the upload fails, fall back to inline html so a slide is never lost.
+                // HTML **and narration** are offloaded to Appwrite Storage (rotated across
+                // all configs); only their URLs are stored in Postgres. If an upload fails,
+                // fall back to inline so a slide is never lost.
                 const revealData = slideContent.fragmentData ?? slideContent.revealData ?? [];
                 let slideHtmlUrl: string | null = null;
                 let slideHtmlInline: string | null = slideContent.html ?? null;
@@ -1153,12 +1155,23 @@ export const generateCourseSlidesFn = inngest.createFunction(
                         console.warn(`⚠️ ${TAG} Slide ${si + 1} HTML upload failed, keeping inline: ${e?.message?.slice(0, 100)}`);
                     }
                 }
+                let narrationUrl: string | null = null;
+                let narrationInline: any | null = slideContent.narration ?? null;
+                if (slideContent.narration) {
+                    try {
+                        narrationUrl = await uploadSlideNarration(slideContent.slideId, slideContent.narration);
+                        narrationInline = null; // offloaded — don't duplicate in Postgres
+                    } catch (e: any) {
+                        console.warn(`⚠️ ${TAG} Slide ${si + 1} narration upload failed, keeping inline: ${e?.message?.slice(0, 100)}`);
+                    }
+                }
                 await db.insert(chapterContentSlides).values({
                     courseId,
                     chapterId,
                     slideId: slideContent.slideId,
                     slideIndex: si + 1,
-                    narration: slideContent.narration,
+                    narration: narrationInline,
+                    narrationUrl,
                     html: slideHtmlInline,
                     htmlUrl: slideHtmlUrl,
                     revealData,
@@ -1167,7 +1180,7 @@ export const generateCourseSlidesFn = inngest.createFunction(
                     audioDuration: null,
                 }).onConflictDoUpdate({
                     target: chapterContentSlides.slideId,
-                    set: { narration: slideContent.narration, html: slideHtmlInline, htmlUrl: slideHtmlUrl, revealData },
+                    set: { narration: narrationInline, narrationUrl, html: slideHtmlInline, htmlUrl: slideHtmlUrl, revealData },
                 });
 
                 console.log(`💾 ${TAG} Slide ${si + 1}/${totalSlides} content saved to database ✅`);
@@ -1346,10 +1359,24 @@ export const generateCourseAudioFn = inngest.createFunction(
 
         // ── Load the reviewed slides from DB (Phase 1 already persisted them) ──
         const slidesData = await step.run("load-reviewed-slides", async () => {
-            const rows = await db.select().from(chapterContentSlides)
+            const rows = await db.select({
+                slideId: chapterContentSlides.slideId,
+                slideIndex: chapterContentSlides.slideIndex,
+                narration: chapterContentSlides.narration,
+                narrationUrl: chapterContentSlides.narrationUrl,
+                revealData: chapterContentSlides.revealData,
+                audioUrl: chapterContentSlides.audioUrl,
+                captions: chapterContentSlides.captions,
+                audioDuration: chapterContentSlides.audioDuration,
+            }).from(chapterContentSlides)
                 .where(eq(chapterContentSlides.chapterId, chapterId));
             rows.sort((a, b) => (a.slideIndex ?? 0) - (b.slideIndex ?? 0));
-            return rows;
+            // Resolve narration from Appwrite (narrationUrl) or inline fallback.
+            return Promise.all(rows.map(async (r) => ({
+                ...r,
+                narration: await resolveSlideNarration(r),
+                narrationUrl: null,
+            })));
         });
 
         if (!slidesData?.length) {
@@ -1438,8 +1465,10 @@ export const generateCourseAudioFn = inngest.createFunction(
                     audioUrl, audioDuration,
                     narration: slide.narration,
                     captions,
-                    html: slide.html ?? null,
-                    htmlUrl: slide.htmlUrl ?? null,
+                    // html/htmlUrl only apply on a fresh insert (never here — the row
+                    // was just loaded). The conflict-update below preserves them.
+                    html: null,
+                    htmlUrl: null,
                     revealData,
                 }).onConflictDoUpdate({
                     target: chapterContentSlides.slideId,

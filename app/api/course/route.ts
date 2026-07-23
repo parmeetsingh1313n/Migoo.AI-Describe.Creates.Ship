@@ -15,6 +15,7 @@ import { db, dbLegacy, dbRetry } from "@/config/db";
 import { chapterContentSlides, coursesTable } from "@/config/schema";
 import { apiError, apiSuccess } from "@/lib/api-helpers";
 import { resolveSlideHtml } from "@/lib/slide-html";
+import { resolveSlideNarration } from "@/lib/slide-narration";
 import { logEgress } from "@/lib/egress-log";
 import { validateInput, getCourseQuerySchema } from "@/lib/validations";
 import { currentUser } from "@clerk/nextjs/server";
@@ -153,15 +154,21 @@ export async function GET(req: NextRequest) {
             }
         }
 
-        // Resolve HTML (Appwrite htmlUrl → markup, else inline html) so the preview
-        // player receives inline `html` exactly as before. Concurrent; leaves all
-        // other fields untouched.
+        // Resolve HTML + narration (Appwrite URL → content, else inline) so the
+        // preview player receives inline `html` and `narration` exactly as before.
+        // Concurrent per slide; leaves all other fields untouched.
         try {
             slides = await Promise.all(
-                slides.map(async (s) => ({ ...s, html: await resolveSlideHtml(s), htmlUrl: undefined }))
+                slides.map(async (s) => ({
+                    ...s,
+                    html: await resolveSlideHtml(s),
+                    htmlUrl: undefined,
+                    narration: await resolveSlideNarration(s),
+                    narrationUrl: undefined,
+                }))
             );
         } catch (resolveErr: any) {
-            console.error('❌ Failed resolving slide HTML from Appwrite:', resolveErr?.message?.substring(0, 120));
+            console.error('❌ Failed resolving slide content from Appwrite:', resolveErr?.message?.substring(0, 120));
         }
 
         return apiSuccess(logEgress("/api/course", {

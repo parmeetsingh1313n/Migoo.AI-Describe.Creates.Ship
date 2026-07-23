@@ -21,6 +21,7 @@ import { GENERATE_SINGLE_SLIDE_PROMPT, PLAN_SLIDE_PROMPT } from "@/data/Prompt";
 import { SLIDE_TYPE_PAIRS, SLIDE_ACCENTS, SLIDE_ARCHETYPES, pickArchetype, componentName, isCodeArchetype, isCodeCompanionArchetype, isLikelyCodeTopic } from "@/data/slide-design";
 import { fetchSlideResearch } from "@/lib/tavily";
 import { uploadSlideHtml, resolveSlideHtml } from "@/lib/slide-html";
+import { uploadSlideNarration, resolveSlidesNarration } from "@/lib/slide-narration";
 import { apiError, apiSuccess, apiOptions } from "@/lib/api-helpers";
 import { validateInput, regenerateSlideSchema } from "@/lib/validations";
 import { currentUser } from "@clerk/nextjs/server";
@@ -57,8 +58,10 @@ export async function POST(req: NextRequest) {
         const subTopics: string[] = (chapter.subContent?.slice(0, 15)) || [chapter.chapterTitle];
 
         // ── Load the chapter's slides (target + siblings for context) ────────
-        const chapterSlides = await db.select().from(chapterContentSlides)
+        const rawChapterSlides = await db.select().from(chapterContentSlides)
             .where(and(eq(chapterContentSlides.courseId, courseId), eq(chapterContentSlides.chapterId, chapterId)));
+        // Resolve narration from Appwrite (narrationUrl) or inline fallback.
+        const chapterSlides = await resolveSlidesNarration(rawChapterSlides);
         chapterSlides.sort((a, b) => (a.slideIndex ?? 0) - (b.slideIndex ?? 0));
 
         const target = chapterSlides.find((s) => s.slideId === slideId);
@@ -207,7 +210,7 @@ fragmentData completely to reflect the requested change. Honour the request prec
         // the slide's previous markup — which may live in Appwrite, so resolve it.
         const finalHtml = html || (await resolveSlideHtml(target)) || "";
 
-        // Offload to Appwrite; store only the URL. On upload failure, keep inline.
+        // Offload HTML to Appwrite; store only the URL. On upload failure, keep inline.
         let htmlUrl: string | null = null;
         let htmlInline: string | null = finalHtml || null;
         if (finalHtml) {
@@ -219,12 +222,25 @@ fragmentData completely to reflect the requested change. Honour the request prec
             }
         }
 
+        // Offload narration to Appwrite; store only the URL. On upload failure, keep inline.
+        let narrationUrl: string | null = null;
+        let narrationInline: any | null = narration;
+        if (narration) {
+            try {
+                narrationUrl = await uploadSlideNarration(slideId, narration);
+                narrationInline = null;
+            } catch (e: any) {
+                console.warn(`⚠️ regenerate-slide narration upload failed for ${slideId}, keeping inline: ${e?.message?.slice(0, 100)}`);
+            }
+        }
+
         // Persist — clear any stale audio (audio is synthesised after final approval)
         const [updated] = await db.update(chapterContentSlides)
             .set({
                 html: htmlInline,
                 htmlUrl,
-                narration,
+                narration: narrationInline,
+                narrationUrl,
                 revealData,
                 audioUrl: null,
                 captions: null,
