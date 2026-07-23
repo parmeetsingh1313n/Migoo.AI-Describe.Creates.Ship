@@ -23,7 +23,7 @@ import { uploadSlideNarration, resolveSlideNarration } from "@/lib/slide-narrati
 import { generateNanoBananaImage, generateNanoBananaImagesParallel } from "@/lib/apify-image";
 import { fetchSlideResearch } from "@/lib/tavily";
 import { SLIDE_TYPE_PAIRS, SLIDE_ACCENTS, SLIDE_ARCHETYPES, pickArchetype, pickNonCodeArchetype, componentName, isCodeArchetype, isCodeCompanionArchetype, isLikelyCodeTopic, codeSlideBudget } from "@/data/slide-design";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { inngest } from "./client";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -892,6 +892,37 @@ export const generateCourseSlidesFn = inngest.createFunction(
         const SLIDE_WORKERS = Math.max(1, Math.min(4, FALLBACK_KEY_INDEX >= 0 ? FALLBACK_KEY_INDEX : KEY_COUNT));
         console.log(`🔑 ${TAG} Slide generation: ${SLIDE_WORKERS} parallel worker key(s), fallback key index=${FALLBACK_KEY_INDEX} (of ${KEY_COUNT} keys)`);
 
+        // ── reportSlideProgress: live, per-slide progress for the "Designing Slides"
+        // bar. Called the MOMENT any slide finishes (in any order), it counts how
+        // many slide rows are ACTUALLY persisted for this chapter and advances
+        // slidesComplete to that count — but only FORWARD (GREATEST), so two parallel
+        // slides finishing near-simultaneously can never bounce the bar backward.
+        // The DB count is the source of truth (replay-safe, matches what the user's
+        // course actually contains), and every call refreshes updatedAt — which also
+        // keeps the chapter-status stale-reset watchdog from firing mid-generation. ──
+        const reportSlideProgress = async () => {
+            try {
+                const [{ count }] = await db
+                    .select({ count: sql<number>`count(*)::int` })
+                    .from(chapterContentSlides)
+                    .where(eq(chapterContentSlides.chapterId, chapterId));
+                const done = Math.min(totalSlides, Number(count) || 0);
+                await db.update(chapterGenerationStatus)
+                    .set({
+                        status: "generating:slides",
+                        slidesTotal: totalSlides,
+                        // Monotonic: only move forward, never regress on a racing write.
+                        slidesComplete: sql`GREATEST(${chapterGenerationStatus.slidesComplete}, ${done})`,
+                        audioComplete: existingAudioCount,
+                        updatedAt: new Date(),
+                    })
+                    .where(eq(chapterGenerationStatus.chapterId, chapterId));
+            } catch (e: any) {
+                console.warn(`⚠️ ${TAG} reportSlideProgress failed (non-fatal): ${e?.message?.slice(0, 100)}`);
+            }
+        };
+
+
         // Running archetype ledger for the WHOLE chapter, index-aligned to slide
         // index (0-based). Archetype assignment is pure JS — it depends ONLY on the
         // archetypes of PRIOR slides, never on generated text — so we precompute it
@@ -902,7 +933,7 @@ export const generateCourseSlidesFn = inngest.createFunction(
         // ── reuseSlide: an already-generated slide, NO LLM. Re-injects images if
         // placeholders remain. Returns the slide object (caller pushes in order). ──
         const reuseSlide = async (si: number, existing: any) => {
-            return await step.run(`reuse-slide-${si}`, async () => {
+            const result = await step.run(`reuse-slide-${si}`, async () => {
                     // Re-inject image URLs in case this slide was saved BEFORE
                     // course images were generated (placeholder tokens remain).
                     // HTML may be in Appwrite (htmlUrl) or inline (legacy) — resolve first.
@@ -947,6 +978,9 @@ export const generateCourseSlidesFn = inngest.createFunction(
                         archetype: pickArchetype(chapterIndex, si),
                     };
                 });
+            // Live progress: a reused slide counts as prepared too.
+            await reportSlideProgress();
+            return result;
         };
 
         // ── assignArchetypeFor(si): deterministic PLANNING pass (pure JS, NO LLM).
@@ -1187,6 +1221,10 @@ export const generateCourseSlidesFn = inngest.createFunction(
                 return slideContent;
             });
 
+            // Live progress: this slide is now fully prepared → bump the bar by the
+            // real persisted count immediately, without waiting for its wave-mates.
+            await reportSlideProgress();
+
             return slideResult;
         };
 
@@ -1244,15 +1282,11 @@ export const generateCourseSlidesFn = inngest.createFunction(
             waveResults.sort((a, b) => a.si - b.si);
             for (const { slide } of waveResults) slidesData.push(slide);
 
-            // Progress once per wave — monotonic (parallel slides finish out of order,
-            // so a per-slide counter would bounce around). Fresh slides already wrote
-            // their own rows inside the write step; this only advances the counter.
-            await upsertStatus({
-                status: "generating:slides",
-                slidesTotal: totalSlides,
-                slidesComplete: slidesData.length,
-                audioComplete: existingAudioCount,
-            });
+            // Progress is now reported PER-SLIDE (reportSlideProgress) the moment
+            // each slide finishes, so the bar climbs 1-by-1 within a wave instead of
+            // jumping by SLIDE_WORKERS at the barrier. One final sync here catches
+            // any rounding and keeps updatedAt fresh at the wave boundary.
+            await reportSlideProgress();
 
             console.log(`🌊 ${TAG} Wave [${waveStart + 1}-${waveEnd}] complete — ${slidesData.length}/${totalSlides} slides ready`);
         }

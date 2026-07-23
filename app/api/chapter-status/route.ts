@@ -143,7 +143,7 @@ export async function GET(req: NextRequest) {
             // "Designing slides 0/N" the user never started. If the row hasn't
             // updated in 15 min, auto-reset to idle so the card returns to normal.
             if (['generating:slides', 'generating:audio', 'queued'].includes(row.status ?? '')) {
-                const GEN_STALE_MS = 15 * 60 * 1000; // 15 minutes
+                const GEN_STALE_MS = 25 * 60 * 1000; // 25 minutes
                 const lastUpdate = row.updatedAt ? new Date(row.updatedAt).getTime() : 0;
                 const isStale = Date.now() - lastUpdate > GEN_STALE_MS;
 
