@@ -487,7 +487,21 @@ const CINEMATIC_DIRECTOR_SCRIPT = `
     var fs = sample ? parseFloat(getComputedStyle(sample).fontSize) : 18;
     deckDense = (fs * scale) < FONT_THRESHOLD; return deckDense;
   }
+  var __fragRectCache = {};
+  function cacheFragRects() {
+    __fragRectCache = {};
+    var cam = camera || document.getElementById('cine-camera');
+    var prev = cam ? cam.style.transform : null;
+    if (cam) { cam.style.transform = 'none'; void cam.offsetHeight; }
+    document.querySelectorAll('.reveal .slides section [data-fragment-index]').forEach(function(el) {
+      var r = el.getBoundingClientRect();
+      if (r.width >= 4 && r.height >= 4) __fragRectCache[el.getAttribute('data-fragment-index')] = { x: r.left, y: r.top, w: r.width, h: r.height };
+    });
+    if (cam && prev !== null) cam.style.transform = prev;
+  }
   function fragmentRect(idx) {
+    var c = __fragRectCache[String(idx)];
+    if (c) return c;
     var el = document.querySelector('.reveal .slides section [data-fragment-index="' + idx + '"]')
           || document.querySelectorAll('.reveal .slides section .fragment')[idx];
     if (!el) return null;
@@ -539,7 +553,7 @@ const CINEMATIC_DIRECTOR_SCRIPT = `
     var s = lerp(fPrev.s, fCur.s, e), tx = lerp(fPrev.tx, fCur.tx, e), ty = lerp(fPrev.ty, fCur.ty, e);
     camera.style.transform = 'translate(' + tx.toFixed(2) + 'px,' + ty.toFixed(2) + 'px) scale(' + s.toFixed(4) + ')';
   };
-  window.__cineReset = function () { deckDense = null; };
+  window.__cineReset = function () { deckDense = null; __fragRectCache = {}; if (camera) { camera.style.transform = 'none'; } cacheFragRects(); };
 })();
 </script>`;
 
