@@ -432,6 +432,20 @@ const CINE_FPS = Math.max(10, parseInt(process.env.CINE_FPS ?? '24', 10) || 24);
 // visually indistinguishable. Set CINE_FRAME_PNG=1 to force lossless PNG frames.
 const CINE_FRAME_EXT = String(process.env.CINE_FRAME_PNG ?? '').trim() === '1' ? 'png' : 'jpg';
 
+// ── Shared H.264 encode params (KEEP IDENTICAL across every clip encoder) ──────
+// The final stitch uses `concat -c copy`, which stream-copies segments without
+// re-encoding. That is only glitch-free if EVERY segment shares the same:
+//   • constant frame rate  (-fps_mode cfr) — kills variable-duration micro-stutter
+//   • closed GOP at a fixed keyframe interval (-g / keyint) so each segment starts
+//     on an IDR frame → no decoder flicker at slide/reveal concat boundaries
+//   • pixel format / profile / level
+// `-sc_threshold 0` + `scenecut=0` disable adaptive keyframes so keyframes land on
+// predictable frame numbers. GOP = CINE_FPS (one keyframe per second).
+const X264_COMMON = `-c:v libx264 -preset fast -crf 28 -pix_fmt yuv420p -profile:v high -level 4.1 -r ${CINE_FPS} -fps_mode cfr -g ${CINE_FPS} -keyint_min ${CINE_FPS} -sc_threshold 0 -x264-params "keyint=${CINE_FPS}:min-keyint=${CINE_FPS}:scenecut=0"`;
+// Canonical scale/pad/SAR filter — every segment must be exactly 1440x720, SAR 1:1.
+const SCALE_PAD = `scale=1440:720:force_original_aspect_ratio=decrease,pad=1440:720:(ow-iw)/2:(oh-ih)/2,setsar=1`;
+const AAC_COMMON = `-c:a aac -b:a 128k -ar 44100 -ac 2`;
+
 // Inlined here (this is a standalone CI script that can't import the TS lib) —
 // KEEP IN SYNC with lib/reveal-doc.ts CINEMATIC_DIRECTOR_SCRIPT + COMPONENT_ANIMATION_STYLES.
 const CINEMATIC_DIRECTOR_SCRIPT = `
@@ -976,7 +990,7 @@ async function renderSlide(i, slide, totalSlides) {
   } else if (intervalClips.length > 1) {
     await concat(intervalClips, slideClip);
   } else {
-    await execAsync(`"${getFFmpeg()}" -y -f lavfi -i color=c=black:s=1440x720:r=${CINE_FPS}:d=${totalSec.toFixed(3)} -f lavfi -i anullsrc=r=44100:cl=stereo -c:v libx264 -c:a aac -r ${CINE_FPS} -t ${totalSec.toFixed(3)} "${slideClip}"`).catch(() => {});
+    await execAsync(`"${getFFmpeg()}" -y -f lavfi -i color=c=black:s=1440x720:r=${CINE_FPS}:d=${totalSec.toFixed(3)} -f lavfi -i anullsrc=r=44100:cl=stereo ${X264_COMMON} -vf "${SCALE_PAD}" ${AAC_COMMON} -t ${totalSec.toFixed(3)} -movflags +faststart "${slideClip}"`).catch(() => {});
   }
 
   console.log(`  ✅ Slide ${i + 1} complete`);
@@ -1128,11 +1142,11 @@ async function makeClip(imgPath, audioPath, audioStart, duration, out, prevImgPa
     hasPrev ? `-loop 1 -framerate ${CINE_FPS} -t ${duration.toFixed(3)} -i "${prevImgPath}"` : '',
     `-loop 1 -framerate ${CINE_FPS} -t ${duration.toFixed(3)} -i "${imgPath}"`,
     `-ss ${audioStart.toFixed(3)} -t ${duration.toFixed(3)} -i "${audioPath}"`,
-    `-c:v libx264 -preset fast -crf 28 -tune stillimage -pix_fmt yuv420p -r ${CINE_FPS}`,
+    X264_COMMON,
     hasPrev
-      ? `-filter_complex "[1:v]format=yuva420p,fade=t=in:st=0:d=${fd.toFixed(3)}:alpha=1[fadein];[0:v][fadein]overlay=x=0:y=0,scale=1440:720:force_original_aspect_ratio=decrease,pad=1440:720:(ow-iw)/2:(oh-ih)/2,setsar=1"`
-      : `-vf "scale=1440:720:force_original_aspect_ratio=decrease,pad=1440:720:(ow-iw)/2:(oh-ih)/2,setsar=1"`,
-    `-c:a aac -b:a 128k -ar 44100`,
+      ? `-filter_complex "[1:v]format=yuva420p,fade=t=in:st=0:d=${fd.toFixed(3)}:alpha=1[fadein];[0:v][fadein]overlay=x=0:y=0,${SCALE_PAD}"`
+      : `-vf "${SCALE_PAD}"`,
+    AAC_COMMON,
     `-t ${duration.toFixed(3)} -movflags +faststart`,
     `"${out}"`,
   ].filter(Boolean).join(' ');
@@ -1151,9 +1165,9 @@ async function encodeFrameSequence(framesDir, audioPath, durationSec, out) {
     `"${ff}" -y`,
     `-framerate ${CINE_FPS} -i "${pattern}"`,
     `-i "${audioPath}"`,
-    `-c:v libx264 -preset fast -crf 28 -pix_fmt yuv420p -r ${CINE_FPS}`,
-    `-vf "scale=1440:720:force_original_aspect_ratio=decrease,pad=1440:720:(ow-iw)/2:(oh-ih)/2,setsar=1"`,
-    `-c:a aac -b:a 128k -ar 44100`,
+    X264_COMMON,
+    `-vf "${SCALE_PAD}"`,
+    AAC_COMMON,
     `-t ${durationSec.toFixed(3)} -movflags +faststart`,
     `"${out}"`,
   ].join(' ');
