@@ -491,13 +491,27 @@ const CINEMATIC_DIRECTOR_SCRIPT = `
   function cacheFragRects() {
     __fragRectCache = {};
     var cam = camera || document.getElementById('cine-camera');
-    var prev = cam ? cam.style.transform : null;
-    if (cam) { cam.style.transform = 'none'; void cam.offsetHeight; }
-    document.querySelectorAll('.reveal .slides section [data-fragment-index]').forEach(function(el) {
+    var prevCam = cam ? cam.style.transform : null;
+    if (cam) { cam.style.transform = 'none'; }
+    var nodes = document.querySelectorAll('.reveal .slides section [data-fragment-index]');
+    // Neutralize each fragment's entry-animation transform (slide-up/scale-in/blur-in)
+    // so we measure the FINAL resting box, not the pre-reveal shifted/scaled one.
+    var savedInline = [];
+    nodes.forEach(function(el) {
+      savedInline.push(el.style.transform);
+      el.style.transform = 'none';
+    });
+    void document.body.offsetHeight;
+    nodes.forEach(function(el) {
       var r = el.getBoundingClientRect();
       if (r.width >= 4 && r.height >= 4) __fragRectCache[el.getAttribute('data-fragment-index')] = { x: r.left, y: r.top, w: r.width, h: r.height };
     });
-    if (cam && prev !== null) cam.style.transform = prev;
+    // Restore inline transforms exactly as they were.
+    nodes.forEach(function(el, i) {
+      if (savedInline[i]) el.style.transform = savedInline[i];
+      else el.style.removeProperty('transform');
+    });
+    if (cam && prevCam !== null) cam.style.transform = prevCam;
   }
   function fragmentRect(idx) {
     var c = __fragRectCache[String(idx)];
