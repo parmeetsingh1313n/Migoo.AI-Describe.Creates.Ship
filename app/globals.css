@@ -1890,3 +1890,37 @@ a:hover > .nav-flip .nav-flip-bottom {
 .cl-internal-phfxlr {
   display: none !important;
 }
+
+/* ══════════════════════════════════════════════════════════════════
+   NOTES DIALOG — Brand (Migoo) scrollbar
+   Slim gradient thumb matching the blue→indigo→purple brand, replacing
+   the chunky default OS scrollbar in the notes dialog scroll columns.
+   ══════════════════════════════════════════════════════════════════ */
+.notes-scroll {
+  scrollbar-width: thin;                                   /* Firefox */
+  scrollbar-color: rgba(109, 91, 211, 0.45) transparent;  /* thumb, track */
+}
+.notes-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+.notes-scroll::-webkit-scrollbar-track {
+  background: transparent;
+  margin: 8px 0;
+}
+.notes-scroll::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #3EA5D6 0%, #3363AD 50%, #6D5BD3 100%);
+  border-radius: 9999px;
+  border: 2px solid transparent;   /* inset the thumb so it reads slimmer */
+  background-clip: padding-box;
+  transition: background 0.2s ease;
+}
+.notes-scroll::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, #5bb8e4 0%, #4272bd 50%, #8B7FE8 100%);
+  background-clip: padding-box;
+}
+/* Kill the up/down stepper arrow caps */
+.notes-scroll::-webkit-scrollbar-button {
+  display: none;
+  height: 0;
+  width: 0;
+}

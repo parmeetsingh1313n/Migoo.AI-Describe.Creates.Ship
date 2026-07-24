@@ -542,7 +542,7 @@ function NotesIntro({ slideCount }: { slideCount: number; chapterTitle: string }
     { icon: LayoutGrid, label: 'Bento grids', tint: '#a78bfa' },
     { icon: Table, label: 'Comparison tables', tint: '#2dd4bf' },
     { icon: Clock, label: 'Timelines', tint: '#38bdf8' },
-    { icon: Radar, label: 'Radial maps', tint: '#f59e0b' },
+    { icon: Radar, label: 'Radial maps', tint: '#8B7FE8' },
   ]
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
@@ -556,9 +556,9 @@ function NotesIntro({ slideCount }: { slideCount: number; chapterTitle: string }
         {/* front page with real-looking content */}
         <div style={{ position: 'relative', width: 128, height: 162, background: 'linear-gradient(160deg,#20293b,#161d2b)', borderRadius: 10, border: '1px solid rgba(255,255,255,0.1)', boxShadow: '0 20px 45px rgba(0,0,0,0.6)', padding: '12px 12px 0', overflow: 'hidden' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 9 }}>
-            <div style={{ width: 16, height: 16, borderRadius: 5, background: 'linear-gradient(135deg,#f59e0b,#d97706)' }} />
+            <div style={{ width: 16, height: 16, borderRadius: 5, background: 'linear-gradient(135deg,#3EA5D6 0%,#3363AD 50%,#6D5BD3 100%)' }} />
             <div style={{ flex: 1, height: 5, borderRadius: 3, background: 'rgba(255,255,255,0.18)' }} />
-            <div style={{ width: 18, height: 5, borderRadius: 3, background: 'rgba(245,158,11,0.5)' }} />
+            <div style={{ width: 18, height: 5, borderRadius: 3, background: 'rgba(109,91,211,0.5)' }} />
           </div>
           {[92, 78, 85].map((w, i) => <div key={i} style={{ height: 3.5, width: `${w}%`, borderRadius: 2, background: 'rgba(255,255,255,0.09)', marginBottom: 5 }} />)}
           {/* mini bento */}
@@ -579,8 +579,8 @@ function NotesIntro({ slideCount }: { slideCount: number; chapterTitle: string }
       {/* Headline block — left-aligned, editorial */}
       <div>
         <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginBottom: 10 }}>
-          <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#f59e0b', boxShadow: '0 0 8px rgba(245,158,11,0.7)' }} />
-          <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 1.5, textTransform: 'uppercase', color: '#f59e0b' }}>Study Dossier</span>
+          <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#8B7FE8', boxShadow: '0 0 8px rgba(109,91,211,0.7)' }} />
+          <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 1.5, textTransform: 'uppercase', color: '#8B7FE8' }}>Study Dossier</span>
         </div>
         <h4 style={{ margin: '0 0 8px', fontSize: 20, fontWeight: 700, color: '#f8fafc', letterSpacing: '-0.02em', lineHeight: 1.25 }}>
           The whole chapter, distilled onto&nbsp;paper.
@@ -608,7 +608,7 @@ function NotesIntro({ slideCount }: { slideCount: number; chapterTitle: string }
           <FileText size={11} color="#94a3b8" /> {slideCount} slide{slideCount === 1 ? '' : 's'}
         </span>
         <span style={{ opacity: 0.6 }}>→</span>
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 9px', borderRadius: 20, background: 'rgba(245,158,11,0.06)', border: '1px solid rgba(245,158,11,0.15)', color: '#f59e0b', fontWeight: 600 }}>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 9px', borderRadius: 20, background: 'rgba(109,91,211,0.06)', border: '1px solid rgba(109,91,211,0.15)', color: '#8B7FE8', fontWeight: 600 }}>
           <BookOpen size={11} /> multi-page notes
         </span>
       </div>
@@ -710,7 +710,7 @@ export function ChapterNotesDialog({ open, onClose, chapterTitle, slides, course
         transform: 'translate(-50%, -50%)', 
         zIndex: 9999, 
         width: notesData ? 980 : 540, 
-        background: '#090d16', 
+        background: '#0c1122', 
         borderRadius: 24, 
         border: '1px solid rgba(255,255,255,0.08)', 
         boxShadow: '0 25px 80px rgba(0,0,0,0.8)', 
@@ -723,7 +723,7 @@ export function ChapterNotesDialog({ open, onClose, chapterTitle, slides, course
         {/* Header */}
         <div style={{ padding: '20px 24px', borderBottom: '1px solid rgba(255,255,255,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <div style={{ width: 40, height: 40, borderRadius: 12, background: 'linear-gradient(135deg,#f59e0b,#d97706)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 12px rgba(245,158,11,0.2)' }}>
+            <div style={{ width: 40, height: 40, borderRadius: 12, background: 'linear-gradient(135deg,#3EA5D6 0%,#3363AD 50%,#6D5BD3 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 12px rgba(109,91,211,0.2)' }}>
               <BookOpen size={20} color="#fff" />
             </div>
             <div>
@@ -759,7 +759,7 @@ export function ChapterNotesDialog({ open, onClose, chapterTitle, slides, course
         <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
           
           {/* Controls Column */}
-          <div style={{ width: notesData ? 360 : '100%', padding: 24, borderRight: notesData ? '1px solid rgba(255,255,255,0.06)' : 'none', display: 'flex', flexDirection: 'column', gap: 20, overflowY: 'auto' }}>
+          <div className="notes-scroll" style={{ width: notesData ? 360 : '100%', padding: 24, borderRight: notesData ? '1px solid rgba(255,255,255,0.06)' : 'none', display: 'flex', flexDirection: 'column', gap: 20, overflowY: 'auto' }}>
             
             {!notesData ? (
               <NotesIntro slideCount={slides.length} chapterTitle={chapterTitle} />
@@ -770,11 +770,11 @@ export function ChapterNotesDialog({ open, onClose, chapterTitle, slides, course
                   {DESIGN_KEYS.map(key => {
                     const isSel = selected === key
                     return (
-                      <button key={key} onClick={() => setSelected(key)} style={{ background: '#111827', border: '1px solid rgba(255,255,255,0.05)', cursor: 'pointer', padding: 0, borderRadius: 12, overflow: 'hidden', position: 'relative', outline: isSel ? '2px solid #f59e0b' : 'none', transition: 'transform 0.2s' }}>
+                      <button key={key} onClick={() => setSelected(key)} style={{ background: '#161d33', border: '1px solid rgba(255,255,255,0.05)', cursor: 'pointer', padding: 0, borderRadius: 12, overflow: 'hidden', position: 'relative', outline: isSel ? '2px solid #8B7FE8' : 'none', transition: 'transform 0.2s' }}>
                         <img src={DESIGNS[key].img} alt={DESIGNS[key].label} style={{ width: '100%', aspectRatio: '1.4', objectFit: 'cover', display: 'block', opacity: isSel ? 1 : 0.65 }} />
-                        {isSel && <div style={{ position: 'absolute', top: 6, right: 6, width: 18, height: 18, borderRadius: '50%', background: '#f59e0b', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Check size={10} color="#fff" strokeWidth={3} /></div>}
-                        <div style={{ padding: '6px 8px', background: '#090d16', textAlign: 'left' }}>
-                          <p style={{ margin: 0, fontSize: 10, color: isSel ? '#f59e0b' : '#94a3b8', fontWeight: 600 }}>{DESIGNS[key].label}</p>
+                        {isSel && <div style={{ position: 'absolute', top: 6, right: 6, width: 18, height: 18, borderRadius: '50%', background: '#8B7FE8', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Check size={10} color="#fff" strokeWidth={3} /></div>}
+                        <div style={{ padding: '6px 8px', background: '#0c1122', textAlign: 'left' }}>
+                          <p style={{ margin: 0, fontSize: 10, color: isSel ? '#8B7FE8' : '#94a3b8', fontWeight: 600 }}>{DESIGNS[key].label}</p>
                         </div>
                       </button>
                     )
@@ -784,10 +784,10 @@ export function ChapterNotesDialog({ open, onClose, chapterTitle, slides, course
             )}
 
             {generating && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: 16, background: 'rgba(245,158,11,0.03)', borderRadius: 16, border: '1px solid rgba(245,158,11,0.1)' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: 16, background: 'rgba(109,91,211,0.03)', borderRadius: 16, border: '1px solid rgba(109,91,211,0.1)' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <Loader2 size={16} className="animate-spin text-amber-500" />
-                  <span style={{ fontSize: 12, fontWeight: 600, color: '#f59e0b' }}>Migoo AI is thinking...</span>
+                  <Loader2 size={16} className="animate-spin text-[#8B7FE8]" />
+                  <span style={{ fontSize: 12, fontWeight: 600, color: '#8B7FE8' }}>Migoo AI is thinking...</span>
                 </div>
                 <p style={{ margin: 0, fontSize: 11, color: '#64748b', lineHeight: 1.5 }}>Migoo AI is examining slide elements, generating tables for comparisons, creating interactive timelines, and building a professional Cornell template structure.</p>
               </div>
@@ -796,8 +796,8 @@ export function ChapterNotesDialog({ open, onClose, chapterTitle, slides, course
             {notesData && (
               <div style={{ padding: 16, background: 'rgba(255,255,255,0.02)', borderRadius: 16, border: '1px solid rgba(255,255,255,0.05)', fontSize: 11, color: '#94a3b8', display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <p style={{ margin: 0, fontWeight: 600, color: '#f1f5f9' }}>📊 Generation Details</p>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Total Sections:</span><span style={{ color: '#f59e0b', fontWeight: 700 }}>{sections.length}</span></div>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Key Concepts:</span><span style={{ color: '#f59e0b', fontWeight: 700 }}>{notesData.keyTerms?.length || 0}</span></div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Total Sections:</span><span style={{ color: '#8B7FE8', fontWeight: 700 }}>{sections.length}</span></div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Key Concepts:</span><span style={{ color: '#8B7FE8', fontWeight: 700 }}>{notesData.keyTerms?.length || 0}</span></div>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Page Count:</span><span style={{ color: '#fff', fontWeight: 700 }}>{pages.length + (notesData.keyTerms?.length ? 1 : 0)} Pages</span></div>
               </div>
             )}
@@ -806,7 +806,7 @@ export function ChapterNotesDialog({ open, onClose, chapterTitle, slides, course
             <div style={{ marginTop: 'auto', display: 'flex', gap: 10, flexShrink: 0 }}>
               <button onClick={onClose} style={{ flex: 1, padding: '10px 16px', borderRadius: 12, border: '1px solid rgba(255,255,255,0.08)', background: 'none', color: '#94a3b8', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>Cancel</button>
               {!notesData ? (
-                <DrawOutlineButton onClick={handleGenerate} disabled={generating} variant="dark" accentColor="#f59e0b" className="flex-2 text-xs">
+                <DrawOutlineButton onClick={handleGenerate} disabled={generating} variant="dark" accentColor="#8B7FE8" className="flex-2 text-xs">
                   {generating ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
                   {generating ? 'Generating…' : 'Generate Notes'}
                 </DrawOutlineButton>
@@ -822,10 +822,10 @@ export function ChapterNotesDialog({ open, onClose, chapterTitle, slides, course
 
           {/* Right Live Preview Column */}
           {notesData && (
-            <div style={{ flex: 1, background: '#05070c', padding: 24, display: 'flex', flexDirection: 'column', gap: 14, overflowY: 'auto', maxHeight: '100%' }}>
+            <div className="notes-scroll" style={{ flex: 1, background: '#080b16', padding: 24, display: 'flex', flexDirection: 'column', gap: 14, overflowY: 'auto', maxHeight: '100%' }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <span style={{ fontSize: 11, color: '#64748b', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1 }}>Live Document Preview</span>
-                <span style={{ fontSize: 10, color: '#f59e0b', background: 'rgba(245,158,11,0.08)', padding: '2px 8px', borderRadius: 6, fontWeight: 600 }}>A4 Format</span>
+                <span style={{ fontSize: 10, color: '#8B7FE8', background: 'rgba(109,91,211,0.08)', padding: '2px 8px', borderRadius: 6, fontWeight: 600 }}>A4 Format</span>
               </div>
               
               <div style={{ display: 'flex', flexDirection: 'column', gap: 24, alignItems: 'center', paddingBottom: 20 }}>
