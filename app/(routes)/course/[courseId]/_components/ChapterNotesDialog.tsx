@@ -549,28 +549,28 @@ function NotesIntro({ slideCount }: { slideCount: number; chapterTitle: string }
       {/* Faux document preview — layered, tilted pages */}
       <div style={{ position: 'relative', height: 168, display: 'flex', alignItems: 'center', justifyContent: 'center', marginTop: 4 }}>
         {/* dotted texture backdrop */}
-        <div style={{ position: 'absolute', inset: '-24px -24px 0', backgroundImage: 'radial-gradient(rgba(255,255,255,0.05) 1px, transparent 0)', backgroundSize: '14px 14px', maskImage: 'radial-gradient(ellipse 70% 80% at 50% 40%, #000 40%, transparent 100%)', WebkitMaskImage: 'radial-gradient(ellipse 70% 80% at 50% 40%, #000 40%, transparent 100%)' }} />
+        <div style={{ position: 'absolute', inset: '-24px -24px 0', backgroundImage: 'radial-gradient(rgba(15,23,42,0.06) 1px, transparent 0)', backgroundSize: '14px 14px', maskImage: 'radial-gradient(ellipse 70% 80% at 50% 40%, #000 40%, transparent 100%)', WebkitMaskImage: 'radial-gradient(ellipse 70% 80% at 50% 40%, #000 40%, transparent 100%)' }} />
         {/* back page */}
-        <div style={{ position: 'absolute', width: 118, height: 150, background: '#141b28', borderRadius: 8, border: '1px solid rgba(255,255,255,0.06)', transform: 'rotate(-9deg) translateX(-46px)', boxShadow: '0 12px 28px rgba(0,0,0,0.45)' }} />
-        <div style={{ position: 'absolute', width: 118, height: 150, background: '#182031', borderRadius: 8, border: '1px solid rgba(255,255,255,0.07)', transform: 'rotate(7deg) translateX(46px)', boxShadow: '0 12px 28px rgba(0,0,0,0.45)' }} />
+        <div style={{ position: 'absolute', width: 118, height: 150, background: '#eef1f6', borderRadius: 8, border: '1px solid rgba(15,23,42,0.06)', transform: 'rotate(-9deg) translateX(-46px)', boxShadow: '0 12px 28px rgba(15,23,42,0.12)' }} />
+        <div style={{ position: 'absolute', width: 118, height: 150, background: '#f4f6fa', borderRadius: 8, border: '1px solid rgba(15,23,42,0.06)', transform: 'rotate(7deg) translateX(46px)', boxShadow: '0 12px 28px rgba(15,23,42,0.12)' }} />
         {/* front page with real-looking content */}
-        <div style={{ position: 'relative', width: 128, height: 162, background: 'linear-gradient(160deg,#20293b,#161d2b)', borderRadius: 10, border: '1px solid rgba(255,255,255,0.1)', boxShadow: '0 20px 45px rgba(0,0,0,0.6)', padding: '12px 12px 0', overflow: 'hidden' }}>
+        <div style={{ position: 'relative', width: 128, height: 162, background: 'linear-gradient(160deg,#ffffff,#f7f8fc)', borderRadius: 10, border: '1px solid rgba(15,23,42,0.08)', boxShadow: '0 20px 45px rgba(15,23,42,0.16)', padding: '12px 12px 0', overflow: 'hidden' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 9 }}>
             <div style={{ width: 16, height: 16, borderRadius: 5, background: 'linear-gradient(135deg,#3EA5D6 0%,#3363AD 50%,#6D5BD3 100%)' }} />
-            <div style={{ flex: 1, height: 5, borderRadius: 3, background: 'rgba(255,255,255,0.18)' }} />
-            <div style={{ width: 18, height: 5, borderRadius: 3, background: 'rgba(109,91,211,0.5)' }} />
+            <div style={{ flex: 1, height: 5, borderRadius: 3, background: 'rgba(15,23,42,0.1)' }} />
+            <div style={{ width: 18, height: 5, borderRadius: 3, background: 'rgba(109,91,211,0.35)' }} />
           </div>
-          {[92, 78, 85].map((w, i) => <div key={i} style={{ height: 3.5, width: `${w}%`, borderRadius: 2, background: 'rgba(255,255,255,0.09)', marginBottom: 5 }} />)}
+          {[92, 78, 85].map((w, i) => <div key={i} style={{ height: 3.5, width: `${w}%`, borderRadius: 2, background: 'rgba(15,23,42,0.07)', marginBottom: 5 }} />)}
           {/* mini bento */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4, margin: '9px 0' }}>
-            <div style={{ height: 22, borderRadius: 5, background: 'rgba(167,139,250,0.16)', border: '1px solid rgba(167,139,250,0.25)' }} />
-            <div style={{ height: 22, borderRadius: 5, background: 'rgba(45,212,191,0.14)', border: '1px solid rgba(45,212,191,0.22)' }} />
+            <div style={{ height: 22, borderRadius: 5, background: 'rgba(167,139,250,0.14)', border: '1px solid rgba(167,139,250,0.3)' }} />
+            <div style={{ height: 22, borderRadius: 5, background: 'rgba(45,212,191,0.12)', border: '1px solid rgba(45,212,191,0.28)' }} />
           </div>
           {/* mini table lines */}
           {[0, 1, 2].map((i) => (
             <div key={i} style={{ display: 'flex', gap: 4, marginBottom: 3 }}>
-              <div style={{ flex: 1, height: 3, borderRadius: 2, background: i === 0 ? 'rgba(56,189,248,0.4)' : 'rgba(255,255,255,0.08)' }} />
-              <div style={{ flex: 1, height: 3, borderRadius: 2, background: i === 0 ? 'rgba(56,189,248,0.4)' : 'rgba(255,255,255,0.08)' }} />
+              <div style={{ flex: 1, height: 3, borderRadius: 2, background: i === 0 ? 'rgba(51,99,173,0.45)' : 'rgba(15,23,42,0.06)' }} />
+              <div style={{ flex: 1, height: 3, borderRadius: 2, background: i === 0 ? 'rgba(51,99,173,0.45)' : 'rgba(15,23,42,0.06)' }} />
             </div>
           ))}
         </div>
@@ -579,13 +579,13 @@ function NotesIntro({ slideCount }: { slideCount: number; chapterTitle: string }
       {/* Headline block — left-aligned, editorial */}
       <div>
         <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginBottom: 10 }}>
-          <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#8B7FE8', boxShadow: '0 0 8px rgba(109,91,211,0.7)' }} />
-          <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 1.5, textTransform: 'uppercase', color: '#8B7FE8' }}>Study Dossier</span>
+          <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#6D5BD3', boxShadow: '0 0 8px rgba(109,91,211,0.5)' }} />
+          <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 1.5, textTransform: 'uppercase', color: '#6D5BD3' }}>Study Dossier</span>
         </div>
-        <h4 style={{ margin: '0 0 8px', fontSize: 20, fontWeight: 700, color: '#f8fafc', letterSpacing: '-0.02em', lineHeight: 1.25 }}>
+        <h4 style={{ margin: '0 0 8px', fontSize: 20, fontWeight: 700, color: '#0f172a', letterSpacing: '-0.02em', lineHeight: 1.25 }}>
           The whole chapter, distilled onto&nbsp;paper.
         </h4>
-        <p style={{ margin: 0, fontSize: 12.5, color: '#8a96a8', lineHeight: 1.6 }}>
+        <p style={{ margin: 0, fontSize: 12.5, color: '#64748b', lineHeight: 1.6 }}>
           Migoo reads every slide and rebuilds them as a printable set of notes — structured, cross-referenced, and ready to revise from.
         </p>
       </div>
@@ -593,22 +593,22 @@ function NotesIntro({ slideCount }: { slideCount: number; chapterTitle: string }
       {/* Feature grid */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 8 }}>
         {features.map(({ icon: Icon, label, tint }) => (
-          <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '9px 11px', borderRadius: 12, background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>
+          <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '9px 11px', borderRadius: 12, background: '#f8fafc', border: '1px solid rgba(15,23,42,0.06)' }}>
             <div style={{ width: 26, height: 26, borderRadius: 8, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: `${tint}1f`, border: `1px solid ${tint}40` }}>
               <Icon size={14} color={tint} />
             </div>
-            <span style={{ fontSize: 12, fontWeight: 600, color: '#cbd5e1' }}>{label}</span>
+            <span style={{ fontSize: 12, fontWeight: 600, color: '#334155' }}>{label}</span>
           </div>
         ))}
       </div>
 
       {/* Meta footer */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 4, fontSize: 11, color: '#64748b' }}>
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 9px', borderRadius: 20, background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 9px', borderRadius: 20, background: '#f8fafc', border: '1px solid rgba(15,23,42,0.06)' }}>
           <FileText size={11} color="#94a3b8" /> {slideCount} slide{slideCount === 1 ? '' : 's'}
         </span>
         <span style={{ opacity: 0.6 }}>→</span>
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 9px', borderRadius: 20, background: 'rgba(109,91,211,0.06)', border: '1px solid rgba(109,91,211,0.15)', color: '#8B7FE8', fontWeight: 600 }}>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 9px', borderRadius: 20, background: 'rgba(109,91,211,0.08)', border: '1px solid rgba(109,91,211,0.18)', color: '#6D5BD3', fontWeight: 600 }}>
           <BookOpen size={11} /> multi-page notes
         </span>
       </div>
@@ -708,12 +708,12 @@ export function ChapterNotesDialog({ open, onClose, chapterTitle, slides, course
         top: '50%', 
         left: '50%', 
         transform: 'translate(-50%, -50%)', 
-        zIndex: 9999, 
-        width: notesData ? 980 : 540, 
-        background: '#0c1122', 
-        borderRadius: 24, 
-        border: '1px solid rgba(255,255,255,0.08)', 
-        boxShadow: '0 25px 80px rgba(0,0,0,0.8)', 
+        zIndex: 9999,
+        width: notesData ? 980 : 540,
+        background: '#ffffff',
+        borderRadius: 24,
+        border: '1px solid rgba(15,23,42,0.08)',
+        boxShadow: '0 25px 80px rgba(15,23,42,0.25)',
         overflow: 'hidden',
         transition: 'width 0.4s cubic-bezier(0.16, 1, 0.3, 1)',
         display: 'flex',
@@ -721,37 +721,37 @@ export function ChapterNotesDialog({ open, onClose, chapterTitle, slides, course
         maxHeight: '90vh'
       }}>
         {/* Header */}
-        <div style={{ padding: '20px 24px', borderBottom: '1px solid rgba(255,255,255,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+        <div style={{ padding: '20px 24px', borderBottom: '1px solid rgba(15,23,42,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <div style={{ width: 40, height: 40, borderRadius: 12, background: 'linear-gradient(135deg,#3EA5D6 0%,#3363AD 50%,#6D5BD3 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 12px rgba(109,91,211,0.2)' }}>
               <BookOpen size={20} color="#fff" />
             </div>
             <div>
-              <p style={{ margin: 0, fontSize: 16, fontWeight: 700, color: '#f8fafc', letterSpacing: '-0.02em' }}>Deep Study Notes</p>
+              <p style={{ margin: 0, fontSize: 16, fontWeight: 700, color: '#0f172a', letterSpacing: '-0.02em' }}>Deep Study Notes</p>
               <p style={{ margin: 0, fontSize: 11, color: '#64748b' }}>{chapterTitle} • {slides.length} Slides</p>
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             {notesData && (
               <>
-                <button 
-                  onClick={handleGenerate} 
-                  disabled={generating} 
+                <button
+                  onClick={handleGenerate}
+                  disabled={generating}
                   title="Regenerate study notes"
-                  style={{ background: 'rgba(255,255,255,0.03)', border: 'none', cursor: generating ? 'wait' : 'pointer', color: '#94a3b8', padding: 6, borderRadius: 10, display: 'flex', transition: 'background 0.2s', alignItems: 'center' }}
+                  style={{ background: '#f1f5f9', border: 'none', cursor: generating ? 'wait' : 'pointer', color: '#64748b', padding: 6, borderRadius: 10, display: 'flex', transition: 'background 0.2s', alignItems: 'center' }}
                 >
                   {generating ? <Loader2 size={14} className="animate-spin" /> : <RotateCw size={14} />}
                 </button>
-                <button 
-                  onClick={handleRemoveNotes} 
+                <button
+                  onClick={handleRemoveNotes}
                   title="Remove study notes"
-                  style={{ background: 'rgba(239,68,68,0.08)', border: 'none', cursor: 'pointer', color: '#f87171', padding: 6, borderRadius: 10, display: 'flex', transition: 'background 0.2s', alignItems: 'center' }}
+                  style={{ background: 'rgba(239,68,68,0.08)', border: 'none', cursor: 'pointer', color: '#ef4444', padding: 6, borderRadius: 10, display: 'flex', transition: 'background 0.2s', alignItems: 'center' }}
                 >
                   <Trash2 size={14} />
                 </button>
               </>
             )}
-            <button onClick={onClose} style={{ background: 'rgba(255,255,255,0.03)', border: 'none', cursor: 'pointer', color: '#94a3b8', padding: 6, borderRadius: 10, display: 'flex', transition: 'background 0.2s' }}><X size={18} /></button>
+            <button onClick={onClose} style={{ background: '#f1f5f9', border: 'none', cursor: 'pointer', color: '#64748b', padding: 6, borderRadius: 10, display: 'flex', transition: 'background 0.2s' }}><X size={18} /></button>
           </div>
         </div>
 
@@ -759,8 +759,8 @@ export function ChapterNotesDialog({ open, onClose, chapterTitle, slides, course
         <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
           
           {/* Controls Column */}
-          <div className="notes-scroll" style={{ width: notesData ? 360 : '100%', padding: 24, borderRight: notesData ? '1px solid rgba(255,255,255,0.06)' : 'none', display: 'flex', flexDirection: 'column', gap: 20, overflowY: 'auto' }}>
-            
+          <div className="notes-scroll" style={{ width: notesData ? 360 : '100%', padding: 24, borderRight: notesData ? '1px solid rgba(15,23,42,0.06)' : 'none', display: 'flex', flexDirection: 'column', gap: 20, overflowY: 'auto' }}>
+
             {!notesData ? (
               <NotesIntro slideCount={slides.length} chapterTitle={chapterTitle} />
             ) : (
@@ -770,11 +770,11 @@ export function ChapterNotesDialog({ open, onClose, chapterTitle, slides, course
                   {DESIGN_KEYS.map(key => {
                     const isSel = selected === key
                     return (
-                      <button key={key} onClick={() => setSelected(key)} style={{ background: '#161d33', border: '1px solid rgba(255,255,255,0.05)', cursor: 'pointer', padding: 0, borderRadius: 12, overflow: 'hidden', position: 'relative', outline: isSel ? '2px solid #8B7FE8' : 'none', transition: 'transform 0.2s' }}>
-                        <img src={DESIGNS[key].img} alt={DESIGNS[key].label} style={{ width: '100%', aspectRatio: '1.4', objectFit: 'cover', display: 'block', opacity: isSel ? 1 : 0.65 }} />
-                        {isSel && <div style={{ position: 'absolute', top: 6, right: 6, width: 18, height: 18, borderRadius: '50%', background: '#8B7FE8', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Check size={10} color="#fff" strokeWidth={3} /></div>}
-                        <div style={{ padding: '6px 8px', background: '#0c1122', textAlign: 'left' }}>
-                          <p style={{ margin: 0, fontSize: 10, color: isSel ? '#8B7FE8' : '#94a3b8', fontWeight: 600 }}>{DESIGNS[key].label}</p>
+                      <button key={key} onClick={() => setSelected(key)} style={{ background: '#ffffff', border: '1px solid rgba(15,23,42,0.08)', cursor: 'pointer', padding: 0, borderRadius: 12, overflow: 'hidden', position: 'relative', outline: isSel ? '2px solid #6D5BD3' : 'none', transition: 'transform 0.2s' }}>
+                        <img src={DESIGNS[key].img} alt={DESIGNS[key].label} style={{ width: '100%', aspectRatio: '1.4', objectFit: 'cover', display: 'block', opacity: isSel ? 1 : 0.75 }} />
+                        {isSel && <div style={{ position: 'absolute', top: 6, right: 6, width: 18, height: 18, borderRadius: '50%', background: '#6D5BD3', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Check size={10} color="#fff" strokeWidth={3} /></div>}
+                        <div style={{ padding: '6px 8px', background: '#f8fafc', textAlign: 'left' }}>
+                          <p style={{ margin: 0, fontSize: 10, color: isSel ? '#6D5BD3' : '#64748b', fontWeight: 600 }}>{DESIGNS[key].label}</p>
                         </div>
                       </button>
                     )
@@ -784,34 +784,34 @@ export function ChapterNotesDialog({ open, onClose, chapterTitle, slides, course
             )}
 
             {generating && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: 16, background: 'rgba(109,91,211,0.03)', borderRadius: 16, border: '1px solid rgba(109,91,211,0.1)' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: 16, background: 'rgba(109,91,211,0.05)', borderRadius: 16, border: '1px solid rgba(109,91,211,0.15)' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <Loader2 size={16} className="animate-spin text-[#8B7FE8]" />
-                  <span style={{ fontSize: 12, fontWeight: 600, color: '#8B7FE8' }}>Migoo AI is thinking...</span>
+                  <Loader2 size={16} className="animate-spin text-[#6D5BD3]" />
+                  <span style={{ fontSize: 12, fontWeight: 600, color: '#6D5BD3' }}>Migoo AI is thinking...</span>
                 </div>
                 <p style={{ margin: 0, fontSize: 11, color: '#64748b', lineHeight: 1.5 }}>Migoo AI is examining slide elements, generating tables for comparisons, creating interactive timelines, and building a professional Cornell template structure.</p>
               </div>
             )}
 
             {notesData && (
-              <div style={{ padding: 16, background: 'rgba(255,255,255,0.02)', borderRadius: 16, border: '1px solid rgba(255,255,255,0.05)', fontSize: 11, color: '#94a3b8', display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <p style={{ margin: 0, fontWeight: 600, color: '#f1f5f9' }}>📊 Generation Details</p>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Total Sections:</span><span style={{ color: '#8B7FE8', fontWeight: 700 }}>{sections.length}</span></div>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Key Concepts:</span><span style={{ color: '#8B7FE8', fontWeight: 700 }}>{notesData.keyTerms?.length || 0}</span></div>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Page Count:</span><span style={{ color: '#fff', fontWeight: 700 }}>{pages.length + (notesData.keyTerms?.length ? 1 : 0)} Pages</span></div>
+              <div style={{ padding: 16, background: '#f8fafc', borderRadius: 16, border: '1px solid rgba(15,23,42,0.06)', fontSize: 11, color: '#64748b', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <p style={{ margin: 0, fontWeight: 600, color: '#0f172a' }}>📊 Generation Details</p>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Total Sections:</span><span style={{ color: '#6D5BD3', fontWeight: 700 }}>{sections.length}</span></div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Key Concepts:</span><span style={{ color: '#6D5BD3', fontWeight: 700 }}>{notesData.keyTerms?.length || 0}</span></div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Page Count:</span><span style={{ color: '#0f172a', fontWeight: 700 }}>{pages.length + (notesData.keyTerms?.length ? 1 : 0)} Pages</span></div>
               </div>
             )}
 
             {/* Actions Panel inside Controls */}
             <div style={{ marginTop: 'auto', display: 'flex', gap: 10, flexShrink: 0 }}>
-              <button onClick={onClose} style={{ flex: 1, padding: '10px 16px', borderRadius: 12, border: '1px solid rgba(255,255,255,0.08)', background: 'none', color: '#94a3b8', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>Cancel</button>
+              <button onClick={onClose} style={{ flex: 1, padding: '10px 16px', borderRadius: 12, border: '1px solid rgba(15,23,42,0.1)', background: 'none', color: '#64748b', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>Cancel</button>
               {!notesData ? (
-                <DrawOutlineButton onClick={handleGenerate} disabled={generating} variant="dark" accentColor="#8B7FE8" className="flex-2 text-xs">
+                <DrawOutlineButton onClick={handleGenerate} disabled={generating} variant="light" accentColor="#6D5BD3" className="flex-2 text-xs">
                   {generating ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
                   {generating ? 'Generating…' : 'Generate Notes'}
                 </DrawOutlineButton>
               ) : (
-                <DrawOutlineButton onClick={handleExport} disabled={exporting || !bgDataUrl} variant="dark" accentColor="#ec4899" className="flex-2 text-xs">
+                <DrawOutlineButton onClick={handleExport} disabled={exporting || !bgDataUrl} variant="light" accentColor="#ec4899" className="flex-2 text-xs">
                   {exporting ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
                   {exporting ? 'Exporting…' : !bgDataUrl ? 'Loading…' : 'Download PDF'}
                 </DrawOutlineButton>
@@ -822,18 +822,18 @@ export function ChapterNotesDialog({ open, onClose, chapterTitle, slides, course
 
           {/* Right Live Preview Column */}
           {notesData && (
-            <div className="notes-scroll" style={{ flex: 1, background: '#080b16', padding: 24, display: 'flex', flexDirection: 'column', gap: 14, overflowY: 'auto', maxHeight: '100%' }}>
+            <div className="notes-scroll" style={{ flex: 1, background: '#f1f5f9', padding: 24, display: 'flex', flexDirection: 'column', gap: 14, overflowY: 'auto', maxHeight: '100%' }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <span style={{ fontSize: 11, color: '#64748b', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1 }}>Live Document Preview</span>
-                <span style={{ fontSize: 10, color: '#8B7FE8', background: 'rgba(109,91,211,0.08)', padding: '2px 8px', borderRadius: 6, fontWeight: 600 }}>A4 Format</span>
+                <span style={{ fontSize: 10, color: '#6D5BD3', background: 'rgba(109,91,211,0.1)', padding: '2px 8px', borderRadius: 6, fontWeight: 600 }}>A4 Format</span>
               </div>
-              
+
               <div style={{ display: 'flex', flexDirection: 'column', gap: 24, alignItems: 'center', paddingBottom: 20 }}>
                 {pages.map((idxs, pi) => {
                   const scale = 0.65
                   const tp = pages.length + (notesData.keyTerms?.length ? 1 : 0)
                   return (
-                    <div key={pi} style={{ position: 'relative', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 12, boxShadow: '0 10px 30px rgba(0,0,0,0.5)', overflow: 'hidden', width: A4_W * scale, height: A4_H * scale }}>
+                    <div key={pi} style={{ position: 'relative', border: '1px solid rgba(15,23,42,0.08)', borderRadius: 12, boxShadow: '0 10px 30px rgba(15,23,42,0.15)', overflow: 'hidden', width: A4_W * scale, height: A4_H * scale }}>
                       <div style={{ transform: `scale(${scale})`, transformOrigin: 'top left', width: A4_W, height: A4_H, pointerEvents: 'none' }}>
                         <NotesPageRender sections={idxs.map(i => sections[i])} startIdx={idxs[0]} bgDataUrl={bgDataUrl} d={d} title={notesData.title || chapterTitle} pageNum={pi + 1} totalPages={tp} summary={pi === 0 ? notesData.summary : undefined} />
                       </div>
@@ -845,7 +845,7 @@ export function ChapterNotesDialog({ open, onClose, chapterTitle, slides, course
                   const scale = 0.65;
                   const tp = pages.length + 1
                   return (
-                    <div key="key-terms-preview" style={{ position: 'relative', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 12, boxShadow: '0 10px 30px rgba(0,0,0,0.5)', overflow: 'hidden', width: A4_W * scale, height: A4_H * scale }}>
+                    <div key="key-terms-preview" style={{ position: 'relative', border: '1px solid rgba(15,23,42,0.08)', borderRadius: 12, boxShadow: '0 10px 30px rgba(15,23,42,0.15)', overflow: 'hidden', width: A4_W * scale, height: A4_H * scale }}>
                       <div style={{ transform: `scale(${scale})`, transformOrigin: 'top left', width: A4_W, height: A4_H, pointerEvents: 'none' }}>
                         <KeyTermsPage keyTerms={notesData.keyTerms} bgDataUrl={bgDataUrl} d={d} pageNum={tp} totalPages={tp} />
                       </div>
