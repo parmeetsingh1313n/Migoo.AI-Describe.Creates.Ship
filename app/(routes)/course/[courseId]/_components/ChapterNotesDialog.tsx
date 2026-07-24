@@ -1,7 +1,7 @@
 "use client"
 import React, { useRef, useState, useEffect } from 'react'
 import { createPortal } from 'react-dom'
-import { X, Download, Loader2, Check, FileText, Sparkles, BookOpen, RotateCw, Trash2 } from 'lucide-react'
+import { X, Download, Loader2, Check, FileText, Sparkles, BookOpen, RotateCw, Trash2, LayoutGrid, Table, Clock, Radar } from 'lucide-react'
 import jsPDF from 'jspdf'
 import { toPng } from 'html-to-image'
 import axios from 'axios'
@@ -536,6 +536,86 @@ function KeyTermsPage({ keyTerms, bgDataUrl, d, pageNum, totalPages }:
 
 
 
+// ── Intro / Empty state ──────────────────────────────────────────────────────
+function NotesIntro({ slideCount }: { slideCount: number; chapterTitle: string }) {
+  const features = [
+    { icon: LayoutGrid, label: 'Bento grids', tint: '#a78bfa' },
+    { icon: Table, label: 'Comparison tables', tint: '#2dd4bf' },
+    { icon: Clock, label: 'Timelines', tint: '#38bdf8' },
+    { icon: Radar, label: 'Radial maps', tint: '#f59e0b' },
+  ]
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
+      {/* Faux document preview — layered, tilted pages */}
+      <div style={{ position: 'relative', height: 168, display: 'flex', alignItems: 'center', justifyContent: 'center', marginTop: 4 }}>
+        {/* dotted texture backdrop */}
+        <div style={{ position: 'absolute', inset: '-24px -24px 0', backgroundImage: 'radial-gradient(rgba(255,255,255,0.05) 1px, transparent 0)', backgroundSize: '14px 14px', maskImage: 'radial-gradient(ellipse 70% 80% at 50% 40%, #000 40%, transparent 100%)', WebkitMaskImage: 'radial-gradient(ellipse 70% 80% at 50% 40%, #000 40%, transparent 100%)' }} />
+        {/* back page */}
+        <div style={{ position: 'absolute', width: 118, height: 150, background: '#141b28', borderRadius: 8, border: '1px solid rgba(255,255,255,0.06)', transform: 'rotate(-9deg) translateX(-46px)', boxShadow: '0 12px 28px rgba(0,0,0,0.45)' }} />
+        <div style={{ position: 'absolute', width: 118, height: 150, background: '#182031', borderRadius: 8, border: '1px solid rgba(255,255,255,0.07)', transform: 'rotate(7deg) translateX(46px)', boxShadow: '0 12px 28px rgba(0,0,0,0.45)' }} />
+        {/* front page with real-looking content */}
+        <div style={{ position: 'relative', width: 128, height: 162, background: 'linear-gradient(160deg,#20293b,#161d2b)', borderRadius: 10, border: '1px solid rgba(255,255,255,0.1)', boxShadow: '0 20px 45px rgba(0,0,0,0.6)', padding: '12px 12px 0', overflow: 'hidden' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 9 }}>
+            <div style={{ width: 16, height: 16, borderRadius: 5, background: 'linear-gradient(135deg,#f59e0b,#d97706)' }} />
+            <div style={{ flex: 1, height: 5, borderRadius: 3, background: 'rgba(255,255,255,0.18)' }} />
+            <div style={{ width: 18, height: 5, borderRadius: 3, background: 'rgba(245,158,11,0.5)' }} />
+          </div>
+          {[92, 78, 85].map((w, i) => <div key={i} style={{ height: 3.5, width: `${w}%`, borderRadius: 2, background: 'rgba(255,255,255,0.09)', marginBottom: 5 }} />)}
+          {/* mini bento */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4, margin: '9px 0' }}>
+            <div style={{ height: 22, borderRadius: 5, background: 'rgba(167,139,250,0.16)', border: '1px solid rgba(167,139,250,0.25)' }} />
+            <div style={{ height: 22, borderRadius: 5, background: 'rgba(45,212,191,0.14)', border: '1px solid rgba(45,212,191,0.22)' }} />
+          </div>
+          {/* mini table lines */}
+          {[0, 1, 2].map((i) => (
+            <div key={i} style={{ display: 'flex', gap: 4, marginBottom: 3 }}>
+              <div style={{ flex: 1, height: 3, borderRadius: 2, background: i === 0 ? 'rgba(56,189,248,0.4)' : 'rgba(255,255,255,0.08)' }} />
+              <div style={{ flex: 1, height: 3, borderRadius: 2, background: i === 0 ? 'rgba(56,189,248,0.4)' : 'rgba(255,255,255,0.08)' }} />
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Headline block — left-aligned, editorial */}
+      <div>
+        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginBottom: 10 }}>
+          <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#f59e0b', boxShadow: '0 0 8px rgba(245,158,11,0.7)' }} />
+          <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 1.5, textTransform: 'uppercase', color: '#f59e0b' }}>Study Dossier</span>
+        </div>
+        <h4 style={{ margin: '0 0 8px', fontSize: 20, fontWeight: 700, color: '#f8fafc', letterSpacing: '-0.02em', lineHeight: 1.25 }}>
+          The whole chapter, distilled onto&nbsp;paper.
+        </h4>
+        <p style={{ margin: 0, fontSize: 12.5, color: '#8a96a8', lineHeight: 1.6 }}>
+          Migoo reads every slide and rebuilds them as a printable set of notes — structured, cross-referenced, and ready to revise from.
+        </p>
+      </div>
+
+      {/* Feature grid */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 8 }}>
+        {features.map(({ icon: Icon, label, tint }) => (
+          <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '9px 11px', borderRadius: 12, background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>
+            <div style={{ width: 26, height: 26, borderRadius: 8, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: `${tint}1f`, border: `1px solid ${tint}40` }}>
+              <Icon size={14} color={tint} />
+            </div>
+            <span style={{ fontSize: 12, fontWeight: 600, color: '#cbd5e1' }}>{label}</span>
+          </div>
+        ))}
+      </div>
+
+      {/* Meta footer */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 4, fontSize: 11, color: '#64748b' }}>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 9px', borderRadius: 20, background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
+          <FileText size={11} color="#94a3b8" /> {slideCount} slide{slideCount === 1 ? '' : 's'}
+        </span>
+        <span style={{ opacity: 0.6 }}>→</span>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 9px', borderRadius: 20, background: 'rgba(245,158,11,0.06)', border: '1px solid rgba(245,158,11,0.15)', color: '#f59e0b', fontWeight: 600 }}>
+          <BookOpen size={11} /> multi-page notes
+        </span>
+      </div>
+    </div>
+  )
+}
+
 // ── Main Dialog ──────────────────────────────────────────────────────────────
 interface Props { open: boolean; onClose: () => void; chapterTitle: string; slides: any[]; courseId: string; chapterId: string }
 
@@ -682,11 +762,7 @@ export function ChapterNotesDialog({ open, onClose, chapterTitle, slides, course
           <div style={{ width: notesData ? 360 : '100%', padding: 24, borderRight: notesData ? '1px solid rgba(255,255,255,0.06)' : 'none', display: 'flex', flexDirection: 'column', gap: 20, overflowY: 'auto' }}>
             
             {!notesData ? (
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '40px 10px', textAlign: 'center' }}>
-                <Sparkles size={32} color="#f59e0b" style={{ marginBottom: 16, alignSelf: 'center', filter: 'drop-shadow(0 0 10px rgba(245,158,11,0.3))' }} />
-                <h4 style={{ margin: '0 0 8px', fontSize: 15, fontWeight: 600, color: '#f1f5f9' }}>Ready to generate rich notes?</h4>
-                <p style={{ margin: 0, fontSize: 12, color: '#64748b', lineHeight: 1.6 }}>Migoo AI will analyze all slide content and synthesize deep study notes complete with bento grids, comparison tables, timelines, radial components, and summaries.</p>
-              </div>
+              <NotesIntro slideCount={slides.length} chapterTitle={chapterTitle} />
             ) : (
               <div>
                 <p style={{ margin: '0 0 12px', fontSize: 11, color: '#64748b', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1 }}>Note Template</p>
