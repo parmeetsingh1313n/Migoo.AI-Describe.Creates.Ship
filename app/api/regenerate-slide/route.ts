@@ -18,6 +18,7 @@ import { db } from "@/config/db";
 import { openrouter } from "@/config/openrouter";
 import { chapterContentSlides, courseImages, coursesTable } from "@/config/schema";
 import { GENERATE_SINGLE_SLIDE_PROMPT, PLAN_SLIDE_PROMPT } from "@/data/Prompt";
+import { slideWordBudget } from "@/inngest/course-functions";
 import { SLIDE_TYPE_PAIRS, SLIDE_ACCENTS, SLIDE_ARCHETYPES, pickArchetype, componentName, isCodeArchetype, isCodeCompanionArchetype, isLikelyCodeTopic } from "@/data/slide-design";
 import { fetchSlideResearch } from "@/lib/tavily";
 import { uploadSlideHtml, resolveSlideHtml } from "@/lib/slide-html";
@@ -163,9 +164,16 @@ the slide coherent with the rest of the chapter. Regenerate the slide's html, na
 fragmentData completely to reflect the requested change. Honour the request precisely.`;
 
         // When Phase 1 produced a plan, tell the writer to render it (not re-plan).
+        // This route regenerates ONE slide in a single request, so it writes html AND
+        // narration together (unlike the pipeline, which narrates in its own step).
+        // Narration is sized to the chapter's per-slide budget so a regenerated slide
+        // stays in proportion with its neighbours.
+        const { targetWords, wordsPerBeat } = slideWordBudget(totalSlides);
         if (slidePlan) {
             systemPrompt += `\n\nA finished PLAN for this slide is in the input field "slidePlan" — render its headline, component, code and style faithfully into the final JSON (html + fragmentData), applying the userChangeRequest on top. Do NOT re-plan the visuals from scratch.`
-                + `\n\n🚨 THE PLAN'S NARRATION BEATS ARE CUES, NOT THE SCRIPT. You write the actual voiceover. Expand EACH beat into 350-500 words of spoken prose — deep explanation, an analogy, a concrete example — so narration.fullText totals 3500-4500 words. Keep the beats' order and meaning, one narration.fragments entry per beat. Copying the short cues through verbatim is a FAILED slide.`;
+                + `\n\n🚨 THE PLAN'S NARRATION BEATS ARE CUES, NOT THE SCRIPT. You write the actual voiceover: expand EACH beat into a full spoken segment of roughly ${wordsPerBeat} words — deep explanation, an analogy, a concrete example — so narration.fullText totals about ${targetWords} words (±10%). Keep the beats' order and meaning, one narration.fragments entry per beat. Copying the short cues through verbatim is a FAILED slide, and so is padding well past ${targetWords} words.`;
+        } else {
+            systemPrompt += `\n\n📝 NARRATION LENGTH: write narration.fullText to about ${targetWords} words (±10%), split across 8-12 narration.fragments entries of roughly ${wordsPerBeat} words each. Every sentence must teach — no padding to reach the count.`;
         }
 
         let slideContent: any = null;

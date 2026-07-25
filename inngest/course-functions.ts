@@ -32,6 +32,37 @@ import { inngest } from "./client";
 
 export const MAX_SLIDES_PER_CHAPTER = 25;
 
+// ─────────────────────────────────────────────────────────────────────────────
+// NARRATION BUDGET
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Target spoken length of ONE chapter video, in minutes. */
+export const TARGET_CHAPTER_MINUTES = 50;
+/** Careful narration pace used by the TTS voices. */
+export const NARRATION_WPM = 150;
+
+/**
+ * Words of narration ONE slide should get, derived from how many slides the
+ * chapter actually has, so the finished video lands near TARGET_CHAPTER_MINUTES
+ * whether the chapter has 6 slides or 20.
+ *
+ * A fixed per-slide count cannot work: at 4000 words/slide (the old prompt's
+ * demand) a 10-slide chapter is a 4.5-HOUR video. Budget the chapter, then
+ * divide. Clamped so a very long chapter still gets substantive slides and a
+ * very short one doesn't produce a 20-minute monologue on a single slide.
+ */
+export function slideWordBudget(totalSlides: number): { targetWords: number; wordsPerBeat: number } {
+    const chapterWords = TARGET_CHAPTER_MINUTES * NARRATION_WPM; // 7,500 @ 50min
+    const raw = Math.round(chapterWords / Math.max(1, totalSlides));
+    // Floor 300 keeps a 25-slide chapter at ~50min instead of overshooting to 67;
+    // ceiling 1600 stops a 3-slide chapter becoming a 10-minute monologue per slide.
+    const targetWords = Math.min(1600, Math.max(300, raw));
+    // Beats per slide run 8-12; size each segment against the middle of that range.
+    const wordsPerBeat = Math.max(30, Math.round(targetWords / 10));
+    return { targetWords, wordsPerBeat };
+}
+
+
 export type ChapterTopic = { topic: string; needsCode: boolean };
 
 /**
@@ -1196,10 +1227,15 @@ export const generateCourseSlidesFn = inngest.createFunction(
             // response on teaching depth. Best-effort: on failure we keep whatever
             // narration Phase 2 produced rather than losing the slide. ──
             const slideWithNarration = await step.run(`narrate-slide-${si}`, async () => {
+                // Per-slide word budget derived from the chapter's real slide count so
+                // the whole chapter lands near TARGET_CHAPTER_MINUTES.
+                const { targetWords, wordsPerBeat } = slideWordBudget(totalSlides);
                 const narrationInput = JSON.stringify({
                     ...buildSlideContext(researchContext, slidePlan),
                     slideHtml: slideVisuals.html ?? "",
                     narrationBeats: slidePlan,
+                    targetWords,
+                    wordsPerBeat,
                 });
 
                 let narration: any = null;
@@ -1209,7 +1245,9 @@ export const generateCourseSlidesFn = inngest.createFunction(
                         const res = await openrouter.json(GENERATE_SLIDE_NARRATION_PROMPT, narrationInput, {
                             model: SLIDE_MODEL,
                             temperature: 0.8,
-                            maxTokens: 16000,
+                            // ~1.4 tokens/word + JSON overhead, with headroom over the
+                            // largest budget slideWordBudget can hand out.
+                            maxTokens: 8000,
                             disableThinking: true,
                             clearThinking: true,
                             timeoutMs: 240000,
@@ -1227,9 +1265,13 @@ export const generateCourseSlidesFn = inngest.createFunction(
                                 fragments: Array.isArray(out?.fragments) ? out.fragments : out?.narration?.fragments ?? [],
                             };
                             const words = String(fullText).split(/\s+/).filter(Boolean).length;
-                            console.log(`🎙️ ${TAG} Slide ${si + 1} narration: ${words} words (~${Math.round(words / 150)} min)`);
-                            if (words < 2500 && attempt < 3) {
-                                console.warn(`⚠️ ${TAG} Slide ${si + 1} narration only ${words} words — retrying for full length...`);
+                            const mins = (words / NARRATION_WPM).toFixed(1);
+                            console.log(`🎙️ ${TAG} Slide ${si + 1} narration: ${words} words (~${mins} min, target ${targetWords})`);
+                            // Retry only a badly SHORT slide (under 60% of budget).
+                            // Overshoot is left alone — re-rolling costs a call and the
+                            // model rarely trims on a second pass.
+                            if (words < targetWords * 0.6 && attempt < 3) {
+                                console.warn(`⚠️ ${TAG} Slide ${si + 1} narration only ${words}/${targetWords} words — retrying...`);
                                 narration = null;
                                 continue;
                             }

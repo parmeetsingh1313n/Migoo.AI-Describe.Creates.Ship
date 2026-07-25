@@ -898,8 +898,8 @@ Output EXACTLY these labelled sections, in this order, as plain text:
    For EACH fragment index write ONE compact line: "[index] <the teaching beat for that block>"
    — 15-30 words naming the concept, the analogy to use, and the concrete example to give.
    This is a CUE, not the finished voiceover: the Phase-2 writer expands each of your lines into
-   350-500 words of spoken prose, so make every line dense with substance to expand (a vague cue
-   produces a short, thin segment).
+   a full spoken segment sized to that slide's word budget, so make every line dense with
+   substance to expand (a vague cue produces a short, thin segment).
 
    Cover a backward bridge on fragment 0 (except slide 1) and a forward bridge to nextSlideTopic
    on the last fragment (except the final slide).
@@ -965,7 +965,7 @@ Return ONLY a single valid JSON object. NO markdown, NO explanations, NO code bl
   "slideIndex": 1,
   "html": "<section data-background-gradient='linear-gradient(135deg, #0f172a, #1e293b)'>...</section>",
   "narration": {
-    "fullText": "Your 3500-4500 word narration, deeply chained to previous slides...",
+    "fullText": "The full narration, at the length the caller's instruction specifies.",
     "fragments": [
       { "index": 0, "text": "The part of the narration spoken while fragment 0 is the focus..." },
       { "index": 1, "text": "The part spoken while fragment 1 is revealed..." }
@@ -1375,7 +1375,8 @@ SELF-CHECK before you output (all must be true):
 📝 NARRATION REQUIREMENTS — CONTEXT-CHAINED CONTENT
 ═══════════════════════════════════════════════════════════════════════════════
 
-** MINIMUM 3500 words. TARGET 4000-4500 words. **
+** Narration length is set by the caller — follow the narration instruction appended below. **
+** The 5-part structure below defines what good narration CONTAINS, not how long it is. **
 
 5-Part Narration Structure (context-aware):
 
@@ -1421,13 +1422,18 @@ NO fragment tokens, NO "as you can see", NO generic filler.
 /**
  * PHASE 3 — NARRATION ONLY.
  *
- * The voiceover is 3500-4500 words; the slide HTML is its own several thousand
- * tokens. Asking one call for both blew past the 300s step limit (the model
- * aborted at 240s, wasted the whole window, then died). Splitting narration into
- * its own step gives it a fresh 300s AND lets the model spend its entire response
- * budget on teaching depth instead of competing with markup.
+ * Asking one call for the slide HTML *and* the voiceover blew past the 300s step
+ * limit (the model aborted at 240s, wasted the whole window, then died).
+ * Splitting narration into its own step gives it a fresh 300s AND lets the model
+ * spend its entire response budget on teaching depth instead of competing with
+ * markup.
  *
- * Input: the same slide context + the finished html + the plan's narration beats.
+ * LENGTH IS NOT FIXED HERE. The caller computes targetWords/wordsPerBeat from the
+ * chapter's real slide count (see slideWordBudget) so every chapter lands near
+ * the same ~50 minute runtime whether it has 6 slides or 20. A hard-coded
+ * per-slide count cannot do that — 4000 words × 10 slides is a 4.5-hour video.
+ *
+ * Input: slide context + the finished html + the plan's beats + the word budget.
  * Output: { "fullText": "...", "fragments": [{ "index": 0, "text": "..." }, ...] }
  */
 export const GENERATE_SLIDE_NARRATION_PROMPT = `You are a world-class educator recording the VOICEOVER for ONE slide of a professional video course. You write the spoken script only — the slide's visuals already exist.
@@ -1440,11 +1446,17 @@ conceptsAlreadyCovered, nextSlideTopic, researchContext, the finished slideHtml,
 📝 LENGTH — THE #1 REQUIREMENT
 ═══════════════════════════════════════════════════════════════════════════════
 
-** 3500-4500 words total. ABSOLUTELY NON-NEGOTIABLE. **
+The input carries your EXACT budget for THIS slide. Obey it literally:
+  • targetWords    — the total words to write. Land within ±10% of it.
+  • wordsPerBeat   — roughly how long each beat's segment should be.
 
-At 150 WPM that is 23-30 minutes of speech. Short narration is the single most
-common failure and it ruins the course. Write 350-500 words for EVERY beat.
-When you feel a section is long enough, it is not — keep teaching.
+These are computed so that all slides in the chapter together add up to a ~50
+minute video. Writing long is just as wrong as writing short: overshoot and the
+chapter balloons past an hour, undershoot and it's a thin 15-minute video.
+
+Do NOT pad to reach the number. Every sentence must teach something — if you hit
+targetWords with room to spare, stop. If you're short, add real substance
+(another example, a deeper mechanism), never filler or restatement.
 
 Each beat becomes one fragment. Same count, same order, same meaning as the beats
 you were given. The beats are CUES — expand each into full spoken prose. Never
@@ -1493,10 +1505,10 @@ nextSlideTopic on its last.
 Return ONLY this JSON object — no markdown, no commentary:
 
 {
-  "fullText": "The ENTIRE voiceover, all fragments joined in order, 3500-4500 words.",
+  "fullText": "The ENTIRE voiceover, all fragments joined in order — targetWords long.",
   "fragments": [
-    { "index": 0, "text": "The full spoken words for fragment 0 (350-500 words)." },
-    { "index": 1, "text": "The full spoken words for fragment 1 (350-500 words)." }
+    { "index": 0, "text": "The full spoken words for fragment 0 (~wordsPerBeat words)." },
+    { "index": 1, "text": "The full spoken words for fragment 1 (~wordsPerBeat words)." }
   ]
 }
 
