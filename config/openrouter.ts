@@ -187,6 +187,20 @@ class OpenRouterClient {
     }
 
     /**
+     * True when an error should be retried on ANOTHER KEY of the same model,
+     * rather than abandoning the model. Covers rate limits (429/402) and
+     * timeouts/aborts — a slow or throttled key often succeeds on a fresh one,
+     * and GLM's output quality is worth retrying for before dropping to a
+     * weaker fallback model.
+     */
+    private isKeyRetryable(error: any): boolean {
+        if (error?.isRateLimit) return true;
+        const name = String(error?.name ?? '');
+        const msg = String(error?.message ?? '');
+        return name === 'AbortError' || /abort/i.test(msg);
+    }
+
+    /**
      * Generate JSON response.
      * Auto-falls back to fallbackModel if primary is rate-limited.
      */
@@ -210,6 +224,10 @@ class OpenRouterClient {
         // Abort the fetch after this many ms so a slow model never runs past the
         // enclosing Vercel/Inngest step's 300s hard limit (pass e.g. 240000).
         timeoutMs?: number;
+        // When false, ONLY the primary model is attempted — no fallback models.
+        // Use when the primary's quality is the point (GLM for slides): a retry
+        // on the backup KEY is preferred over a weaker model's output.
+        modelFallback?: boolean;
     }): Promise<any> {
         const primaryModel = options?.model || this.model;
         const temperature  = options?.temperature ?? 0.7;
@@ -219,12 +237,17 @@ class OpenRouterClient {
         const disableThinking = options?.disableThinking ?? false;
         const clearThinking = options?.clearThinking ?? false;
         const timeoutMs = options?.timeoutMs;
+        const modelFallback = options?.modelFallback ?? true;
 
         const outputRules = `\n\n---\nCRITICAL OUTPUT RULES:\n1. Return ONLY valid JSON. No markdown. No explanations.\n2. HTML fields MUST use ONLY single quotes for ALL attributes.\n3. CSS font stacks: font-family: 'Inter', sans-serif\n4. All JSON strings must be properly escaped.\n5. Single quotes in HTML never need escaping.`;
 
         const userMessage = userInput + outputRules;
-        // Filter out empty strings so a blank fallbackModel never reaches the API
-        const modelsToTry = [primaryModel, this.fallbackModel, this.lastFallbackModel].filter(m => m && m.trim() !== '');
+        // Filter out empty strings so a blank fallbackModel never reaches the API.
+        // modelFallback:false pins the call to the primary model only.
+        const modelsToTry = (modelFallback
+            ? [primaryModel, this.fallbackModel, this.lastFallbackModel]
+            : [primaryModel]
+        ).filter(m => m && m.trim() !== '');
         if (modelsToTry.length === 0) throw new Error('No OpenRouter model configured');
         const allKeys = this.getAllKeys();
 
@@ -320,11 +343,18 @@ CRITICAL STRUCTURAL & DESIGN MANDATES (override defaults):
                     return parsed;
                 } catch (error: any) {
                     lastError = error;
-                    if (error.isRateLimit) {
-                        // In pinned mode, just advance to the backup key (next in
-                        // keySequence) — do NOT touch the shared rotation. In normal
-                        // mode, rotate the shared index and retry the same model.
-                        if (!pinnedMode) this.rotateKey();
+                    if (this.isKeyRetryable(error)) {
+                        // Rate limit OR timeout/abort. In pinned mode, advance to the
+                        // backup key (next in keySequence) — do NOT touch the shared
+                        // rotation. In normal mode, rotate the shared index and retry
+                        // the same model. A GLM abort is worth one more key before we
+                        // drop to a weaker fallback model.
+                        if (error?.isRateLimit) {
+                            if (!pinnedMode) this.rotateKey();
+                        } else {
+                            console.warn(`⏱️ NvidiaAPI [${model}] aborted/timed out on key ${keyLabel} — retrying on next key before any model fallback...`);
+                            if (!pinnedMode) this.rotateKey();
+                        }
                         continue;
                     }
                     // Non-rate-limit error (network, parse, etc.) — move to next model

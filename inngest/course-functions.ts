@@ -16,7 +16,7 @@
 import { db } from "@/config/db";
 import { openrouter } from "@/config/openrouter";
 import { chapterContentSlides, chapterGenerationStatus, courseImages, coursesTable } from "@/config/schema";
-import { GENERATE_SINGLE_SLIDE_PROMPT, PLAN_SLIDE_PROMPT, EXPAND_CHAPTER_TOPICS_PROMPT } from "@/data/Prompt";
+import { GENERATE_SINGLE_SLIDE_PROMPT, GENERATE_SLIDE_NARRATION_PROMPT, PLAN_SLIDE_PROMPT, EXPAND_CHAPTER_TOPICS_PROMPT } from "@/data/Prompt";
 import { putWithRotation } from "@/lib/blob";
 import { uploadSlideHtml, resolveSlideHtml } from "@/lib/slide-html";
 import { uploadSlideNarration, resolveSlideNarration } from "@/lib/slide-narration";
@@ -1096,14 +1096,12 @@ export const generateCourseSlidesFn = inngest.createFunction(
                     plan = await openrouter.text(PLAN_SLIDE_PROMPT, JSON.stringify(buildSlideContext(research, null)), {
                         model: SLIDE_MODEL,
                         disableThinking: false,
-                        // The plan's NARRATION FRAGMENTS section IS the final voiceover
-                        // (Phase 2 joins it verbatim), so this budget has to hold
-                        // 3500-4500 words of prose (~6.5k tokens) PLUS the component
-                        // scaffold and up to ~50 lines of code. openrouter.text()
-                        // honours this verbatim — it deliberately skips json()'s 100k
-                        // GLM override — so 4000 here silently capped every video at
-                        // ~1/3 its intended length.
-                        maxTokens: 16000,
+                        // Compact scaffold ONLY (beats/cues, never finished prose) —
+                        // thinking is ON here, so every extra token is slow. Phase 2
+                        // writes the actual 3500-4500 word narration with thinking OFF,
+                        // where tokens are cheap. Making Phase 1 emit the full voiceover
+                        // costs the long output twice, serially, once per slide.
+                        maxTokens: 4000,
                         timeoutMs: 240000,
                         // This slide OWNS keyIndex for both phases; fall back to the
                         // reserved shared fallback key only if its own key 429s.
@@ -1119,17 +1117,18 @@ export const generateCourseSlidesFn = inngest.createFunction(
 
             // ── Phase 2: WRITE (GLM thinking OFF → fast rendering). Own step → own
             // fresh 300s budget. Renders the Phase-1 plan (when present) into the
-            // final JSON, keeping the html + narration.fragments + fragmentData
-            // contract intact. ──
-            const slideResult = await step.run(`write-slide-${si}`, async () => {
+            // final JSON: html + fragmentData. Narration is Phase 3's job. ──
+            const slideVisuals = await step.run(`write-slide-${si}`, async () => {
                 const slideInput = JSON.stringify(buildSlideContext(researchContext, slidePlan));
 
                 // When Phase 1 produced a plan, tell the writer to render it (not re-plan).
+                // Narration is NOT written here — Phase 3 owns it in its own step, so
+                // this call spends its whole budget (and its 300s) on the visuals.
                 let systemPrompt = GENERATE_SINGLE_SLIDE_PROMPT;
                 if (slidePlan) {
-                    systemPrompt += `\n\nA finished PLAN for this slide is in the input field "slidePlan" — render it faithfully into the final JSON (html + narration.fragments + fragmentData). Do NOT re-plan from scratch.`
-                        + `\n\n🚨 NARRATION LENGTH STILL APPLIES: the plan's NARRATION FRAGMENTS section is finished voiceover prose — copy it into narration.fragments and narration.fullText IN FULL, word for word. NEVER summarise, compress, trim or paraphrase it. If the plan's narration totals under 3500 words, EXPAND each segment with deeper explanation, analogies and examples until fullText is 3500-4500 words, keeping the plan's order, meaning and fragment boundaries intact. A short narration is a FAILED slide.`;
+                    systemPrompt += `\n\nA finished PLAN for this slide is in the input field "slidePlan" — render its headline, component, code and style faithfully into the final JSON (html + fragmentData). Do NOT re-plan the visuals from scratch.`;
                 }
+                systemPrompt += `\n\n⚡ NARRATION IS HANDLED BY A SEPARATE CALL — do NOT write it here. For "narration", return exactly {"fullText":""}. Spend your entire response on html + fragmentData. Every other rule above (component lock, density, no-overlap, image rules, fragment indices) still applies in full.`;
 
                 let slideContent: any = null;
                 let slideError: any = null;
@@ -1147,6 +1146,10 @@ export const generateCourseSlidesFn = inngest.createFunction(
                             disableThinking: true,
                             clearThinking: true,
                             timeoutMs: 240000,
+                            // GLM only — its slide quality is the point. An abort now
+                            // retries on the backup KEY rather than falling to a weaker
+                            // model (nemotron 503s and gpt-oss burns the leftover budget).
+                            modelFallback: false,
                             // Same dedicated key as Phase 1 (fallback behind it).
                             pinnedKeyIndex: keyIndex,
                             backupKeyIndex: FALLBACK_KEY_INDEX >= 0 ? FALLBACK_KEY_INDEX : undefined,
@@ -1182,26 +1185,92 @@ export const generateCourseSlidesFn = inngest.createFunction(
                     });
                 }
 
-                // Save slide content to DB immediately (audioUrl stays null until TTS runs).
+                return slideContent;
+            });
+
+            // ── Phase 3: NARRATE. Own step → own fresh 300s budget. The voiceover is
+            // 3500-4500 words (~6.5k tokens); asking one call for that AND the slide
+            // HTML overran the 300s step limit, so the fetch aborted at 240s, burned
+            // the whole window, and the step died with nothing saved. Split out, each
+            // call comfortably fits its budget and the model spends its entire
+            // response on teaching depth. Best-effort: on failure we keep whatever
+            // narration Phase 2 produced rather than losing the slide. ──
+            const slideWithNarration = await step.run(`narrate-slide-${si}`, async () => {
+                const narrationInput = JSON.stringify({
+                    ...buildSlideContext(researchContext, slidePlan),
+                    slideHtml: slideVisuals.html ?? "",
+                    narrationBeats: slidePlan,
+                });
+
+                let narration: any = null;
+                for (let attempt = 1; attempt <= 3; attempt++) {
+                    try {
+                        console.log(`🎙️ ${TAG} Slide ${si + 1}/${totalSlides} NARRATE via ${SLIDE_MODEL} (attempt ${attempt}/3)...`);
+                        const res = await openrouter.json(GENERATE_SLIDE_NARRATION_PROMPT, narrationInput, {
+                            model: SLIDE_MODEL,
+                            temperature: 0.8,
+                            maxTokens: 16000,
+                            disableThinking: true,
+                            clearThinking: true,
+                            timeoutMs: 240000,
+                            // GLM only — its narration quality is the point here. An abort
+                            // retries on the backup KEY instead of dropping to a weaker model.
+                            modelFallback: false,
+                            pinnedKeyIndex: keyIndex,
+                            backupKeyIndex: FALLBACK_KEY_INDEX >= 0 ? FALLBACK_KEY_INDEX : undefined,
+                        });
+                        const out = Array.isArray(res) ? res[0] : res;
+                        const fullText = out?.fullText ?? out?.narration?.fullText ?? "";
+                        if (fullText && String(fullText).trim().length > 0) {
+                            narration = {
+                                fullText: String(fullText),
+                                fragments: Array.isArray(out?.fragments) ? out.fragments : out?.narration?.fragments ?? [],
+                            };
+                            const words = String(fullText).split(/\s+/).filter(Boolean).length;
+                            console.log(`🎙️ ${TAG} Slide ${si + 1} narration: ${words} words (~${Math.round(words / 150)} min)`);
+                            if (words < 2500 && attempt < 3) {
+                                console.warn(`⚠️ ${TAG} Slide ${si + 1} narration only ${words} words — retrying for full length...`);
+                                narration = null;
+                                continue;
+                            }
+                            break;
+                        }
+                    } catch (e: any) {
+                        console.warn(`⚠️ ${TAG} Slide ${si + 1} narration attempt ${attempt}: ${e?.message?.substring(0, 120)}`);
+                        if (attempt < 3) await new Promise(r => setTimeout(r, 3000));
+                    }
+                }
+
+                if (narration) {
+                    return { ...slideVisuals, narration };
+                }
+                console.warn(`⚠️ ${TAG} Slide ${si + 1} narration failed — keeping Phase-2 narration if any`);
+                return slideVisuals;
+            });
+
+            // ── Persist. Own step so a narration retry never re-writes a half slide. ──
+            const slideResult = await step.run(`save-slide-${si}`, async () => {
+                const saved = slideWithNarration;
+                // Save slide content to DB (audioUrl stays null until TTS runs).
                 // HTML **and narration** are offloaded to Appwrite Storage (rotated across
                 // all configs); only their URLs are stored in Postgres. If an upload fails,
                 // fall back to inline so a slide is never lost.
-                const revealData = slideContent.fragmentData ?? slideContent.revealData ?? [];
+                const revealData = saved.fragmentData ?? saved.revealData ?? [];
                 let slideHtmlUrl: string | null = null;
-                let slideHtmlInline: string | null = slideContent.html ?? null;
-                if (slideContent.html) {
+                let slideHtmlInline: string | null = saved.html ?? null;
+                if (saved.html) {
                     try {
-                        slideHtmlUrl = await uploadSlideHtml(slideContent.slideId, slideContent.html);
+                        slideHtmlUrl = await uploadSlideHtml(saved.slideId, saved.html);
                         slideHtmlInline = null; // offloaded — don't duplicate in Postgres
                     } catch (e: any) {
                         console.warn(`⚠️ ${TAG} Slide ${si + 1} HTML upload failed, keeping inline: ${e?.message?.slice(0, 100)}`);
                     }
                 }
                 let narrationUrl: string | null = null;
-                let narrationInline: any | null = slideContent.narration ?? null;
-                if (slideContent.narration) {
+                let narrationInline: any | null = saved.narration ?? null;
+                if (saved.narration) {
                     try {
-                        narrationUrl = await uploadSlideNarration(slideContent.slideId, slideContent.narration);
+                        narrationUrl = await uploadSlideNarration(saved.slideId, saved.narration);
                         narrationInline = null; // offloaded — don't duplicate in Postgres
                     } catch (e: any) {
                         console.warn(`⚠️ ${TAG} Slide ${si + 1} narration upload failed, keeping inline: ${e?.message?.slice(0, 100)}`);
@@ -1210,7 +1279,7 @@ export const generateCourseSlidesFn = inngest.createFunction(
                 await db.insert(chapterContentSlides).values({
                     courseId,
                     chapterId,
-                    slideId: slideContent.slideId,
+                    slideId: saved.slideId,
                     slideIndex: si + 1,
                     narration: narrationInline,
                     narrationUrl,
@@ -1226,7 +1295,7 @@ export const generateCourseSlidesFn = inngest.createFunction(
                 });
 
                 console.log(`💾 ${TAG} Slide ${si + 1}/${totalSlides} content saved to database ✅`);
-                return slideContent;
+                return saved;
             });
 
             // Live progress: this slide is now fully prepared → bump the bar by the

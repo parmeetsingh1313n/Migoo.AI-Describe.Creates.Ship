@@ -892,46 +892,25 @@ Output EXACTLY these labelled sections, in this order, as plain text:
    working code snippet to display (real line breaks, up to ~50 lines, no fake-truncation, no
    "// rest omitted"). If not a code slide, write "CODE: none".
 
-4. NARRATION FRAGMENTS — the on-screen blocks map to fragment indices 0,1,2,… in reading order.
+4. NARRATION BEATS — the on-screen blocks map to fragment indices 0,1,2,… in reading order.
    Aim for 8-12 fragments.
 
-   🚨 THIS SECTION IS THE ACTUAL VOICEOVER SCRIPT, NOT A SUMMARY OF IT. 🚨
-   These segments, concatenated in order, ARE the full narration — the writer joins them verbatim
-   into fullText and a TTS engine speaks them. A one-line cue here becomes a 10-second video.
-
-   ** TOTAL: 3500-4500 words across all fragments (ABSOLUTELY NON-NEGOTIABLE) **
-   ** PER FRAGMENT: 350-500 words — that is 3-5 full paragraphs of real spoken teaching. **
-
-   For EACH fragment index write:
-   "[index]" on its own, then the COMPLETE spoken words for that block — written out in full,
-   word for word, as the narrator will say them. Never write a description of what will be said
-   ("explain the trade-offs here"); write the explanation itself.
-
-   Every fragment must contain:
-   - A deep explanation with background context (4+ sentences, never 1-2)
-   - At least one analogy or metaphor
-   - A concrete real-world example or scenario, described in detail
-   - A connection back to what came before and forward to what comes next
+   For EACH fragment index write ONE compact line: "[index] <the teaching beat for that block>"
+   — 15-30 words naming the concept, the analogy to use, and the concrete example to give.
+   This is a CUE, not the finished voiceover: the Phase-2 writer expands each of your lines into
+   350-500 words of spoken prose, so make every line dense with substance to expand (a vague cue
+   produces a short, thin segment).
 
    Cover a backward bridge on fragment 0 (except slide 1) and a forward bridge to nextSlideTopic
    on the last fragment (except the final slide).
    Do NOT re-explain anything in conceptsAlreadyCovered; reference it instead.
 
-   Style: conversational but professional; address the viewer as "you"; vary sentence length;
-   no filler, no "as you can see on screen", no fragment tokens or HTML.
-
-   ⚠️ If your fragments total under 3500 words, the plan is REJECTED and the video is too short.
-   When you think a fragment is long enough, it is not — keep teaching.
-
 5. STYLE — the accent colour and type-pairing from designHint, and one line on the visual mood so
    this slide looks distinct from the previous one.
 
-Sections 1, 2, 3 and 5 are a terse scaffold — directive, no prose.
-Section 4 is the OPPOSITE: it is finished, full-length, word-for-word voiceover prose, and it is
-by far the longest part of your output. English only.`;
+Keep the whole plan concise and directive — it is a scaffold, not prose. English only.`;
 
 export const GENERATE_SINGLE_SLIDE_PROMPT = `You are an elite instructional designer and master educator creating ONE slide in a series of slides for a professional video course.
-
 You have been given:
 - The FULL chapter outline (all slide topics in order)
 - Rich summaries of ALL previously generated slides
@@ -1438,3 +1417,89 @@ NO fragment tokens, NO "as you can see", NO generic filler.
 
 ✅ RETURN ONE JSON OBJECT. SINGLE QUOTES IN HTML. NO MARKDOWN. CHAIN THE CONTEXT.
 ═══════════════════════════════════════════════════════════════════════════════`;
+
+/**
+ * PHASE 3 — NARRATION ONLY.
+ *
+ * The voiceover is 3500-4500 words; the slide HTML is its own several thousand
+ * tokens. Asking one call for both blew past the 300s step limit (the model
+ * aborted at 240s, wasted the whole window, then died). Splitting narration into
+ * its own step gives it a fresh 300s AND lets the model spend its entire response
+ * budget on teaching depth instead of competing with markup.
+ *
+ * Input: the same slide context + the finished html + the plan's narration beats.
+ * Output: { "fullText": "...", "fragments": [{ "index": 0, "text": "..." }, ...] }
+ */
+export const GENERATE_SLIDE_NARRATION_PROMPT = `You are a world-class educator recording the VOICEOVER for ONE slide of a professional video course. You write the spoken script only — the slide's visuals already exist.
+
+You receive: chapterTitle, slideTopic, slideIndex, totalSlides, slidePosition, previousSlidesContext,
+conceptsAlreadyCovered, nextSlideTopic, researchContext, the finished slideHtml, and narrationBeats
+(the per-fragment teaching cues from the planner, in on-screen reading order).
+
+═══════════════════════════════════════════════════════════════════════════════
+📝 LENGTH — THE #1 REQUIREMENT
+═══════════════════════════════════════════════════════════════════════════════
+
+** 3500-4500 words total. ABSOLUTELY NON-NEGOTIABLE. **
+
+At 150 WPM that is 23-30 minutes of speech. Short narration is the single most
+common failure and it ruins the course. Write 350-500 words for EVERY beat.
+When you feel a section is long enough, it is not — keep teaching.
+
+Each beat becomes one fragment. Same count, same order, same meaning as the beats
+you were given. The beats are CUES — expand each into full spoken prose. Never
+copy a cue through as-is, never summarise, never merge or drop beats.
+
+═══════════════════════════════════════════════════════════════════════════════
+🎓 DEPTH — WHAT EVERY FRAGMENT MUST CONTAIN
+═══════════════════════════════════════════════════════════════════════════════
+
+1. A deep explanation with background context — 4+ sentences, never 1-2. Explain
+   the WHY and the mechanism underneath, not just the WHAT.
+2. At least one analogy or metaphor that makes the abstract concrete.
+3. A specific real-world example or scenario, described in enough detail that the
+   viewer can picture it — real tools, real numbers, real situations.
+4. A common mistake or misconception here, and WHY it trips people up.
+5. A connection backward to what was already taught and forward to what's next.
+
+Ground every factual claim in researchContext when it is provided. Prefer real,
+current specifics over vague generalities — concrete beats abstract every time.
+
+═══════════════════════════════════════════════════════════════════════════════
+🎙️ VOICE
+═══════════════════════════════════════════════════════════════════════════════
+
+✅ Conversational but expert — a brilliant teacher explaining to a friend
+✅ Address the viewer as "you"; use "we" when reasoning together
+✅ Rhetorical questions to create curiosity before answering them
+✅ Transitions: "Now that we understand…", "Here's where it gets interesting…"
+✅ Vary rhythm — short punchy sentences between longer explanatory ones
+✅ It must stand alone as valuable teaching even with no visuals
+
+❌ NO "as you can see on screen" / "look at this slide" — the audio must work blind
+❌ NO filler ("this is important", "let's learn about") — every sentence teaches
+❌ NO fragment tokens, HTML, markdown or stage directions in the spoken text
+❌ NO re-explaining anything in conceptsAlreadyCovered — reference it and move on
+❌ NO robotic or academic tone, NO unexplained jargon or abbreviations
+
+Slide 1 opens with a genuine hook. The final slide closes with real takeaways.
+Any middle slide bridges backward on its first fragment and forward to
+nextSlideTopic on its last.
+
+═══════════════════════════════════════════════════════════════════════════════
+📤 OUTPUT
+═══════════════════════════════════════════════════════════════════════════════
+
+Return ONLY this JSON object — no markdown, no commentary:
+
+{
+  "fullText": "The ENTIRE voiceover, all fragments joined in order, 3500-4500 words.",
+  "fragments": [
+    { "index": 0, "text": "The full spoken words for fragment 0 (350-500 words)." },
+    { "index": 1, "text": "The full spoken words for fragment 1 (350-500 words)." }
+  ]
+}
+
+"fullText" MUST equal every fragment's text concatenated in index order — same
+words, nothing added or removed. One fragment per beat, indices starting at 0.
+ENGLISH ONLY — never any Chinese, Japanese, Korean, Cyrillic or other non-Latin script.`;

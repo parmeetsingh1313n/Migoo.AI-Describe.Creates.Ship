@@ -137,13 +137,10 @@ export async function POST(req: NextRequest) {
             slidePlan = await openrouter.text(PLAN_SLIDE_PROMPT, JSON.stringify(slideContext), {
                 model: "z-ai/glm-5.2",
                 disableThinking: false,
-                // The plan's NARRATION FRAGMENTS section IS the final voiceover, so
-                // this must hold 3500-4500 words (~6.5k tokens) plus the scaffold.
-                // openrouter.text() honours it verbatim (no 100k GLM override), so a
-                // low cap here directly shortens the video. If the bigger output
-                // overruns the 100s Phase-1 ceiling we abort to the plan-less path,
-                // where GENERATE_SINGLE_SLIDE_PROMPT enforces the same word count.
-                maxTokens: 12000,
+                // Compact scaffold only — thinking is ON here so tokens are slow, and
+                // this route shares ONE 300s budget across both phases. Phase 2 writes
+                // the full 3500-4500 word narration with thinking OFF.
+                maxTokens: 4000,
                 timeoutMs: 100000,
             });
         } catch (e: any) {
@@ -167,8 +164,8 @@ fragmentData completely to reflect the requested change. Honour the request prec
 
         // When Phase 1 produced a plan, tell the writer to render it (not re-plan).
         if (slidePlan) {
-            systemPrompt += `\n\nA finished PLAN for this slide is in the input field "slidePlan" — render it faithfully into the final JSON (html + narration.fragments + fragmentData), applying the userChangeRequest on top. Do NOT re-plan from scratch.`
-                + `\n\n🚨 NARRATION LENGTH STILL APPLIES: the plan's NARRATION FRAGMENTS section is finished voiceover prose — copy it into narration.fragments and narration.fullText IN FULL, word for word. NEVER summarise, compress, trim or paraphrase it. If the plan's narration totals under 3500 words, EXPAND each segment with deeper explanation, analogies and examples until fullText is 3500-4500 words, keeping the plan's order, meaning and fragment boundaries intact. A short narration is a FAILED slide.`;
+            systemPrompt += `\n\nA finished PLAN for this slide is in the input field "slidePlan" — render its headline, component, code and style faithfully into the final JSON (html + fragmentData), applying the userChangeRequest on top. Do NOT re-plan the visuals from scratch.`
+                + `\n\n🚨 THE PLAN'S NARRATION BEATS ARE CUES, NOT THE SCRIPT. You write the actual voiceover. Expand EACH beat into 350-500 words of spoken prose — deep explanation, an analogy, a concrete example — so narration.fullText totals 3500-4500 words. Keep the beats' order and meaning, one narration.fragments entry per beat. Copying the short cues through verbatim is a FAILED slide.`;
         }
 
         let slideContent: any = null;
