@@ -893,16 +893,42 @@ Output EXACTLY these labelled sections, in this order, as plain text:
    "// rest omitted"). If not a code slide, write "CODE: none".
 
 4. NARRATION FRAGMENTS — the on-screen blocks map to fragment indices 0,1,2,… in reading order.
-   For EACH fragment index, write one line: "[index] <what the voiceover says while that block is
-   the focus>". Cover a backward bridge on fragment 0 (except slide 1) and a forward bridge to
-   nextSlideTopic on the last fragment (except the final slide). These segments, concatenated in
-   order, ARE the full narration — the writer will join them into fullText. Aim for 6-12 fragments.
+   Aim for 8-12 fragments.
+
+   🚨 THIS SECTION IS THE ACTUAL VOICEOVER SCRIPT, NOT A SUMMARY OF IT. 🚨
+   These segments, concatenated in order, ARE the full narration — the writer joins them verbatim
+   into fullText and a TTS engine speaks them. A one-line cue here becomes a 10-second video.
+
+   ** TOTAL: 3500-4500 words across all fragments (ABSOLUTELY NON-NEGOTIABLE) **
+   ** PER FRAGMENT: 350-500 words — that is 3-5 full paragraphs of real spoken teaching. **
+
+   For EACH fragment index write:
+   "[index]" on its own, then the COMPLETE spoken words for that block — written out in full,
+   word for word, as the narrator will say them. Never write a description of what will be said
+   ("explain the trade-offs here"); write the explanation itself.
+
+   Every fragment must contain:
+   - A deep explanation with background context (4+ sentences, never 1-2)
+   - At least one analogy or metaphor
+   - A concrete real-world example or scenario, described in detail
+   - A connection back to what came before and forward to what comes next
+
+   Cover a backward bridge on fragment 0 (except slide 1) and a forward bridge to nextSlideTopic
+   on the last fragment (except the final slide).
    Do NOT re-explain anything in conceptsAlreadyCovered; reference it instead.
+
+   Style: conversational but professional; address the viewer as "you"; vary sentence length;
+   no filler, no "as you can see on screen", no fragment tokens or HTML.
+
+   ⚠️ If your fragments total under 3500 words, the plan is REJECTED and the video is too short.
+   When you think a fragment is long enough, it is not — keep teaching.
 
 5. STYLE — the accent colour and type-pairing from designHint, and one line on the visual mood so
    this slide looks distinct from the previous one.
 
-Keep the whole plan concise and directive — it is a scaffold, not prose. English only.`;
+Sections 1, 2, 3 and 5 are a terse scaffold — directive, no prose.
+Section 4 is the OPPOSITE: it is finished, full-length, word-for-word voiceover prose, and it is
+by far the longest part of your output. English only.`;
 
 export const GENERATE_SINGLE_SLIDE_PROMPT = `You are an elite instructional designer and master educator creating ONE slide in a series of slides for a professional video course.
 

@@ -1096,7 +1096,14 @@ export const generateCourseSlidesFn = inngest.createFunction(
                     plan = await openrouter.text(PLAN_SLIDE_PROMPT, JSON.stringify(buildSlideContext(research, null)), {
                         model: SLIDE_MODEL,
                         disableThinking: false,
-                        maxTokens: 4000,
+                        // The plan's NARRATION FRAGMENTS section IS the final voiceover
+                        // (Phase 2 joins it verbatim), so this budget has to hold
+                        // 3500-4500 words of prose (~6.5k tokens) PLUS the component
+                        // scaffold and up to ~50 lines of code. openrouter.text()
+                        // honours this verbatim — it deliberately skips json()'s 100k
+                        // GLM override — so 4000 here silently capped every video at
+                        // ~1/3 its intended length.
+                        maxTokens: 16000,
                         timeoutMs: 240000,
                         // This slide OWNS keyIndex for both phases; fall back to the
                         // reserved shared fallback key only if its own key 429s.
@@ -1120,7 +1127,8 @@ export const generateCourseSlidesFn = inngest.createFunction(
                 // When Phase 1 produced a plan, tell the writer to render it (not re-plan).
                 let systemPrompt = GENERATE_SINGLE_SLIDE_PROMPT;
                 if (slidePlan) {
-                    systemPrompt += `\n\nA finished PLAN for this slide is in the input field "slidePlan" — render it faithfully into the final JSON (html + narration.fragments + fragmentData). Do NOT re-plan from scratch.`;
+                    systemPrompt += `\n\nA finished PLAN for this slide is in the input field "slidePlan" — render it faithfully into the final JSON (html + narration.fragments + fragmentData). Do NOT re-plan from scratch.`
+                        + `\n\n🚨 NARRATION LENGTH STILL APPLIES: the plan's NARRATION FRAGMENTS section is finished voiceover prose — copy it into narration.fragments and narration.fullText IN FULL, word for word. NEVER summarise, compress, trim or paraphrase it. If the plan's narration totals under 3500 words, EXPAND each segment with deeper explanation, analogies and examples until fullText is 3500-4500 words, keeping the plan's order, meaning and fragment boundaries intact. A short narration is a FAILED slide.`;
                 }
 
                 let slideContent: any = null;
