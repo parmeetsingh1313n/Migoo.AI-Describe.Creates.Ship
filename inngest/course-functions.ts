@@ -38,8 +38,14 @@ export const MAX_SLIDES_PER_CHAPTER = 25;
 
 /** Target spoken length of ONE chapter video, in minutes. */
 export const TARGET_CHAPTER_MINUTES = 50;
-/** Careful narration pace used by the TTS voices. */
-export const NARRATION_WPM = 150;
+/**
+ * Real measured pace of the Sarvam voices as we call them.
+ *
+ * Not the ~150 WPM of unhurried human speech: generateTTSAudio sends
+ * pace: 1.05, which lands the bulbul voices near 165 WPM. Measured against a
+ * real chapter — 7,925 words rendered to ~48 min of audio.
+ */
+export const NARRATION_WPM = 165;
 
 /**
  * Words of narration ONE slide should get, derived from how many slides the
@@ -166,33 +172,71 @@ function buildImagePrompt(courseName: string, chapterTitle: string, topic: strin
 // ─── MP3 helpers ─────────────────────────────────────────────────────────────
 
 /**
- * Estimate MP3 duration by parsing the first MPEG sync frame header.
- * Falls back to assuming 64 kbps if no valid frame found.
+ * True MP3 duration, by walking every MPEG frame header and summing each
+ * frame's playback time.
+ *
+ * The old implementation read ONE header and did (bytes * 8) / bitrate, using
+ * the MPEG-1 bitrate table only. Sarvam is called with speech_sample_rate 22050,
+ * which encodes MPEG-2 Layer III — a DIFFERENT bitrate table. Index 8 there is
+ * 64 kbps, but the MPEG-1 table reports 112 kbps, so duration came out ~1.75x
+ * SHORT. The renderer trims each clip to that value (-t durationSec), so ~43% of
+ * every slide's narration was being cut off the end of the video.
+ *
+ * Frame-walking also handles VBR and the multi-chunk concatenation we do in
+ * generateTTSAudio (each chunk is its own MP3, possibly at its own bitrate),
+ * which a single-header read cannot.
  */
 function getMp3Duration(buf: Buffer): number {
-    // Skip ID3v2 tag if present
-    let offset = 0;
+    // Layer III bitrate tables, in kbps, indexed by the header's 4-bit field.
+    const BR_V1_L3 = [0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 0];
+    const BR_V2_L3 = [0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160, 0];
+    const SR_V1 = [44100, 48000, 32000, 0];       // MPEG-1
+    const SR_V2 = [22050, 24000, 16000, 0];       // MPEG-2
+    const SR_V25 = [11025, 12000, 8000, 0];       // MPEG-2.5
+
+    let i = 0;
+    // Skip an ID3v2 tag if present.
     if (buf.length > 10 && buf[0] === 0x49 && buf[1] === 0x44 && buf[2] === 0x33) {
-        const id3Size = ((buf[6] & 0x7f) << 21) | ((buf[7] & 0x7f) << 14) | ((buf[8] & 0x7f) << 7) | (buf[9] & 0x7f);
-        offset = id3Size + 10;
+        i = 10 + (((buf[6] & 0x7f) << 21) | ((buf[7] & 0x7f) << 14) | ((buf[8] & 0x7f) << 7) | (buf[9] & 0x7f));
     }
-    // Scan for MPEG sync word
-    for (let i = offset; i < Math.min(buf.length - 3, offset + 8192); i++) {
-        if (buf[i] === 0xFF && (buf[i + 1] & 0xE0) === 0xE0) {
-            const header = buf.readUInt32BE(i);
-            const versionBits = (header >> 19) & 0x3;
-            const bitrateIdx = (header >> 12) & 0xF;
-            const sampleRateIdx = (header >> 10) & 0x3;
-            // Bitrate table: MPEG1 Layer3
-            const BITRATES = [0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 0];
-            const SAMPLE_V1 = [44100, 48000, 32000, 0];
-            const SAMPLE_V2 = [22050, 24000, 16000, 0]; // MPEG2 / 2.5
-            const bitrate = BITRATES[bitrateIdx] * 1000;
-            const sampleRate = versionBits === 3 ? SAMPLE_V1[sampleRateIdx] : SAMPLE_V2[sampleRateIdx];
-            if (bitrate > 0 && sampleRate > 0) return (buf.length * 8) / bitrate;
+
+    let duration = 0;
+    let frames = 0;
+    while (i + 4 <= buf.length) {
+        // Frame sync: 11 set bits.
+        if (buf[i] !== 0xff || (buf[i + 1] & 0xe0) !== 0xe0) { i++; continue; }
+
+        const versionBits = (buf[i + 1] >> 3) & 0x3;  // 3=MPEG1, 2=MPEG2, 0=MPEG2.5
+        const layerBits = (buf[i + 1] >> 1) & 0x3;    // 1=Layer III
+        const bitrateIdx = (buf[i + 2] >> 4) & 0xf;
+        const sampleRateIdx = (buf[i + 2] >> 2) & 0x3;
+        const padding = (buf[i + 2] >> 1) & 0x1;
+
+        if (versionBits === 1 || layerBits !== 1 || bitrateIdx === 0 || bitrateIdx === 15 || sampleRateIdx === 3) {
+            i++; // reserved/free/invalid — not a real frame start
+            continue;
         }
+
+        const isV1 = versionBits === 3;
+        const bitrate = (isV1 ? BR_V1_L3[bitrateIdx] : BR_V2_L3[bitrateIdx]) * 1000;
+        const sampleRate = versionBits === 3 ? SR_V1[sampleRateIdx]
+            : versionBits === 2 ? SR_V2[sampleRateIdx]
+                : SR_V25[sampleRateIdx];
+        if (!bitrate || !sampleRate) { i++; continue; }
+
+        // Layer III: 1152 samples per frame on MPEG-1, 576 on MPEG-2/2.5.
+        const samplesPerFrame = isV1 ? 1152 : 576;
+        const frameLen = Math.floor((samplesPerFrame / 8) * bitrate / sampleRate) + padding;
+        if (frameLen < 4) { i++; continue; }
+
+        duration += samplesPerFrame / sampleRate;
+        frames++;
+        i += frameLen;
     }
-    return (buf.length * 8) / 64000; // fallback: assume 64 kbps
+
+    if (frames > 0) return duration;
+    // No parsable frames — assume the 64 kbps CBR that Sarvam emits at 22050 Hz.
+    return (buf.length * 8) / 64000;
 }
 
 /**
@@ -1584,7 +1628,15 @@ export const generateCourseAudioFn = inngest.createFunction(
                 // TTS → MP3 buffer
                 const audioBuffer = await generateTTSAudio(narration, "en-IN", courseVoice);
                 const audioDuration = getMp3Duration(audioBuffer);
-                console.log(`✅ ${TAG} Slide ${i + 1} TTS: ${audioBuffer.length} bytes, ${audioDuration.toFixed(2)}s`);
+                const spokenWords = narration.split(/\s+/).filter(Boolean).length;
+                const wpm = audioDuration > 0 ? Math.round(spokenWords / (audioDuration / 60)) : 0;
+                console.log(`✅ ${TAG} Slide ${i + 1} TTS: ${audioBuffer.length} bytes, ${audioDuration.toFixed(2)}s (${spokenWords} words, ${wpm} WPM)`);
+                // A wildly off WPM means the duration parse is wrong, and the renderer
+                // trims each clip to exactly this value — so the narration would be cut
+                // off. Surface it loudly instead of shipping a silently short video.
+                if (wpm > 0 && (wpm < 90 || wpm > 260)) {
+                    console.warn(`🚨 ${TAG} Slide ${i + 1} implausible ${wpm} WPM — audioDuration (${audioDuration.toFixed(1)}s) is likely misparsed; video will be trimmed wrong.`);
+                }
 
                 // Upload MP3 → Appwrite
                 const slideKey = slide.slideId || `slide-${i}`;
