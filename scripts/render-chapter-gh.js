@@ -460,7 +460,12 @@ const CINEMATIC_DIRECTOR_SCRIPT = `
 <script>
 (function () {
   var EASE = function (x) { return x < 0.5 ? 4*x*x*x : 1 - Math.pow(-2*x+2, 3)/2; };
-  var FONT_THRESHOLD = 15, ZOOM_PAD = 90, MAX_ZOOM = 1.9, DRAG = 0.55;
+  var FONT_THRESHOLD = 15, ZOOM_PAD = 90, MAX_ZOOM = 1.9;
+  // Absolute seconds the camera spends travelling between framings — FIXED, not a
+  // fraction of the fragment's window (the old DRAG=0.55 drifted for 55% of an
+  // often 6-8s window, which read as the picture never settling). Move promptly,
+  // then HOLD perfectly still. KEEP IN SYNC with lib/reveal-doc.ts MOVE_SEC.
+  var MOVE_SEC = 0.7;
   var VW = 1440, VH = 720, camera = null, deckDense = null;
   function timeline() { return Array.isArray(window.__cineTimeline) ? window.__cineTimeline : []; }
   function duration() { return window.__cineDuration || 0; }
@@ -536,6 +541,29 @@ const CINEMATIC_DIRECTOR_SCRIPT = `
     return { s: s, tx: tx, ty: ty };
   }
   function lerp(a, b, t) { return a + (b - a) * t; }
+  // A fragment whose content is essentially just a picture. Images are decoration
+  // here — the teaching is in the text — so zooming into one wastes the viewer's
+  // attention on the least important thing on the slide. The camera stays wide
+  // for these instead. KEEP IN SYNC with lib/reveal-doc.ts isImageFragment.
+  function isImageFragment(idx) {
+    var el = document.querySelector('.reveal .slides section [data-fragment-index="' + idx + '"]')
+          || document.querySelectorAll('.reveal .slides section .fragment')[idx];
+    if (!el) return false;
+    if (el.tagName === 'IMG' || el.tagName === 'FIGURE') return true;
+    var imgs = el.querySelectorAll('img');
+    if (imgs.length === 0) return false;
+    // Mostly-image if the text it carries is negligible (a caption is fine).
+    var text = (el.textContent || '').replace(/\\s+/g, ' ').trim();
+    if (text.length > 60) return false;
+    // ...or if the image dominates the fragment's own area.
+    var er = el.getBoundingClientRect();
+    var area = 0;
+    for (var i = 0; i < imgs.length; i++) {
+      var ir = imgs[i].getBoundingClientRect();
+      area += ir.width * ir.height;
+    }
+    return er.width * er.height > 0 && (area / (er.width * er.height)) > 0.55;
+  }
   function applyReveals(t) {
     var tl = timeline();
     if (!window.__deck || tl.length === 0) return -1;
@@ -563,10 +591,12 @@ const CINEMATIC_DIRECTOR_SCRIPT = `
     //   if (!measureDense() || activeOrd < 0 || tl.length === 0) { camera.style.transform = 'none'; return; }
     if (activeOrd < 0 || tl.length === 0) { camera.style.transform = 'none'; return; }
     var cur = tl[activeOrd], prev = activeOrd > 0 ? tl[activeOrd - 1] : cur;
-    var span = Math.max(0.001, cur.endSec - cur.startSec);
-    var into = Math.max(0, Math.min(1, (t - cur.startSec) / span));
-    var e = EASE(Math.min(1, into / DRAG));
-    var fCur = frameFor(fragmentRect(cur.index)), fPrev = frameFor(fragmentRect(prev.index));
+    var e = EASE(Math.max(0, Math.min(1, (t - cur.startSec) / MOVE_SEC)));
+    // Image fragments are decoration — pull back to the full slide rather than
+    // magnifying a picture the viewer doesn't need to study.
+    var WIDE = { s: 1, tx: 0, ty: 0 };
+    var fCur = isImageFragment(cur.index) ? WIDE : frameFor(fragmentRect(cur.index));
+    var fPrev = isImageFragment(prev.index) ? WIDE : frameFor(fragmentRect(prev.index));
     var s = lerp(fPrev.s, fCur.s, e), tx = lerp(fPrev.tx, fCur.tx, e), ty = lerp(fPrev.ty, fCur.ty, e);
     camera.style.transform = 'translate(' + tx.toFixed(2) + 'px,' + ty.toFixed(2) + 'px) scale(' + s.toFixed(4) + ')';
   };
@@ -697,26 +727,39 @@ function buildRevealDeckHtml(html, baseUrl) {
       }
       if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
       else boot();
-      // STEPPED code scroll: instead of a continuous linear crawl (which never
-      // lets the viewer actually read), we page through the code — DWELL on each
-      // screenful so it can be read, then a quick eased slide up to the next page.
+      // PAGINATED code scroll — MUST match lib/reveal-doc.ts scrollCodeToProgress
+      // exactly, or the rendered video scrolls differently from the preview.
+      // Show one full page, HOLD it, then jump exactly one page in a quick 0.28s
+      // ease. NOT a continuous crawl (the old DWELL-based version drifted the code
+      // upward for most of every page's slice, so it never sat still to be read).
       window.__scrollCodeToProgress = function (progress) {
         var body = document.querySelector('.code-card-body, .code-card pre');
         if (!body) return;
         var maxScroll = body.scrollHeight - body.clientHeight;
-        if (maxScroll <= 1) { body.scrollTop = 0; return; }
-        var page   = Math.max(60, body.clientHeight * 0.88);      // advance ~one screen (slight overlap for context)
-        var nSteps = Math.max(1, Math.ceil(maxScroll / page));    // how many page-slides to reach the bottom
-        var DWELL  = 0.72;                                        // read for 72% of each page's time, then fast-slide
-        var p      = Math.max(0, Math.min(1, progress));
-        var phaseF = p * nSteps;                                  // 0..nSteps
-        var k      = Math.min(nSteps - 1, Math.floor(phaseF));    // current page index
-        var into   = phaseF - k;                                  // 0..1 within this page's time slice
-        var from   = Math.min(maxScroll, k * page);
-        var to     = Math.min(maxScroll, (k + 1) * page);
-        var slide  = into <= DWELL ? 0 : (into - DWELL) / (1 - DWELL);
-        var e      = slide <= 0 ? 0 : (slide >= 1 ? 1 : (1 - Math.pow(1 - slide, 3))); // snappy ease-out
-        body.scrollTop = from + (to - from) * e;
+        if (maxScroll <= 0) { body.scrollTop = 0; return; }
+        var p = Math.max(0, Math.min(1, progress));
+        var OVERLAP = 40;
+        var page = Math.max(1, body.clientHeight - OVERLAP);
+        var pages = Math.max(1, Math.ceil(maxScroll / page) + 1);
+        var pageIndex = Math.min(pages - 1, Math.floor(p * pages));
+        var target = Math.min(maxScroll, pageIndex * page);
+        if (body.getAttribute('data-code-page') !== String(pageIndex)) {
+          body.setAttribute('data-code-page', String(pageIndex));
+          body.style.scrollBehavior = 'auto';
+          var startTop = body.scrollTop;
+          var startT = null;
+          var DUR = 280;
+          var step = function (ts) {
+            if (startT === null) startT = ts;
+            var k = Math.min(1, (ts - startT) / DUR);
+            var eased = k < 0.5 ? 4*k*k*k : 1 - Math.pow(-2*k+2, 3)/2;
+            body.scrollTop = startTop + (target - startTop) * eased;
+            if (k < 1 && body.getAttribute('data-code-page') === String(pageIndex)) {
+              requestAnimationFrame(step);
+            }
+          };
+          requestAnimationFrame(step);
+        }
       };
     })();
   `;

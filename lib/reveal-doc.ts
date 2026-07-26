@@ -202,6 +202,39 @@ export const CINEMATIC_DIRECTOR_SCRIPT = `
         || document.querySelectorAll('.reveal .slides section .fragment')[index] || null;
   }
 
+  // True when a fragment is essentially just a picture. Images on these slides are
+  // decoration (the teaching lives in the text), so the camera must NOT zoom into
+  // one — it wastes the viewer's attention on the least important thing on screen.
+  // KEEP IN SYNC with render-chapter-gh.js isImageFragment.
+  var imageFragCache = {};
+  function isImageFragment(index) {
+    if (imageFragCache[index] !== undefined) return imageFragCache[index];
+    var el = fragmentEl(index);
+    if (!el) return false;                                  // not laid out yet — don't cache
+    var verdict = false;
+    if (el.tagName === 'IMG' || el.tagName === 'FIGURE') {
+      verdict = true;
+    } else {
+      var imgs = el.querySelectorAll('img');
+      if (imgs.length > 0) {
+        var text = (el.textContent || '').replace(/\\s+/g, ' ').trim();
+        if (text.length <= 60) {
+          verdict = true;                                   // image + at most a caption
+        } else {
+          var er = el.getBoundingClientRect();
+          var area = 0;
+          for (var i = 0; i < imgs.length; i++) {
+            var ir = imgs[i].getBoundingClientRect();
+            area += ir.width * ir.height;
+          }
+          verdict = er.width * er.height > 0 && (area / (er.width * er.height)) > 0.55;
+        }
+      }
+    }
+    imageFragCache[index] = verdict;
+    return verdict;
+  }
+
   // Framing for a fragment index, measured in stable (untransformed) slide space.
   function targetFrame(index) {
     if (frameCache[index]) return frameCache[index];
@@ -276,15 +309,19 @@ export const CINEMATIC_DIRECTOR_SCRIPT = `
     // Ease over a FIXED short window, then hold — snappy, not a window-long crawl.
     var e = EASE(Math.max(0, Math.min(1, (t - cur.startSec) / MOVE_SEC)));
 
-    var fCur = targetFrame(cur.index);
-    var fPrev = targetFrame(prev.index);
+    // Image fragments are decoration — the teaching is in the text — so the camera
+    // pulls back to the whole slide instead of magnifying a picture the viewer
+    // doesn't need to study. KEEP IN SYNC with render-chapter-gh.js isImageFragment.
+    var WIDE = { s: 1, tx: 0, ty: 0 };
+    var fCur = isImageFragment(cur.index) ? WIDE : targetFrame(cur.index);
+    var fPrev = isImageFragment(prev.index) ? WIDE : targetFrame(prev.index);
     var s = lerp(fPrev.s, fCur.s, e);
     var tx = lerp(fPrev.tx, fCur.tx, e);
     var ty = lerp(fPrev.ty, fCur.ty, e);
     camera.style.transform = 'translate(' + tx.toFixed(2) + 'px,' + ty.toFixed(2) + 'px) scale(' + s.toFixed(4) + ')';
   };
 
-  window.__cineReset = function () { deckDense = null; frameCache = {}; lastRevealOrd = -2; };
+  window.__cineReset = function () { deckDense = null; frameCache = {}; imageFragCache = {}; lastRevealOrd = -2; };
 })();
 </script>`;
 
