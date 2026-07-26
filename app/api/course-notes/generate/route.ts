@@ -139,8 +139,8 @@ export async function POST(req: NextRequest) {
 
         console.log(`📝 Generating notes for chapter "${chapterTitle}" (${slides.length} slides, ${slideContents.length} chars)`);
 
-        // ── Step 3: Generate via Owl Alpha as raw text ───────────────────────
-        const systemPrompt = `You are an expert academic note-maker. You receive the text content extracted from educational video slides of a chapter. Your job is to create comprehensive, detailed, beautifully structured study notes that a student can use to revise the entire chapter.
+        // ── Step 3: Generate via GLM as raw text ───────────────────────
+        const systemPrompt = `You are an expert academic note-maker and information designer. You receive the text content extracted from educational video slides of a chapter. Your job is to create the DEFINITIVE study dossier for this chapter — notes so complete, structured and visual that a student could skip the video and still master every concept, then use the same pages for rapid revision before an exam.
 
 OUTPUT FORMAT: Return a single JSON object with this exact structure:
 
@@ -150,7 +150,7 @@ OUTPUT FORMAT: Return a single JSON object with this exact structure:
   "mainNotes": [
     {
       "heading": "Section heading",
-      "type": "<one of the 21 types below>",
+      "type": "<one of the 31 types below>",
       ...type-specific fields
     }
   ],
@@ -159,43 +159,60 @@ OUTPUT FORMAT: Return a single JSON object with this exact structure:
   ]
 }
 
-SECTION TYPES — use as many different types as possible across your 14-20 sections, rotating variety:
+ICON VOCABULARY — wherever a field is named "icon", give ONE lowercase keyword naming the concept, chosen from (or close to) this vocabulary. The renderer draws a real outlined icon from it — NEVER write "icon-xxx", never an emoji, never a sentence:
+windows, macos, linux, terminal, desktop, laptop, mobile, keyboard, cpu, server, cloud, web, network, code, syntax, json, git, bug, tool, config, setup, package, module, database, variable, function, string, play, run, launch, rocket, power, install, download, save, loop, repeat, exit, search, filter, share, arrow, step, flow, pipeline, milestone, flag, goal, idea, tip, brain, learn, book, notes, write, checklist, question, puzzle, focus, chart, graph, trend, math, sum, percent, compare, gauge, speed, table, grid, science, test, atom, check, done, success, wrong, fail, warning, info, star, award, trophy, best, sparkle, fast, energy, fire, key, lock, security, time, clock, timer, history, calendar, map, location, compass, home, building, work, money, cost, user, team, chat, mail, voice, audio, camera, video, image, design, sun, night, water, mountain, tree, plant, grow, path, gift, reward, game, coffee, link, folder, file, layers, point.
+Pick the keyword that MATCHES the item's meaning (a step about installing → "install"; about the REPL → "terminal"; about variables → "variable").
 
-1. "bullets" — { "bullets": ["point1", "point2", ...] } — 4-6 detailed bullet points
-2. "numbered" — { "bullets": ["step1", "step2", ...] } — 4-6 numbered items
+SECTION TYPES — use maximum variety across your sections, rotating types so no two adjacent sections share one:
+
+1. "bullets" — { "bullets": ["point1", ...] } — 4-6 detailed bullet points
+2. "numbered" — { "bullets": ["step1", ...] } — 4-6 numbered items
 3. "table" — { "table": { "headers": ["col1","col2","col3"], "rows": [["a","b","c"], ...] } } — min 3 cols, 3-5 rows
 4. "callout" — { "calloutText": "Important insight or key takeaway" }
 5. "highlight" — { "highlightTitle": "Title", "highlightBody": "Detailed explanation" }
-6. "cards" — { "cards": [{"icon": "icon-key", "title": "Card Title", "description": "Detail"}] } — 4-6 cards
+6. "cards" — { "cards": [{"icon": "key", "title": "Card Title", "description": "Detail"}] } — 4-6 cards
 7. "numbered-grid" — { "items": [{"title": "Item", "description": "Detail"}] } — 4-6 items
-8. "circular-map" — { "centerLabel": "Central Concept", "items": [{"title": "Related", "description": "How"}] } — 4-6
+8. "circular-map" — { "centerLabel": "Central Concept", "items": [{"icon": "keyword", "title": "Related", "description": "How"}] } — 4-6
 9. "quote-cards" — { "quotes": [{"title": "Label", "text": "Quote or fact"}] } — 3 quotes
-10. "flowchart" — { "steps": [{"label": "Step", "detail": "What happens"}] } — 4-6 steps
-11. "horizontal-flowchart" — { "steps": [{"label": "Step", "detail": "Detail", "icon": "icon-key"}] } — 4-5 steps
-12. "radial-list" — { "centerLabel": "Center", "items": [{"icon": "icon-key", "title": "Item", "description": "Detail"}] } — 3-4
-13. "step-cards" — { "steps": [{"label": "Step", "detail": "Detail", "icon": "icon-key"}] } — 4-5 steps
+10. "flowchart" — { "steps": [{"label": "Step", "detail": "What happens", "icon": "keyword"}] } — 4-6 steps
+11. "horizontal-flowchart" — { "steps": [{"label": "Step", "detail": "Detail", "icon": "keyword"}] } — 4-5 steps
+12. "radial-list" — { "centerLabel": "Center", "items": [{"icon": "keyword", "title": "Item", "description": "Detail"}] } — 3-4
+13. "step-cards" — { "steps": [{"label": "Step", "detail": "Detail", "icon": "keyword"}] } — 4-5 steps
 14. "timeline" — { "events": [{"date": "Phase/Period", "title": "Event", "description": "Detail"}] } — 4-6 events
 15. "comparison" — { "leftLabel": "Option A", "rightLabel": "Option B", "points": [{"left": "A trait", "right": "B trait", "aspect": "Category"}] } — 3-5 points
-16. "stats-row" — { "stats": [{"value": "85%", "label": "Accuracy", "icon": "📊"}] } — 3-4 stats
+16. "stats-row" — { "stats": [{"value": "85%", "label": "Accuracy", "icon": "chart"}] } — 3-4 stats
 17. "definition-list" — { "definitions": [{"term": "Concept", "meaning": "Explanation"}] } — 4-6 pairs
 18. "checklist" — { "items": [{"text": "Task or requirement", "checked": true}] } — 5-7 items
-19. "gradient-banner" — { "emoji": "🎯", "bannerText": "Key principle", "subText": "Supporting explanation" }
-20. "matrix" — { "quadrants": [{"label": "Q1", "items": ["item1","item2"]}, {"label": "Q2", "items": ["item1","item2"]}, {"label": "Q3", "items": ["item1","item2"]}, {"label": "Q4", "items": ["item1","item2"]}] }
-21. "icon-list" — { "listItems": [{"emoji": "🔹", "title": "Feature", "detail": "Description"}] } — 4-6 items
+19. "gradient-banner" — { "emoji": "goal", "bannerText": "Key principle", "subText": "Supporting explanation" } (emoji field takes an icon KEYWORD)
+20. "matrix" — { "quadrants": [{"label": "Q1", "items": ["item1","item2"]}, ...exactly 4 quadrants] }
+21. "icon-list" — { "listItems": [{"emoji": "keyword", "title": "Feature", "detail": "Description"}] } — 4-6 items
+22. "code-block" — { "language": "python", "filename": "example.py", "code": "real runnable code with \\n line breaks", "output": "what it prints (optional)", "explanation": "one-line takeaway (optional)" } — REAL code from the chapter, 4-15 lines. MANDATORY at least once when the chapter teaches any code.
+23. "qa-cards" — { "questions": [{"question": "Exam-style question", "answer": "Complete worked answer"}] } — 2-3 pairs testing UNDERSTANDING of this chapter, not recall
+24. "mnemonic" — { "phrase": "Catchy Memory Phrase Here", "meaning": "what each first letter stands for" } — invent a genuinely helpful memory device for a list the chapter teaches
+25. "formula" — { "expression": "E = mc²  /  O(n log n)  /  result = base ** exp", "legend": [{"symbol": "n", "meaning": "input size"}] } — for any formula, rule or complexity the chapter contains
+26. "pyramid" — { "tiers": [{"label": "Peak concept", "detail": "one line"}, ...3-4 tiers, FIRST is the peak] } — hierarchies, foundations, priority orders
+27. "venn" — { "leftLabel": "A", "rightLabel": "B", "sharedLabel": "Both", "leftItems": ["..."], "sharedItems": ["..."], "rightItems": ["..."] } — 2-3 items each — overlapping concepts
+28. "do-dont" — { "dos": ["good practice", ...], "donts": ["mistake to avoid", ...] } — 3-5 each — best practices vs common errors
+29. "big-fact" — { "fact": "ONE huge number/short phrase (e.g. '3.5x', '1991', 'Zero')", "context": "one sentence explaining why it matters" } — the chapter's most memorable single fact
+30. "progress-bars" — { "bars": [{"label": "Skill/Topic", "percent": 80, "detail": "optional one line"}] } — 3-5 bars — relative importance, difficulty, coverage or adoption
+31. "roadmap" — { "milestones": [{"icon": "keyword", "label": "Milestone", "detail": "what you can do at this point"}] } — 4-6 — the learning journey of this chapter
 
 CRITICAL JSON RULES (strictly follow to avoid parse errors):
 - All string values must use ONLY single quotes INSIDE text if you need quotes, never raw double-quote characters inside a JSON string value
+- In "code" fields escape every newline as \\n and every double quote as \\"
 - Do not use apostrophes that look like quotes — use plain ASCII apostrophe only
 - No trailing commas
 - No comments in the JSON
 - Return ONLY the raw JSON object, no markdown fences, no preamble
 
-CONTENT RULES:
-1. Generate exactly 14-20 sections covering ALL slide content deeply
-2. Use maximum variety of section types
-3. Each bullet/detail must be a complete, informative sentence
-4. Include 8-12 keyTerms with clear definitions
-5. Content must be DEEP and DETAILED — not surface level`;
+CONTENT RULES — this is a study DOSSIER, not a summary:
+1. Generate 16-24 sections covering EVERY topic the slides teach, in the slides' teaching order — nothing skipped
+2. Use at least 12 DIFFERENT section types; never two adjacent sections of the same type
+3. MANDATORY sections when applicable: at least one "code-block" if the chapter shows any code; at least one "qa-cards"; at least one "do-dont"; at least one of "mnemonic"/"big-fact"/"formula"; close with a "roadmap" or "gradient-banner" wrap-up
+4. Every bullet/detail is a complete, information-dense sentence that TEACHES — never a bare label, never filler
+5. Include concrete specifics from the slides: real commands, real values, real names, real numbers — a student should trust these notes as accurate
+6. Include 8-12 keyTerms with precise definitions
+7. Headings are clean title-case phrases with NO numbering prefixes`;
 
         const userMessage = `Generate comprehensive study notes for this chapter.
 

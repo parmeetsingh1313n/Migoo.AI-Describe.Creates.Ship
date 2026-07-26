@@ -7,6 +7,7 @@ import { toPng } from 'html-to-image'
 import axios from 'axios'
 import { toast } from 'sonner'
 import DrawOutlineButton from '@/components/ui/DrawOutlineButton'
+import { NoteIcon } from '@/lib/notes-icons'
 
 type DesignKey = 'abstractPastel' | 'geoPebbles' | 'botanical' | 'elegantLeaf'
 const DESIGNS: Record<DesignKey, { label: string; img: string; pageBg: string; accent: string; accentLight: string; accentBorder: string; text: string; muted: string; headerGrad: string }> = {
@@ -59,14 +60,26 @@ function NoteSection({ section, index, d }: { section: any; index: number; d: ty
             ))}</tbody>
           </table>
         )}
-        {type === 'callout' && <div style={{ background: d.accentLight, borderLeft: `3px solid ${d.accent}`, borderRadius: '0 6px 6px 0', padding: '6px 9px', marginTop: 4 }}><p style={{ margin: 0, fontSize: 9.5, color: d.text, fontStyle: 'italic', lineHeight: 1.4 }}>💡 {section.calloutText}</p></div>}
+        {type === 'callout' && (
+          <div style={{ background: d.accentLight, borderLeft: `3px solid ${d.accent}`, borderRadius: '0 6px 6px 0', padding: '6px 9px', marginTop: 4, display: 'flex', gap: 7, alignItems: 'flex-start' }}>
+            <div style={{ width: 18, height: 18, borderRadius: 6, background: d.headerGrad, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: 1 }}>
+              <NoteIcon hint="idea" size={10} strokeWidth={2.4} />
+            </div>
+            <p style={{ margin: 0, fontSize: 9.5, color: d.text, fontStyle: 'italic', lineHeight: 1.4 }}>{section.calloutText}</p>
+          </div>
+        )}
         {type === 'highlight' && <div style={{ background: d.accentLight, border: `1px solid ${d.accentBorder}`, borderRadius: 8, padding: '7px 9px', marginTop: 4 }}><strong style={{ fontSize: 10, color: d.accent }}>{section.highlightTitle}</strong><p style={{ margin: '2px 0 0', fontSize: 9.5, color: d.text, lineHeight: 1.4 }}>{section.highlightBody}</p></div>}
         {(type === 'cards' || type === 'numbered-grid') && (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 5, marginTop: 4 }}>
             {(section.cards || section.items || []).map((c: any, i: number) => (
               <div key={i} style={{ background: d.accentLight, border: `1px solid ${d.accentBorder}`, borderRadius: 7, padding: '5px 7px' }}>
-                <strong style={{ fontSize: 9, color: d.accent }}>{c.title || c.label}</strong>
-                <p style={{ margin: '1px 0 0', fontSize: 8.5, color: d.text, lineHeight: 1.4 }}>{c.description || c.detail}</p>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                  <div style={{ width: 16, height: 16, borderRadius: 5, background: d.headerGrad, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <NoteIcon hint={c.icon || c.title || c.label} ordinal={i} size={9} strokeWidth={2.4} />
+                  </div>
+                  <strong style={{ fontSize: 9, color: d.accent }}>{c.title || c.label}</strong>
+                </div>
+                <p style={{ margin: '2px 0 0', fontSize: 8.5, color: d.text, lineHeight: 1.4 }}>{c.description || c.detail}</p>
               </div>
             ))}
           </div>
@@ -75,8 +88,6 @@ function NoteSection({ section, index, d }: { section: any; index: number; d: ty
           <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10, marginTop: 12, position: 'relative', padding: '10px 0' }}>
             {(section.steps || []).map((s: any, i: number) => {
               const stepLetter = String.fromCharCode(65 + i) // A, B, C...
-              const icons = ['💼', '💻', '🎯', '🚀', '🧠', '📊']
-              const icon = s.icon || icons[i % icons.length]
               const colors = [
                 'linear-gradient(135deg, #a3e635, #65a30d)', // Greenish
                 'linear-gradient(135deg, #34d399, #059669)', // Teal
@@ -86,59 +97,58 @@ function NoteSection({ section, index, d }: { section: any; index: number; d: ty
               const grad = colors[i % colors.length]
 
               return (
-                <div key={i} style={{ 
-                  flex: 1, 
-                  display: 'flex', 
-                  flexDirection: 'column', 
-                  alignItems: 'center', 
-                  position: 'relative', 
+                <div key={i} style={{
+                  flex: 1,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  position: 'relative',
                   textAlign: 'center'
                 }}>
                   {/* Connecting Line to next step */}
                   {i < (section.steps || []).length - 1 && (
-                    <div style={{ 
-                      position: 'absolute', 
-                      top: 23, 
-                      left: 'calc(50% + 26px)', 
-                      right: 'calc(-50% + 26px)', 
-                      height: 1, 
-                      background: d.accentBorder, 
-                      zIndex: 1 
+                    <div style={{
+                      position: 'absolute',
+                      top: 23,
+                      left: 'calc(50% + 26px)',
+                      right: 'calc(-50% + 26px)',
+                      height: 1,
+                      background: d.accentBorder,
+                      zIndex: 1
                     }} />
                   )}
 
-                  {/* Circular Step Badge */}
-                  <div style={{ 
-                    width: 46, 
-                    height: 46, 
-                    borderRadius: '50%', 
-                    background: grad, 
-                    display: 'flex', 
-                    alignItems: 'center', 
-                    justifyContent: 'center', 
-                    fontSize: 18, 
-                    color: '#fff',
-                    position: 'relative', 
+                  {/* Circular Step Badge — real outlined icon resolved from the
+                      model's hint (was printing the raw "icon-…" text) */}
+                  <div style={{
+                    width: 46,
+                    height: 46,
+                    borderRadius: '50%',
+                    background: grad,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    position: 'relative',
                     boxShadow: '0 4px 10px rgba(0,0,0,0.15)',
                     zIndex: 2
                   }}>
-                    {icon}
+                    <NoteIcon hint={s.icon || s.label || s.title} ordinal={i} size={20} strokeWidth={2} />
                     {/* Step Indicator Letter (A, B, C...) */}
-                    <div style={{ 
-                      position: 'absolute', 
-                      top: -2, 
-                      right: -2, 
-                      width: 14, 
-                      height: 14, 
-                      borderRadius: '50%', 
-                      background: '#fff', 
-                      border: `1.5px solid ${d.accentBorder}`, 
-                      display: 'flex', 
-                      alignItems: 'center', 
-                      justifyContent: 'center', 
-                      fontSize: 7.5, 
-                      fontWeight: 900, 
-                      color: d.text 
+                    <div style={{
+                      position: 'absolute',
+                      top: -2,
+                      right: -2,
+                      width: 14,
+                      height: 14,
+                      borderRadius: '50%',
+                      background: '#fff',
+                      border: `1.5px solid ${d.accentBorder}`,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: 7.5,
+                      fontWeight: 900,
+                      color: d.text
                     }}>
                       {stepLetter}
                     </div>
@@ -207,41 +217,35 @@ function NoteSection({ section, index, d }: { section: any; index: number; d: ty
 
             {/* Right Cards List */}
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 6, paddingLeft: 18 }}>
-              {(section.items || []).map((it: any, i: number) => {
-                const icons = ['💼', '💻', '🎯', '🚀', '🧠', '📊']
-                const icon = it.icon || icons[i % icons.length]
-                return (
-                  <div key={i} style={{ 
-                    display: 'flex', 
-                    alignItems: 'center', 
-                    gap: 10, 
-                    background: d.accentLight, 
-                    border: `1px solid ${d.accentBorder}`, 
-                    borderRadius: 12, 
-                    padding: '6px 12px',
-                    boxShadow: '0 2px 6px rgba(0,0,0,0.02)'
+              {(section.items || []).map((it: any, i: number) => (
+                <div key={i} style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  background: d.accentLight,
+                  border: `1px solid ${d.accentBorder}`,
+                  borderRadius: 12,
+                  padding: '6px 12px',
+                  boxShadow: '0 2px 6px rgba(0,0,0,0.02)'
+                }}>
+                  <div style={{
+                    width: 24,
+                    height: 24,
+                    borderRadius: 8,
+                    background: d.headerGrad,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    flexShrink: 0
                   }}>
-                    <div style={{ 
-                      width: 24, 
-                      height: 24, 
-                      borderRadius: 8, 
-                      background: d.headerGrad, 
-                      display: 'flex', 
-                      alignItems: 'center', 
-                      justifyContent: 'center', 
-                      fontSize: 11,
-                      color: '#fff',
-                      flexShrink: 0
-                    }}>
-                      {icon}
-                    </div>
-                    <div>
-                      <strong style={{ fontSize: 9, color: d.text, display: 'block' }}>{it.title}</strong>
-                      <span style={{ fontSize: 8, color: d.muted, lineHeight: 1.3, display: 'block', marginTop: 1 }}>{it.description}</span>
-                    </div>
+                    <NoteIcon hint={it.icon || it.title} ordinal={i} size={13} strokeWidth={2.2} />
                   </div>
-                )
-              })}
+                  <div>
+                    <strong style={{ fontSize: 9, color: d.text, display: 'block' }}>{it.title}</strong>
+                    <span style={{ fontSize: 8, color: d.muted, lineHeight: 1.3, display: 'block', marginTop: 1 }}>{it.description}</span>
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         )}
@@ -294,8 +298,12 @@ function NoteSection({ section, index, d }: { section: any; index: number; d: ty
           <div style={{ display: 'flex', gap: 5, marginTop: 4 }}>
             {(section.stats || []).map((st: any, i: number) => (
               <div key={i} style={{ flex: 1, background: d.accentLight, border: `1px solid ${d.accentBorder}`, borderRadius: 10, padding: '8px 6px', textAlign: 'center' }}>
-                <div style={{ fontSize: 14 }}>{st.icon || '📊'}</div>
-                <div style={{ fontSize: 16, fontWeight: 800, color: d.accent, lineHeight: 1.2, marginTop: 2 }}>{st.value}</div>
+                <div style={{ display: 'flex', justifyContent: 'center' }}>
+                  <div style={{ width: 22, height: 22, borderRadius: 7, background: d.headerGrad, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <NoteIcon hint={st.icon || st.label} ordinal={i} size={12} strokeWidth={2.2} />
+                  </div>
+                </div>
+                <div style={{ fontSize: 16, fontWeight: 800, color: d.accent, lineHeight: 1.2, marginTop: 3 }}>{st.value}</div>
                 <div style={{ fontSize: 7.5, color: d.muted, marginTop: 2, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.3 }}>{st.label}</div>
               </div>
             ))}
@@ -334,7 +342,9 @@ function NoteSection({ section, index, d }: { section: any; index: number; d: ty
         {/* ── Gradient Banner ── */}
         {type === 'gradient-banner' && (
           <div style={{ marginTop: 4, background: d.headerGrad, borderRadius: 10, padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 10 }}>
-            <span style={{ fontSize: 20, flexShrink: 0 }}>{section.emoji || '🎯'}</span>
+            <div style={{ width: 30, height: 30, borderRadius: 9, background: 'rgba(255,255,255,0.18)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <NoteIcon hint={section.emoji || section.bannerText} ordinal={index} size={16} strokeWidth={2} />
+            </div>
             <div>
               <div style={{ fontSize: 10.5, fontWeight: 800, color: '#fff', lineHeight: 1.3 }}>{section.bannerText}</div>
               {section.subText && <div style={{ fontSize: 8.5, color: 'rgba(255,255,255,0.75)', marginTop: 2, lineHeight: 1.3 }}>{section.subText}</div>}
@@ -367,7 +377,9 @@ function NoteSection({ section, index, d }: { section: any; index: number; d: ty
           <div style={{ marginTop: 4, display: 'flex', flexDirection: 'column', gap: 4 }}>
             {(section.listItems || []).map((it: any, i: number) => (
               <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: '4px 8px', background: i % 2 === 0 ? d.accentLight : 'transparent', borderRadius: 7 }}>
-                <span style={{ fontSize: 12, flexShrink: 0, marginTop: 0 }}>{it.emoji || '🔹'}</span>
+                <div style={{ width: 20, height: 20, borderRadius: 6, background: d.headerGrad, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: 1 }}>
+                  <NoteIcon hint={it.emoji || it.icon || it.title} ordinal={i} size={11} strokeWidth={2.2} />
+                </div>
                 <div>
                   <strong style={{ fontSize: 9, color: d.accent }}>{it.title}</strong>
                   <p style={{ margin: '1px 0 0', fontSize: 8.5, color: d.text, lineHeight: 1.4 }}>{it.detail}</p>
@@ -376,6 +388,198 @@ function NoteSection({ section, index, d }: { section: any; index: number; d: ty
             ))}
           </div>
         )}
+        {/* ── Code Block — real mono code card with editor chrome ── */}
+        {type === 'code-block' && section.code && (
+          <div style={{ marginTop: 4, borderRadius: 10, overflow: 'hidden', border: `1px solid ${d.accentBorder}`, boxShadow: '0 4px 14px rgba(0,0,0,0.08)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 10px', background: '#2d3446' }}>
+              <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#ff5f56' }} />
+              <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#ffbd2e' }} />
+              <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#27c93f' }} />
+              <span style={{ marginLeft: 6, fontSize: 7.5, color: 'rgba(255,255,255,0.6)', fontFamily: 'monospace', fontWeight: 600 }}>{section.filename || section.language || 'code'}</span>
+            </div>
+            <pre style={{ margin: 0, padding: '8px 12px', background: '#1e2432', color: '#dbe4f5', fontSize: 8.5, lineHeight: 1.55, fontFamily: 'Consolas, Menlo, monospace', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{section.code}</pre>
+            {section.output && (
+              <div style={{ padding: '5px 12px', background: '#141926', borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+                <span style={{ fontSize: 7, color: '#7dd3a8', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5 }}>Output</span>
+                <pre style={{ margin: '2px 0 0', fontSize: 8, color: '#9fb3ce', fontFamily: 'Consolas, Menlo, monospace', whiteSpace: 'pre-wrap' }}>{section.output}</pre>
+              </div>
+            )}
+            {section.explanation && <p style={{ margin: 0, padding: '5px 10px', background: d.accentLight, fontSize: 8.5, color: d.text, lineHeight: 1.4, fontStyle: 'italic' }}>{section.explanation}</p>}
+          </div>
+        )}
+
+        {/* ── Q&A Cards — exam-style question with worked answer ── */}
+        {type === 'qa-cards' && (
+          <div style={{ marginTop: 4, display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {(section.questions || []).map((q: any, i: number) => (
+              <div key={i} style={{ borderRadius: 9, overflow: 'hidden', border: `1px solid ${d.accentBorder}` }}>
+                <div style={{ display: 'flex', gap: 7, alignItems: 'flex-start', padding: '6px 9px', background: d.headerGrad }}>
+                  <div style={{ width: 16, height: 16, borderRadius: '50%', background: 'rgba(255,255,255,0.22)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, color: '#fff', fontSize: 8, fontWeight: 800 }}>Q</div>
+                  <p style={{ margin: 0, fontSize: 9, color: '#fff', fontWeight: 700, lineHeight: 1.4 }}>{q.question}</p>
+                </div>
+                <div style={{ display: 'flex', gap: 7, alignItems: 'flex-start', padding: '6px 9px', background: d.accentLight }}>
+                  <div style={{ width: 16, height: 16, borderRadius: '50%', background: d.accent, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, color: '#fff', fontSize: 8, fontWeight: 800 }}>A</div>
+                  <p style={{ margin: 0, fontSize: 8.5, color: d.text, lineHeight: 1.45 }}>{q.answer}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* ── Mnemonic — memory device with letter chips ── */}
+        {type === 'mnemonic' && (
+          <div style={{ marginTop: 4, background: d.accentLight, border: `1.5px dashed ${d.accent}`, borderRadius: 10, padding: '8px 11px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5 }}>
+              <div style={{ width: 18, height: 18, borderRadius: 6, background: d.headerGrad, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <NoteIcon hint="brain" size={10} strokeWidth={2.4} />
+              </div>
+              <span style={{ fontSize: 8, fontWeight: 800, color: d.accent, textTransform: 'uppercase', letterSpacing: 0.6 }}>Memory Trick</span>
+            </div>
+            <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', marginBottom: 5 }}>
+              {String(section.phrase || '').split(' ').map((word: string, i: number) => (
+                <span key={i} style={{ padding: '2px 6px', borderRadius: 5, background: '#fff', border: `1px solid ${d.accentBorder}`, fontSize: 8.5, color: d.text }}>
+                  <strong style={{ color: d.accent, fontSize: 10 }}>{word.charAt(0)}</strong>{word.slice(1)}
+                </span>
+              ))}
+            </div>
+            <p style={{ margin: 0, fontSize: 8.5, color: d.muted, lineHeight: 1.4, fontStyle: 'italic' }}>{section.meaning}</p>
+          </div>
+        )}
+
+        {/* ── Formula Card — centered expression with legend ── */}
+        {type === 'formula' && (
+          <div style={{ marginTop: 4, borderRadius: 10, border: `1px solid ${d.accentBorder}`, overflow: 'hidden' }}>
+            <div style={{ padding: '10px 12px', background: d.accentLight, textAlign: 'center' }}>
+              <span style={{ fontSize: 14, fontWeight: 700, color: d.text, fontFamily: 'Georgia, serif', fontStyle: 'italic', letterSpacing: 0.5 }}>{section.expression}</span>
+            </div>
+            {(section.legend || []).length > 0 && (
+              <div style={{ padding: '5px 10px', display: 'flex', flexWrap: 'wrap', gap: '3px 12px', background: '#fff' }}>
+                {(section.legend || []).map((l: any, i: number) => (
+                  <span key={i} style={{ fontSize: 8, color: d.muted }}>
+                    <strong style={{ color: d.accent, fontFamily: 'Georgia, serif', fontStyle: 'italic' }}>{l.symbol}</strong> = {l.meaning}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── Pyramid — stacked hierarchy tiers, wide base to narrow peak ── */}
+        {type === 'pyramid' && (
+          <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
+            {(section.tiers || []).map((t: any, i: number) => {
+              const n = (section.tiers || []).length
+              const width = 45 + ((i + 1) / n) * 55 // top narrow → bottom wide
+              return (
+                <div key={i} style={{ width: `${width}%`, background: i === 0 ? d.headerGrad : d.accentLight, border: i === 0 ? 'none' : `1px solid ${d.accentBorder}`, borderRadius: 7, padding: '4px 10px', textAlign: 'center' }}>
+                  <strong style={{ fontSize: 8.5, color: i === 0 ? '#fff' : d.accent, display: 'block' }}>{t.label}</strong>
+                  {t.detail && <span style={{ fontSize: 7.5, color: i === 0 ? 'rgba(255,255,255,0.8)' : d.muted, lineHeight: 1.3 }}>{t.detail}</span>}
+                </div>
+              )
+            })}
+          </div>
+        )}
+
+        {/* ── Venn — two overlapping concept circles + shared middle ── */}
+        {type === 'venn' && (
+          <div style={{ marginTop: 4 }}>
+            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', position: 'relative', height: 96 }}>
+              <div style={{ width: 150, height: 88, borderRadius: '50%', background: 'rgba(96,165,250,0.14)', border: '1.5px solid rgba(96,165,250,0.5)', marginRight: -44, display: 'flex', alignItems: 'center', paddingLeft: 14 }}>
+                <span style={{ fontSize: 8.5, fontWeight: 800, color: '#2563eb', width: 62, lineHeight: 1.25 }}>{section.leftLabel}</span>
+              </div>
+              <div style={{ width: 150, height: 88, borderRadius: '50%', background: 'rgba(192,132,252,0.14)', border: '1.5px solid rgba(192,132,252,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: 14 }}>
+                <span style={{ fontSize: 8.5, fontWeight: 800, color: '#7c3aed', width: 62, textAlign: 'right', lineHeight: 1.25 }}>{section.rightLabel}</span>
+              </div>
+              <div style={{ position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%,-50%)', width: 58, textAlign: 'center' }}>
+                <span style={{ fontSize: 7.5, fontWeight: 800, color: d.text, lineHeight: 1.2, display: 'block' }}>{section.sharedLabel || 'Both'}</span>
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 5, marginTop: 4 }}>
+              <div style={{ flex: 1, background: 'rgba(96,165,250,0.09)', borderRadius: 7, padding: '4px 7px' }}>
+                {(section.leftItems || []).map((x: string, i: number) => <div key={i} style={{ fontSize: 7.5, color: d.text, lineHeight: 1.5 }}>• {x}</div>)}
+              </div>
+              <div style={{ flex: 1, background: d.accentLight, border: `1px solid ${d.accentBorder}`, borderRadius: 7, padding: '4px 7px' }}>
+                {(section.sharedItems || []).map((x: string, i: number) => <div key={i} style={{ fontSize: 7.5, color: d.text, lineHeight: 1.5, fontWeight: 600 }}>• {x}</div>)}
+              </div>
+              <div style={{ flex: 1, background: 'rgba(192,132,252,0.09)', borderRadius: 7, padding: '4px 7px' }}>
+                {(section.rightItems || []).map((x: string, i: number) => <div key={i} style={{ fontSize: 7.5, color: d.text, lineHeight: 1.5 }}>• {x}</div>)}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── Do / Don't — green vs red guidance columns ── */}
+        {type === 'do-dont' && (
+          <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
+            <div style={{ flex: 1, borderRadius: 9, overflow: 'hidden', border: '1px solid rgba(47,169,140,0.35)' }}>
+              <div style={{ padding: '4px 8px', background: 'rgba(47,169,140,0.14)', display: 'flex', alignItems: 'center', gap: 5 }}>
+                <div style={{ width: 14, height: 14, borderRadius: '50%', background: '#2FA98C', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><NoteIcon hint="check" size={8} strokeWidth={3} /></div>
+                <span style={{ fontSize: 8.5, fontWeight: 800, color: '#1d7a63' }}>DO</span>
+              </div>
+              <div style={{ padding: '4px 8px' }}>
+                {(section.dos || []).map((x: string, i: number) => <div key={i} style={{ fontSize: 8, color: d.text, lineHeight: 1.5, display: 'flex', gap: 4 }}><span style={{ color: '#2FA98C', fontWeight: 800 }}>✓</span>{x}</div>)}
+              </div>
+            </div>
+            <div style={{ flex: 1, borderRadius: 9, overflow: 'hidden', border: '1px solid rgba(224,101,58,0.35)' }}>
+              <div style={{ padding: '4px 8px', background: 'rgba(224,101,58,0.12)', display: 'flex', alignItems: 'center', gap: 5 }}>
+                <div style={{ width: 14, height: 14, borderRadius: '50%', background: '#E0653A', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><NoteIcon hint="wrong" size={8} strokeWidth={3} /></div>
+                <span style={{ fontSize: 8.5, fontWeight: 800, color: '#b34a24' }}>DON'T</span>
+              </div>
+              <div style={{ padding: '4px 8px' }}>
+                {(section.donts || []).map((x: string, i: number) => <div key={i} style={{ fontSize: 8, color: d.text, lineHeight: 1.5, display: 'flex', gap: 4 }}><span style={{ color: '#E0653A', fontWeight: 800 }}>✗</span>{x}</div>)}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── Big Fact — one huge memorable takeaway ── */}
+        {type === 'big-fact' && (
+          <div style={{ marginTop: 4, borderRadius: 12, border: `1px solid ${d.accentBorder}`, background: d.accentLight, padding: '12px 14px', textAlign: 'center', position: 'relative', overflow: 'hidden' }}>
+            <div style={{ position: 'absolute', top: -14, right: -14, width: 64, height: 64, borderRadius: '50%', background: d.headerGrad, opacity: 0.1 }} />
+            <div style={{ fontSize: 24, fontWeight: 900, background: d.headerGrad, WebkitBackgroundClip: 'text', backgroundClip: 'text', color: 'transparent', lineHeight: 1.1 }}>{section.fact}</div>
+            <p style={{ margin: '4px 0 0', fontSize: 9, color: d.text, lineHeight: 1.4 }}>{section.context}</p>
+          </div>
+        )}
+
+        {/* ── Progress Bars — labelled mastery/percentage bars ── */}
+        {type === 'progress-bars' && (
+          <div style={{ marginTop: 4, display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {(section.bars || []).map((b: any, i: number) => {
+              const pct = Math.max(4, Math.min(100, parseInt(String(b.percent ?? b.value ?? 50), 10) || 50))
+              return (
+                <div key={i}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
+                    <span style={{ fontSize: 8.5, fontWeight: 700, color: d.text }}>{b.label}</span>
+                    <span style={{ fontSize: 8.5, fontWeight: 800, color: d.accent }}>{pct}%</span>
+                  </div>
+                  <div style={{ height: 7, borderRadius: 4, background: d.accentLight, border: `1px solid ${d.accentBorder}`, overflow: 'hidden' }}>
+                    <div style={{ width: `${pct}%`, height: '100%', background: d.headerGrad, borderRadius: 4 }} />
+                  </div>
+                  {b.detail && <p style={{ margin: '2px 0 0', fontSize: 7.5, color: d.muted, lineHeight: 1.3 }}>{b.detail}</p>}
+                </div>
+              )
+            })}
+          </div>
+        )}
+
+        {/* ── Roadmap — vertical milestone path with icon nodes ── */}
+        {type === 'roadmap' && (
+          <div style={{ marginTop: 4, position: 'relative', paddingLeft: 22 }}>
+            <div style={{ position: 'absolute', left: 9, top: 6, bottom: 6, width: 2, background: `linear-gradient(180deg, ${d.accent}, ${d.accentBorder})`, borderRadius: 2 }} />
+            {(section.milestones || []).map((m: any, i: number) => (
+              <div key={i} style={{ position: 'relative', marginBottom: 8, paddingLeft: 8 }}>
+                <div style={{ position: 'absolute', left: -20, top: 0, width: 18, height: 18, borderRadius: 6, background: d.headerGrad, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: `0 0 0 2.5px ${d.accentLight}` }}>
+                  <NoteIcon hint={m.icon || m.label} ordinal={i} size={10} strokeWidth={2.4} />
+                </div>
+                <div style={{ background: i === (section.milestones || []).length - 1 ? d.accentLight : 'transparent', borderRadius: 7, padding: i === (section.milestones || []).length - 1 ? '3px 7px' : 0 }}>
+                  <strong style={{ fontSize: 9, color: d.text, display: 'block' }}>{m.label}</strong>
+                  <span style={{ fontSize: 8, color: d.muted, lineHeight: 1.35, display: 'block' }}>{m.detail}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
         {/* ── AI-Generated Image (4 rotating styles from notes module) ── */}
         {type === 'ai-image' && section.imageUrl && (() => {
           const pat = section.imageStyle ?? (index % 4)
@@ -439,7 +643,7 @@ function paginateSections(sections: any[]) {
   const est = (s: any) => {
     const t = s.type || 'bullets'
     const HEAD = 45 // section heading + margin
-    const items = (s.bullets || s.points || s.cards || s.items || s.steps || s.quotes || s.events || s.definitions || s.listItems || s.stats || []).length
+    const items = (s.bullets || s.points || s.cards || s.items || s.steps || s.quotes || s.events || s.definitions || s.listItems || s.stats || s.questions || s.tiers || s.bars || s.milestones || []).length
     // Grid-based types: 2 columns, so rows = ceil(items/2)
     const gridRows = Math.ceil(Math.max(items, 1) / 2)
     if (t === 'ai-image') return 300 // image frame + heading + caption
@@ -448,16 +652,27 @@ function paginateSections(sections: any[]) {
     if (t === 'highlight') return HEAD + 65
     if (t === 'comparison') return HEAD + 35 + (s.points?.length || 3) * 28
     if (t === 'matrix') return HEAD + gridRows * 80
-    if (t === 'stats-row') return HEAD + 85
+    if (t === 'stats-row') return HEAD + 95
     if (t === 'table') return HEAD + ((s.table?.rows?.length || 3) + 1) * 24 + 10
     if (t === 'timeline') return HEAD + items * 50
-    if (t === 'cards' || t === 'numbered-grid') return HEAD + gridRows * 55
+    if (t === 'cards' || t === 'numbered-grid') return HEAD + gridRows * 60
     if (t === 'circular-map' || t === 'radial-list') return HEAD + 15 + items * 42
-    if (t === 'flowchart' || t === 'horizontal-flowchart' || t === 'step-cards') return HEAD + 115
+    if (t === 'flowchart' || t === 'horizontal-flowchart' || t === 'step-cards') return HEAD + 125
     if (t === 'quote-cards') return HEAD + Math.ceil(items / 3) * 60
     if (t === 'checklist') return HEAD + items * 26
     if (t === 'definition-list') return HEAD + items * 40
-    if (t === 'icon-list') return HEAD + items * 36
+    if (t === 'icon-list') return HEAD + items * 38
+    // New components
+    if (t === 'code-block') return HEAD + 40 + String(s.code || '').split('\n').length * 14 + (s.output ? 40 : 0) + (s.explanation ? 26 : 0)
+    if (t === 'qa-cards') return HEAD + items * 78
+    if (t === 'mnemonic') return HEAD + 82
+    if (t === 'formula') return HEAD + 62 + ((s.legend?.length || 0) > 0 ? 24 : 0)
+    if (t === 'pyramid') return HEAD + items * 34
+    if (t === 'venn') return HEAD + 108 + Math.max(s.leftItems?.length || 0, s.sharedItems?.length || 0, s.rightItems?.length || 0) * 13
+    if (t === 'do-dont') return HEAD + 28 + Math.max(s.dos?.length || 0, s.donts?.length || 0) * 15
+    if (t === 'big-fact') return HEAD + 82
+    if (t === 'progress-bars') return HEAD + items * 34
+    if (t === 'roadmap') return HEAD + items * 44
     // bullets / numbered — each item can wrap to 2+ lines
     return HEAD + Math.max(items, 1) * 28
   }
@@ -539,10 +754,10 @@ function KeyTermsPage({ keyTerms, bgDataUrl, d, pageNum, totalPages }:
 // ── Intro / Empty state ──────────────────────────────────────────────────────
 function NotesIntro({ slideCount }: { slideCount: number; chapterTitle: string }) {
   const features = [
-    { icon: LayoutGrid, label: 'Bento grids', tint: '#a78bfa' },
-    { icon: Table, label: 'Comparison tables', tint: '#2dd4bf' },
-    { icon: Clock, label: 'Timelines', tint: '#38bdf8' },
-    { icon: Radar, label: 'Radial maps', tint: '#8B7FE8' },
+    { icon: LayoutGrid, label: 'Code blocks & Q&A drills', tint: '#a78bfa' },
+    { icon: Table, label: 'Tables, Venn & pyramids', tint: '#2dd4bf' },
+    { icon: Clock, label: 'Timelines & roadmaps', tint: '#38bdf8' },
+    { icon: Radar, label: 'Mnemonics & formulas', tint: '#8B7FE8' },
   ]
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
