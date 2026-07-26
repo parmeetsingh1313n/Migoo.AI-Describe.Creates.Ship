@@ -99,6 +99,14 @@ RULES:
   you'd write or read real code for. Set false for conceptual/definitional/comparison topics that don't need
   a code example. If the chapter is a programming course, expect a meaningful share of topics to be true —
   but never mark a purely conceptual topic true just because the course is about programming.
+- BUILD/CAPSTONE points: when a subContent point promises a working artifact — its wording contains
+  build / create / craft / "putting it all together" / capstone / mini-project / "from scratch" —
+  its slide topics MUST keep that build wording AND be marked "needsCode": true (the slide will show
+  the complete program plus its printed output). If the program is substantial (more than ~40 lines,
+  or several distinct stages), split it into 2-3 slides so nothing gets crammed: e.g.
+  "Build a grading system — designing the branch structure", then
+  "Build a grading system — the complete program and its output, run on sample scores".
+  More slides for a build is always better than one overcrowded slide.
 
 OUTPUT FORMAT (STRICT JSON — ONLY this array, no markdown, no explanation):
 [
@@ -908,6 +916,18 @@ Output EXACTLY these labelled sections, in this order, as plain text:
 5. STYLE — the accent colour and type-pairing from designHint, and one line on the visual mood so
    this slide looks distinct from the previous one.
 
+🏗️ IF THE INPUT HAS "isBuildSlide": true — this slide's heading promises a working program
+   ("Build…", "Create…", "Putting It All Together"), so the plan MUST deliver it:
+   • COMPONENT is the CODE + OUTPUT layout: the complete program on one side, a terminal-style
+     output panel on the other. List the 1-2 sample runs the output panel will show, with the
+     REAL input values and the EXACT lines the program prints for each (e.g. "score = 85 →
+     Grade: B"). Never plan metric tiles/stat cards as the body of a build slide.
+   • CODE must contain the ACTUAL, COMPLETE, runnable program — every branch, every print,
+     nothing elided. If it genuinely can't fit ~50 lines, plan the smaller but still complete
+     version, never a fake-truncated one.
+   • NARRATION BEATS walk the code section by section first, then trace the sample run(s)
+     through the output line by line — WHY each printed line appears, which branch produced it.
+
 ❓ IF THE INPUT HAS "isQnaSlide": true — this is a closing Q&A discussion slide, not a teaching
    slide. Plan it differently:
    • HEADLINE is the QUESTION itself, verbatim from "qnaQuestion" — never a paraphrase, never a
@@ -958,6 +978,11 @@ The user input JSON carries fields that DIRECTLY CONTROL this slide. Obey them l
    example and explain the rest in the narration. Code NEVER goes inside a table
    cell — always the .code-card. When "imageAllowed":
    false, output NO image at all.
+   🏗️ When "isBuildSlide": true, the designHint's CODE + OUTPUT layout is ABSOLUTE:
+   the complete program in the .code-card PLUS a terminal-style output panel with
+   the exact printed result of 1-2 sample runs. A build slide that shows stats,
+   metric tiles or summary cards instead of the program is the single worst
+   failure this pipeline produces — the heading promised code, so show the code.
 
 3. 🔬 RESEARCH CONTEXT — when "researchContext" is present, it is FACTUAL, CURRENT,
    web-sourced information about this exact topic. Ground your NARRATION in it: use
@@ -1051,12 +1076,14 @@ You will receive a JSON input with these fields:
    - Show how all concepts connect into a unified understanding
    - Provide the "aha moment" that ties everything together
    - No new concepts — only synthesis and reinforcement
-   - HANDS-ON / CAPSTONE EXCEPTION: if the conclusion presents a small project or
-     a "putting it all together" program (e.g. "Building a Grading System"), you
-     MUST show the actual code — build a CODE + COMPANION layout: the real, complete
-     program in a .code-card on one side, and a companion component (numbered steps
-     / metric row / feature list) that maps the code to the concepts it combines.
-     A hands-on conclusion with NO code on screen is wrong — show the program.
+   - HANDS-ON / CAPSTONE RULE: if the conclusion presents a small project or a
+     "putting it all together" program (e.g. "Building a Grading System"), the
+     input will carry "isBuildSlide": true and the CODE + OUTPUT layout applies
+     (see rule 2): the real, complete program in a .code-card on one side and a
+     terminal-style output panel with the exact printed result of sample runs on
+     the other. Even if the flag is missing but the topic clearly promises a
+     built artifact, show the program — a hands-on conclusion with NO code on
+     screen is wrong.
 
 ═══════════════════════════════════════════════════════════════════════════════
 DESIGN SYSTEM — "PREMIUM STRUCTURED" (fills the whole 1440x720 frame, ZERO overlap, rich varied components)
@@ -1519,6 +1546,24 @@ Any middle slide bridges backward on its first fragment and forward to
 nextSlideTopic on its last.
 
 ═══════════════════════════════════════════════════════════════════════════════
+🏗️ BUILD / CAPSTONE SLIDES (when the input has "isBuildSlide": true)
+═══════════════════════════════════════════════════════════════════════════════
+
+The slide shows a complete program and its printed output. Narrate it the way a
+great instructor live-codes:
+
+1. Frame the goal first: what the finished program does, and which of the
+   chapter's concepts it assembles. Make the viewer want to build it.
+2. Walk the code SECTION BY SECTION in source order, matching the on-screen
+   fragments — for each section say what it does, WHY it's written that way, and
+   which chapter concept it uses. Speak the actual identifiers and values.
+3. Then trace the sample run(s) through the output panel LINE BY LINE: which
+   input went in, which branch/path fired, why THAT line printed and not another.
+   The output is where understanding clicks — never skip or summarise it.
+4. Close with what the viewer should change or extend to make it their own —
+   one or two concrete experiments to run.
+
+═══════════════════════════════════════════════════════════════════════════════
 ❓ Q&A SLIDES (when the input has "isQnaSlide": true)
 ═══════════════════════════════════════════════════════════════════════════════
 
@@ -1604,9 +1649,25 @@ OUTPUT FORMAT (STRICT JSON — ONLY this array, no markdown, no explanation):
   {
     "question": "The question exactly as it should appear on screen — one sentence, self-contained, no 'in this chapter' framing.",
     "type": "numerical",
-    "answerOutline": "A compact outline of the correct answer: the steps/values/points the slide must show. This is a cue for the slide writer, not the finished answer — but it must be CORRECT and specific, with real numbers, real code, or real named concepts."
+    "answerOutline": "The COMPLETE worked answer the slide will be built from — see ANSWER OUTLINE REQUIREMENTS."
   }
 ]
+
+ANSWER OUTLINE REQUIREMENTS — this is the ground truth the slide and narration are
+built from, so a thin outline produces a thin slide. Every answerOutline MUST contain:
+- EVERY step of the working in order, each with its real values — never "compute the
+  result" as a step; write the actual computation ("(85 >= 90) is False → skip; (85 >= 80)
+  is True → grade = 'B'").
+- The unambiguous FINAL ANSWER, stated plainly at the end.
+- The most common WRONG answer (or misconception) for this question and one line on
+  why it's wrong — the slide calls it out and the narration explains it.
+- For "code" questions: the COMPLETE, runnable solution code (real line breaks, no
+  elision) AND the exact output it prints when run.
+- For "numerical" questions: every intermediate value with units — the arithmetic must
+  be checkable line by line.
+- For "theory"/"reasoning" questions: each supporting point as a claim + one-line
+  justification, and (for reasoning) the explicit conditions under which the verdict flips.
+It may be long — length is fine; being vague, incomplete, or wrong is the failure.
 
 Every "question" must be fully self-contained — a viewer reading only that sentence knows what
 is being asked. Every "answerOutline" must be factually correct: it is the ground truth the

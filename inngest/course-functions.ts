@@ -22,7 +22,7 @@ import { uploadSlideHtml, resolveSlideHtml } from "@/lib/slide-html";
 import { uploadSlideNarration, resolveSlideNarration } from "@/lib/slide-narration";
 import { generateNanoBananaImage, generateNanoBananaImagesParallel } from "@/lib/apify-image";
 import { fetchSlideResearch } from "@/lib/tavily";
-import { SLIDE_TYPE_PAIRS, SLIDE_ACCENTS, SLIDE_ARCHETYPES, QNA_ARCHETYPES, QNA_TOPIC_PREFIX, pickArchetype, pickNonCodeArchetype, componentName, isCodeArchetype, isCodeCompanionArchetype, isLikelyCodeTopic, codeSlideBudget, isQnaTopic, isQnaArchetype, qnaArchetypeFor } from "@/data/slide-design";
+import { SLIDE_TYPE_PAIRS, SLIDE_ACCENTS, SLIDE_ARCHETYPES, QNA_ARCHETYPES, QNA_TOPIC_PREFIX, CAPSTONE_ARCHETYPE, pickArchetype, pickNonCodeArchetype, componentName, isCodeArchetype, isCodeCompanionArchetype, isLikelyCodeTopic, codeSlideBudget, isQnaTopic, isQnaArchetype, qnaArchetypeFor, isBuildTopic } from "@/data/slide-design";
 import { eq, sql } from "drizzle-orm";
 import { inngest } from "./client";
 
@@ -132,7 +132,10 @@ export async function planChapterQna(chapterTitle: string, teachingTopics: Chapt
         const result = await openrouter.json(
             PLAN_CHAPTER_QNA_PROMPT.replace("{{QNA_COUNT}}", String(count)),
             input,
-            { model: "z-ai/glm-5.2", temperature: 0.2, maxTokens: 6000 },
+            // answerOutline now carries the FULL worked answer (steps, code, output,
+            // misconception) per question — 6k tokens truncated the JSON with 4-5
+            // questions, which silently killed the whole Q&A session.
+            { model: "z-ai/glm-5.2", temperature: 0.2, maxTokens: 12000 },
         );
         const entries: Array<Partial<QnaMeta>> = Array.isArray(result) ? result : [];
         const qna = entries
@@ -1187,6 +1190,16 @@ export const generateCourseSlidesFn = inngest.createFunction(
                 assignedArchetypes[si] = archetype;
                 return archetype;
             }
+            // BUILD/capstone topics ("Build a Grading System…", "Putting It All
+            // Together") are pinned to the CODE + OUTPUT layout: the heading
+            // promises a working program, so the program + its printed output
+            // must be on screen. Exempt from the code budget — a capstone with
+            // metric tiles instead of code is a failed slide. Still recorded in
+            // the ledger so it counts toward codeSlidesSoFar for later slides.
+            if (isBuildTopic(subTopics[si] ?? "")) {
+                assignedArchetypes[si] = CAPSTONE_ARCHETYPE;
+                return CAPSTONE_ARCHETYPE;
+            }
             const naturalArchetype = pickArchetype(chapterIndex, si);
             const wantsCode = chapterTopics[si]?.needsCode ?? false;
             // How many code slides THIS chapter has planned so far (from the ledger).
@@ -1221,6 +1234,8 @@ export const generateCourseSlidesFn = inngest.createFunction(
             const primaryComponent = componentName(archetype);           // e.g. "CODE SNIPPET"
             const isCodeSlide = isCodeArchetype(archetype);
             const isCodeCompanion = isCodeCompanionArchetype(archetype);  // code + a companion component
+            // Build/capstone slides are pinned to CODE + OUTPUT by assignArchetypeFor.
+            const isBuildSlide = !isQnaTopic(subTopics[si] ?? "") && isBuildTopic(subTopics[si] ?? "");
             // Q&A slides carry their question + ground-truth answer outline.
             const qnaMeta = chapterTopics[si]?.qna ?? null;
             // Index of the last TEACHING slide — that one is the chapter's conclusion,
@@ -1270,12 +1285,15 @@ export const generateCourseSlidesFn = inngest.createFunction(
                 // Code slides must be a real .code-card and MUST NOT contain an image.
                 // Q&A slides are image-free too — the worked answer needs the space.
                 isCodeSlide,
+                isBuildSlide,
                 imageAllowed: !isCodeSlide && !qnaMeta,
                 researchContext: research || null,
                 designHint: `🎯 BUILD THIS EXACT COMPONENT (non-negotiable): ${archetype}. `
                     + `Do NOT substitute a table/diff/tiles or any of these already-used layouts: [${usedComponents.join(", ") || "none yet"}]. `
                     + (qnaMeta
                         ? `Do NOT output {{IMAGE_PLACEHOLDER}} or any <img> on this slide — the question and its worked answer are the entire content. `
+                        : isBuildSlide
+                        ? `🏗️ THIS IS A BUILD/CAPSTONE SLIDE — the heading promises the viewer a working program, so the program MUST be on screen. The body is 2 columns: (1) the .code-card with the COMPLETE, runnable solution (real line breaks, up to ~50 lines, auto-scrolls — never fake-truncated), and (2) a terminal-style OUTPUT card (dark mono panel with a '$'-prompt header) showing the EXACT printed output for 1-2 concrete sample runs — real input values producing real output lines (e.g. score = 85 → 'Grade: B'). If space allows, add 2-3 numbered 'concept → code' callouts under the output mapping this chapter's ideas to specific lines. Metric tiles, stat blocks or summary cards in place of the code are the single worst failure for this slide. NEVER an image of code. Do NOT output {{IMAGE_PLACEHOLDER}} or any <img> on this slide. `
                         : isCodeCompanion
                         ? `This is a 2-COLUMN slide: a syntax-highlighted .code-card (header + <pre><code>, real line breaks, a REAL COMPLETE working snippet up to ~20 lines — it auto-scrolls, so never fake-truncate with "// rest omitted" or "...") on ONE side, and a COMPANION component on the OTHER side. Do NOT default to numbered callouts every time — choose the companion that BEST fits this code from the catalog (numbered stepper, definition/callout cards, a metric row, a mini comparison table, concept-vs-example, a feature list, a small chip cloud). The code and the companion are the ONLY two blocks. 🔴 The companion MUST BE DENSE: 3-4 items, and EACH item = a bold title + a real one-line detail (8-14 words) that teaches — NEVER lone 2-word labels. NEVER an image of code, NEVER code in a <table> cell. Do NOT output {{IMAGE_PLACEHOLDER}} or any <img> on this slide. `
                         : isCodeSlide

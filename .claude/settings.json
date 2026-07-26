@@ -23,7 +23,10 @@
       "Bash(node -e ' *)",
       "Bash(git commit -m 'feat\\(slides\\): add experimental plan-then-parallel slide generation *)",
       "Bash(git commit -m 'fix\\(images\\): reuse persisted expansion so re-runs don'\\\\''t regenerate images *)",
-      "WebSearch"
+      "WebSearch",
+      "Bash(gh auth *)",
+      "Bash(git remote *)",
+      "Bash(npx vitest *)"
     ]
   }
 }

@@ -18,8 +18,8 @@ import { db } from "@/config/db";
 import { openrouter } from "@/config/openrouter";
 import { chapterContentSlides, courseImages, coursesTable } from "@/config/schema";
 import { GENERATE_SINGLE_SLIDE_PROMPT, PLAN_SLIDE_PROMPT } from "@/data/Prompt";
-import { slideWordBudget } from "@/inngest/course-functions";
-import { SLIDE_TYPE_PAIRS, SLIDE_ACCENTS, SLIDE_ARCHETYPES, QNA_TOPIC_PREFIX, pickArchetype, componentName, isCodeArchetype, isCodeCompanionArchetype, isLikelyCodeTopic, isQnaTopic, qnaArchetypeFor } from "@/data/slide-design";
+import { slideWordBudget, MAX_SLIDES_PER_CHAPTER, type ChapterTopic } from "@/inngest/course-functions";
+import { SLIDE_TYPE_PAIRS, SLIDE_ACCENTS, SLIDE_ARCHETYPES, QNA_TOPIC_PREFIX, CAPSTONE_ARCHETYPE, pickArchetype, componentName, isCodeArchetype, isCodeCompanionArchetype, isLikelyCodeTopic, isQnaTopic, qnaArchetypeFor, isBuildTopic } from "@/data/slide-design";
 import { fetchSlideResearch } from "@/lib/tavily";
 import { uploadSlideHtml, resolveSlideHtml } from "@/lib/slide-html";
 import { uploadSlideNarration, resolveSlidesNarration } from "@/lib/slide-narration";
@@ -56,7 +56,18 @@ export async function POST(req: NextRequest) {
         if (chapterIndex === -1) return apiError("Chapter not found in this course", 404, "NOT_FOUND");
         const chapter = chapters[chapterIndex];
 
-        const subTopics: string[] = (chapter.subContent?.slice(0, 15)) || [chapter.chapterTitle];
+        // Prefer the persisted per-chapter slide-topic expansion the pipeline
+        // generated (coursesTable.slideTopics[chapterId]) — it is the CANONICAL
+        // slideIndex→topic mapping, including the trailing [Q&A] slides. Falling
+        // back to raw subContent (older courses generated before expansion
+        // existed) loses the Q&A markers, so a regenerated Q&A slide would drop
+        // its Q&A layout without this.
+        const topicsMap = (course.slideTopics as Record<string, ChapterTopic[]> | null) ?? {};
+        const expandedTopics: ChapterTopic[] | null =
+            Array.isArray(topicsMap[chapterId]) && topicsMap[chapterId].length > 0 ? topicsMap[chapterId] : null;
+        const subTopics: string[] = expandedTopics
+            ? expandedTopics.map((t) => t.topic).slice(0, MAX_SLIDES_PER_CHAPTER)
+            : (chapter.subContent?.slice(0, MAX_SLIDES_PER_CHAPTER)) || [chapter.chapterTitle];
 
         // ── Load the chapter's slides (target + siblings for context) ────────
         const rawChapterSlides = await db.select().from(chapterContentSlides)
@@ -69,7 +80,7 @@ export async function POST(req: NextRequest) {
         if (!target) return apiError("Slide not found in this chapter", 404, "NOT_FOUND");
 
         const si = (target.slideIndex ?? 1) - 1;
-        const totalSlides = Math.min(15, Math.max(chapterSlides.length, subTopics.length));
+        const totalSlides = Math.min(MAX_SLIDES_PER_CHAPTER, Math.max(chapterSlides.length, subTopics.length));
         const slideTopic = subTopics[si] ?? chapter.chapterTitle;
 
         // ── Load course images for placeholder injection ─────────────────────
@@ -90,16 +101,24 @@ export async function POST(req: NextRequest) {
         // topic-aware override too, so regenerating a code-y slide doesn't lose
         // its code-card just because the rotation landed elsewhere.
         // A Q&A slide keeps its Q&A layout (question banded on top, answer worked
-        // below); it must never fall back into the teaching rotation.
+        // below); it must never fall back into the teaching rotation. A BUILD/
+        // capstone slide is pinned to CODE + OUTPUT — the complete program plus
+        // its printed output, never metric tiles.
         const isQna = isQnaTopic(slideTopic);
-        const qnaQuestion = isQna ? slideTopic.replace(QNA_TOPIC_PREFIX, "").trim() : "";
+        const qnaMeta = isQna ? (expandedTopics?.[si]?.qna ?? null) : null;
+        const qnaQuestion = isQna
+            ? (qnaMeta?.question ?? slideTopic.replace(QNA_TOPIC_PREFIX, "").trim())
+            : "";
+        const isBuild = !isQna && isBuildTopic(slideTopic);
         const naturalArchetype = pickArchetype(chapterIndex, si);
         const wantsCode = !isQna && isLikelyCodeTopic(slideTopic);
         const archetype = isQna
             ? qnaArchetypeFor(Math.max(0, subTopics.slice(0, si).filter(isQnaTopic).length))
-            : (wantsCode && !isCodeArchetype(naturalArchetype))
-                ? (SLIDE_ARCHETYPES.filter(isCodeArchetype)[si % SLIDE_ARCHETYPES.filter(isCodeArchetype).length] ?? naturalArchetype)
-                : naturalArchetype;
+            : isBuild
+                ? CAPSTONE_ARCHETYPE
+                : (wantsCode && !isCodeArchetype(naturalArchetype))
+                    ? (SLIDE_ARCHETYPES.filter(isCodeArchetype)[si % SLIDE_ARCHETYPES.filter(isCodeArchetype).length] ?? naturalArchetype)
+                    : naturalArchetype;
         const primaryComponent = componentName(archetype);
         const isCodeSlide = isCodeArchetype(archetype);
         const isCodeCompanion = isCodeCompanionArchetype(archetype);
@@ -123,12 +142,18 @@ export async function POST(req: NextRequest) {
             mandatoryComponent: primaryComponent,
             mandatoryComponentSpec: archetype,
             isCodeSlide,
+            isBuildSlide: isBuild,
             imageAllowed: !isCodeSlide && !isQna,
             researchContext: researchContext || null,
-            ...(isQna ? { isQnaSlide: true, qnaQuestion } : {}),
+            // Ground-truth answer data survives regeneration when the persisted
+            // expansion carried it (fresh chapters); older courses fall back to
+            // question-only.
+            ...(isQna ? { isQnaSlide: true, qnaQuestion, ...(qnaMeta ? { qnaType: qnaMeta.type, qnaAnswerOutline: qnaMeta.answerOutline } : {}) } : {}),
             designHint: `🎯 BUILD THIS EXACT COMPONENT unless the user's change request below asks for a different one: ${archetype}. `
                 + (isQna
-                    ? `❓ Q&A DISCUSSION SLIDE — the QUESTION goes verbatim in a banded card at the TOP: "${qnaQuestion}" (small-caps "QUESTION" kicker + serif 20-24px), so the viewer reads it BEFORE any answer. Below it, work the answer step by step as separate fragments — real arithmetic / real code / named concepts, never a description of the working — ending in an unmistakable final-answer row. The answer must be CORRECT. NO {{IMAGE_PLACEHOLDER}} / <img> on this slide. `
+                    ? `❓ Q&A DISCUSSION SLIDE — the QUESTION goes verbatim in a banded card at the TOP: "${qnaQuestion}" (small-caps "QUESTION" kicker + serif 20-24px), so the viewer reads it BEFORE any answer. Below it, work the answer step by step as separate fragments — real arithmetic / real code / named concepts, never a description of the working — ending in an unmistakable final-answer row. The answer must be CORRECT.${qnaMeta?.answerOutline ? ` The correct answer is: ${qnaMeta.answerOutline} — build the slide from THAT, it is ground truth.` : ``} NO {{IMAGE_PLACEHOLDER}} / <img> on this slide. `
+                    : isBuild
+                    ? `🏗️ BUILD/CAPSTONE SLIDE — the heading promises a working program, so the program MUST be on screen. 2-column body: (1) the .code-card with the COMPLETE runnable solution (real line breaks, up to ~50 lines, auto-scrolls — never fake-truncated), and (2) a terminal-style OUTPUT card (dark mono panel, '$'-prompt header) showing the EXACT printed output for 1-2 concrete sample runs (real inputs → real output lines). If space allows, 2-3 numbered 'concept → code' callouts under the output. Metric tiles / stat blocks / summary cards instead of code are the single worst failure for this slide. NO {{IMAGE_PLACEHOLDER}} / <img>. `
                     : isCodeCompanion
                     ? `2-COLUMN slide: a .code-card (header + <pre><code>, real line breaks, a REAL COMPLETE snippet up to ~20 lines, auto-scrolls) on ONE side and a COMPANION component on the OTHER — do NOT always use callouts; pick the catalog component that best fits this code (stepper, definition cards, metric row, mini comparison table, concept-vs-example, feature list, chip cloud). Those are the only two blocks. NEVER a table cell or an image of code. NO {{IMAGE_PLACEHOLDER}} / <img>. `
                     : isCodeSlide

@@ -55,6 +55,35 @@ export const SLIDE_ARCHETYPES = [
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
+// CAPSTONE / BUILD ARCHETYPE
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The layout for BUILD/capstone slides ("Build a Grading System…", "Putting It
+ * All Together", "Create X from scratch"). Deliberately NOT part of
+ * SLIDE_ARCHETYPES — that array's length (35) is load-bearing for the co-prime
+ * stride rotation in pickArchetype, and this layout must never be handed to an
+ * ordinary teaching slide by rotation. It is assigned explicitly via
+ * isBuildTopic, and it is exempt from the chapter code budget: a slide whose
+ * heading promises a working program but shows metric tiles instead of code is
+ * a failed slide, so the program always wins.
+ *
+ * componentName() yields "CODE + OUTPUT", so isCodeArchetype and
+ * isCodeCompanionArchetype both match it without changes.
+ */
+export const CAPSTONE_ARCHETYPE =
+    "CODE + OUTPUT — the capstone/build layout. 2-column body: the COMPLETE, runnable program in a syntax-highlighted .code-card (header + <pre><code>, real line breaks, up to ~50 lines, auto-scrolls in sync with narration — never fake-truncated with '...' or '// rest omitted') on one side; on the other a terminal-style OUTPUT card (dark background, mono font, '$'-prompt header strip) showing EXACTLY what the program prints for 1-2 concrete sample runs (real input values → real printed lines), plus, below the output if space allows, 2-3 numbered 'concept → code' callouts mapping the chapter's ideas to specific lines. NEVER metric tiles, stat blocks or summary cards in place of the code — the program and its output ARE the slide.";
+
+/**
+ * True when a slide topic promises the viewer a working artifact — build /
+ * create / craft / capstone / "putting it all together". Such a slide MUST show
+ * the complete program and its output on screen, whatever the rotation says.
+ */
+export function isBuildTopic(topic: string): boolean {
+    return /\b(build(ing)?|creat(e|ing)|craft(ing)?|putting it all together|capstone|hands[- ]?on project|mini[- ]?project|project:|from scratch)\b/i.test(topic ?? "");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Q&A DISCUSSION ARCHETYPES
 // ─────────────────────────────────────────────────────────────────────────────
 
