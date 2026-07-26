@@ -451,8 +451,11 @@ const AAC_COMMON = `-c:a aac -b:a 128k -ar 44100 -ac 2`;
 const CINEMATIC_DIRECTOR_SCRIPT = `
 <style>
 #cine-camera { transform-origin: 0 0; will-change: transform; }
-.reveal .fragment.cine-spoken.visible { opacity: 0.42 !important; transition: opacity 0.5s ease; }
-.reveal .fragment.cine-active.visible { opacity: 1 !important; transition: opacity 0.4s ease; }
+/* Full brightness for every revealed fragment — the camera directs the eye, not
+   dimming. (Was: cine-spoken faded to 0.42, which read as the slide lighting
+   down its own content.) Classes still applied; they just don't change opacity. */
+.reveal .fragment.cine-spoken.visible,
+.reveal .fragment.cine-active.visible { opacity: 1 !important; }
 </style>
 <script>
 (function () {

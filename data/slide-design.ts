@@ -54,6 +54,51 @@ export const SLIDE_ARCHETYPES = [
     "FORMULA / MATH CALLOUT — one REAL KaTeX-rendered formula or equation, large and centered, with a short one-line explanation beneath; for math, algorithm complexity, or scientific notation",
 ];
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Q&A DISCUSSION ARCHETYPES
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Layouts for the end-of-chapter Q&A session. These are NEVER part of the normal
+ * rotation — they are assigned explicitly to the trailing Q&A slides (see
+ * isQnaTopic / qnaArchetypeFor).
+ *
+ * Every one follows the same spine: the QUESTION sits in a banded card at the
+ * TOP of the slide, and the body below works through the answer step by step, so
+ * a viewer sees what is being asked before any of the answer appears. The four
+ * variants differ by what KIND of question is being answered, because a
+ * numerical, a code, a theory and a conceptual question each need a different
+ * working-out.
+ */
+export const QNA_ARCHETYPES = [
+    "Q&A — NUMERICAL WORKED SOLUTION — the QUESTION in a full-width tinted band at the TOP (small-caps 'Question' kicker + the question in serif, 20-24px). Body = a vertical worked solution: 3-5 numbered steps, each a circular step number + a bold one-line statement of what this step does + the actual arithmetic/formula for that step in mono or KaTeX. Values carry units. Final step is a highlighted ANSWER row with an accent left-border and the result in a large bold number. Never skip algebra — every line must follow visibly from the one above.",
+    "Q&A — CODE SOLUTION WALKTHROUGH — the QUESTION in a full-width tinted band at the TOP. Body = 2 columns: a syntax-highlighted .code-card (header + <pre><code>, a REAL complete working solution, auto-scrolls) on one side, and 3-4 numbered callouts on the other, each mapping to a specific part of the code (a bold label + a real one-line explanation of WHY that line/block is there). Include the expected output as a small mono strip beneath the code when it clarifies the answer.",
+    "Q&A — THEORY / CONCEPTUAL ANSWER — the QUESTION in a full-width tinted band at the TOP. Body = a structured answer: a one-line DIRECT ANSWER in a highlighted definition card first (the viewer gets the answer immediately), then 3-4 supporting points as numbered feature rows (bold claim + one-line justification each), and where a contrast makes it click, a compact 2-column 'this vs that' block. No walls of text — every point is a titled row.",
+    "Q&A — REASONING / TRADE-OFF ANSWER — the QUESTION in a full-width tinted band at the TOP. Body = the shape of the reasoning: either a 3-4 node decision flow (circular nodes joined by a gradient line, each a condition → outcome), or a 2-column WHEN-TO-USE vs WHEN-NOT-TO table, whichever the question calls for — followed by a single-line VERDICT band in an accent tint. For questions where the honest answer is 'it depends', make the dependency explicit and visual.",
+];
+
+/** Prefix stamped on Q&A slide topics so the pipeline can recognise them. */
+export const QNA_TOPIC_PREFIX = "[Q&A]";
+
+/** True when a slide topic is one of the appended Q&A discussion slides. */
+export function isQnaTopic(topic: string): boolean {
+    return typeof topic === "string" && topic.trimStart().startsWith(QNA_TOPIC_PREFIX);
+}
+
+/**
+ * Pick the Q&A layout for the nth Q&A slide. Rotates by question type so a
+ * chapter's Q&A session doesn't show four identical-looking slides; the writer
+ * is separately told to pick questions whose types actually vary.
+ */
+export function qnaArchetypeFor(qnaIndex: number): string {
+    return QNA_ARCHETYPES[qnaIndex % QNA_ARCHETYPES.length];
+}
+
+/** True for any Q&A layout (so the anti-repeat ledger can exempt them). */
+export function isQnaArchetype(archetype: string): boolean {
+    return typeof archetype === "string" && archetype.startsWith("Q&A");
+}
+
 export const SLIDE_TYPE_PAIRS = [
     "Playfair Display headline + Outfit body",
     "Space Grotesk headline + Inter body",

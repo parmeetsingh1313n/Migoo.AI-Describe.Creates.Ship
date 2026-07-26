@@ -19,7 +19,7 @@ import { openrouter } from "@/config/openrouter";
 import { chapterContentSlides, courseImages, coursesTable } from "@/config/schema";
 import { GENERATE_SINGLE_SLIDE_PROMPT, PLAN_SLIDE_PROMPT } from "@/data/Prompt";
 import { slideWordBudget } from "@/inngest/course-functions";
-import { SLIDE_TYPE_PAIRS, SLIDE_ACCENTS, SLIDE_ARCHETYPES, pickArchetype, componentName, isCodeArchetype, isCodeCompanionArchetype, isLikelyCodeTopic } from "@/data/slide-design";
+import { SLIDE_TYPE_PAIRS, SLIDE_ACCENTS, SLIDE_ARCHETYPES, QNA_TOPIC_PREFIX, pickArchetype, componentName, isCodeArchetype, isCodeCompanionArchetype, isLikelyCodeTopic, isQnaTopic, qnaArchetypeFor } from "@/data/slide-design";
 import { fetchSlideResearch } from "@/lib/tavily";
 import { uploadSlideHtml, resolveSlideHtml } from "@/lib/slide-html";
 import { uploadSlideNarration, resolveSlidesNarration } from "@/lib/slide-narration";
@@ -89,36 +89,47 @@ export async function POST(req: NextRequest) {
         // regenerated slide keeps this chapter's varied, non-repeating design —
         // topic-aware override too, so regenerating a code-y slide doesn't lose
         // its code-card just because the rotation landed elsewhere.
+        // A Q&A slide keeps its Q&A layout (question banded on top, answer worked
+        // below); it must never fall back into the teaching rotation.
+        const isQna = isQnaTopic(slideTopic);
+        const qnaQuestion = isQna ? slideTopic.replace(QNA_TOPIC_PREFIX, "").trim() : "";
         const naturalArchetype = pickArchetype(chapterIndex, si);
-        const wantsCode = isLikelyCodeTopic(slideTopic);
-        const archetype = (wantsCode && !isCodeArchetype(naturalArchetype))
-            ? (SLIDE_ARCHETYPES.filter(isCodeArchetype)[si % SLIDE_ARCHETYPES.filter(isCodeArchetype).length] ?? naturalArchetype)
-            : naturalArchetype;
+        const wantsCode = !isQna && isLikelyCodeTopic(slideTopic);
+        const archetype = isQna
+            ? qnaArchetypeFor(Math.max(0, subTopics.slice(0, si).filter(isQnaTopic).length))
+            : (wantsCode && !isCodeArchetype(naturalArchetype))
+                ? (SLIDE_ARCHETYPES.filter(isCodeArchetype)[si % SLIDE_ARCHETYPES.filter(isCodeArchetype).length] ?? naturalArchetype)
+                : naturalArchetype;
         const primaryComponent = componentName(archetype);
         const isCodeSlide = isCodeArchetype(archetype);
         const isCodeCompanion = isCodeCompanionArchetype(archetype);
 
         // Tavily RAG — ground the regenerated narration in accurate, current facts.
-        const researchContext = await fetchSlideResearch(slideTopic, `${course.courseName} · ${chapter.chapterTitle}`);
+        // Search on the bare question for a Q&A slide, never the [Q&A]-prefixed string.
+        const researchContext = await fetchSlideResearch(isQna ? qnaQuestion : slideTopic, `${course.courseName} · ${chapter.chapterTitle}`);
 
         const slideContext: Record<string, any> = {
             chapterTitle: chapter.chapterTitle,
             chapterOverview: chapter.chapterDescription ?? `This chapter covers ${chapter.chapterTitle} comprehensively.`,
             chapterIndex: chapterIndex + 1,
-            fullChapterOutline: subTopics.map((t: string, i: number) => `Slide ${i + 1}: ${t}`),
-            slideTopic,
+            fullChapterOutline: subTopics.map((t: string, i: number) => `Slide ${i + 1}: ${t.replace(QNA_TOPIC_PREFIX, "Q&A:")}`),
+            // Strip the internal [Q&A] marker so it never reaches the slide or voiceover.
+            slideTopic: isQna ? qnaQuestion : slideTopic,
             slideIndex: si + 1,
             totalSlides,
-            slidePosition: si === 0 ? "INTRO" : si === totalSlides - 1 ? "CONCLUSION" : "MIDDLE",
+            slidePosition: isQna ? "QNA" : si === 0 ? "INTRO" : si === totalSlides - 1 ? "CONCLUSION" : "MIDDLE",
             previousSlidesContext: previousContext,
             nextSlideTopic: si + 1 < totalSlides ? subTopics[si + 1] : null,
             mandatoryComponent: primaryComponent,
             mandatoryComponentSpec: archetype,
             isCodeSlide,
-            imageAllowed: !isCodeSlide,
+            imageAllowed: !isCodeSlide && !isQna,
             researchContext: researchContext || null,
+            ...(isQna ? { isQnaSlide: true, qnaQuestion } : {}),
             designHint: `🎯 BUILD THIS EXACT COMPONENT unless the user's change request below asks for a different one: ${archetype}. `
-                + (isCodeCompanion
+                + (isQna
+                    ? `❓ Q&A DISCUSSION SLIDE — the QUESTION goes verbatim in a banded card at the TOP: "${qnaQuestion}" (small-caps "QUESTION" kicker + serif 20-24px), so the viewer reads it BEFORE any answer. Below it, work the answer step by step as separate fragments — real arithmetic / real code / named concepts, never a description of the working — ending in an unmistakable final-answer row. The answer must be CORRECT. NO {{IMAGE_PLACEHOLDER}} / <img> on this slide. `
+                    : isCodeCompanion
                     ? `2-COLUMN slide: a .code-card (header + <pre><code>, real line breaks, a REAL COMPLETE snippet up to ~20 lines, auto-scrolls) on ONE side and a COMPANION component on the OTHER — do NOT always use callouts; pick the catalog component that best fits this code (stepper, definition cards, metric row, mini comparison table, concept-vs-example, feature list, chip cloud). Those are the only two blocks. NEVER a table cell or an image of code. NO {{IMAGE_PLACEHOLDER}} / <img>. `
                     : isCodeSlide
                     ? `CODE slide: the ENTIRE body is ONE .code-card (header + <pre><code>, real line breaks) — NEVER a table cell or plain text. A REAL, COMPLETE, working snippet up to ~50 lines is fine (it auto-scrolls in sync with narration — never fake-truncate it). NO {{IMAGE_PLACEHOLDER}} / <img>. `
@@ -168,12 +179,12 @@ fragmentData completely to reflect the requested change. Honour the request prec
         // narration together (unlike the pipeline, which narrates in its own step).
         // Narration is sized to the chapter's per-slide budget so a regenerated slide
         // stays in proportion with its neighbours.
-        const { targetWords, wordsPerBeat } = slideWordBudget(totalSlides);
+        const { targetWords, minWords, wordsPerBeat } = slideWordBudget(totalSlides);
         if (slidePlan) {
             systemPrompt += `\n\nA finished PLAN for this slide is in the input field "slidePlan" — render its headline, component, code and style faithfully into the final JSON (html + fragmentData), applying the userChangeRequest on top. Do NOT re-plan the visuals from scratch.`
-                + `\n\n🚨 THE PLAN'S NARRATION BEATS ARE CUES, NOT THE SCRIPT. You write the actual voiceover: expand EACH beat into a full spoken segment of roughly ${wordsPerBeat} words — deep explanation, an analogy, a concrete example — so narration.fullText totals about ${targetWords} words (±10%). Keep the beats' order and meaning, one narration.fragments entry per beat. Copying the short cues through verbatim is a FAILED slide, and so is padding well past ${targetWords} words.`;
+                + `\n\n🚨 THE PLAN'S NARRATION BEATS ARE CUES, NOT THE SCRIPT. You write the actual voiceover: expand EACH beat into a full spoken segment of roughly ${wordsPerBeat} words — deep explanation, an analogy, a concrete example — so narration.fullText reaches at least ${minWords} words, aiming for ${targetWords}. Going longer is fine when the material earns it; going under ${minWords} is a FAILED slide, and so is copying the short cues through verbatim. Keep the beats' order and meaning, one narration.fragments entry per beat.`;
         } else {
-            systemPrompt += `\n\n📝 NARRATION LENGTH: write narration.fullText to about ${targetWords} words (±10%), split across 8-12 narration.fragments entries of roughly ${wordsPerBeat} words each. Every sentence must teach — no padding to reach the count.`;
+            systemPrompt += `\n\n📝 NARRATION LENGTH: write narration.fullText to at least ${minWords} words, aiming for ${targetWords}, split across 8-12 narration.fragments entries of roughly ${wordsPerBeat} words each. Longer is welcome when the topic genuinely needs it. Every sentence must teach — never pad to reach the count.`;
         }
 
         let slideContent: any = null;
@@ -204,8 +215,13 @@ fragmentData completely to reflect the requested change. Honour the request prec
         }
 
         // Inject image URLs into placeholders — this slide's OWN image (global index).
+        // Q&A slides have no image of their own, so strip any placeholder the model
+        // emitted rather than pulling in an unrelated slide's illustration.
         let html: string = slideContent.html ?? "";
-        if (html && allImages.length > 0) {
+        if (html && isQna) {
+            html = html.replace(/<img[^>]*\{\{IMAGE_PLACEHOLDER\}\}[^>]*>/g, "")
+                .replace(/\{\{IMAGE_PLACEHOLDER\}\}/g, "");
+        } else if (html && allImages.length > 0) {
             const gIdx = chapterIndex * 15 + si;
             let extra = 0;
             html = html.replace(/\{\{IMAGE_PLACEHOLDER\}\}/g, () => {

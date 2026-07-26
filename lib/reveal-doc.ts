@@ -78,8 +78,8 @@ export const REVEAL_CUSTOM_FRAGMENT_STYLES = `
  *
  * At time t it:
  *   1. Reveals every fragment whose window has started (via reveal.js), marks the
- *      most recent as .cine-active and earlier ones as .cine-spoken (dimmed but
- *      still lit — "old portion stays visible as the eye moves on").
+ *      most recent as .cine-active and earlier ones as .cine-spoken. Both stay at
+ *      full brightness — the camera directs attention, not dimming.
  *   2. On DENSE slides only (effective body font < THRESHOLD after reveal.js
  *      scale), eases a camera transform on a wrapper so the active fragment's
  *      region fills the frame, dragging smoothly toward the next region. On
@@ -96,8 +96,14 @@ export const CINEMATIC_DIRECTOR_SCRIPT = `
    scale (which lives on .reveal .slides). We wrap OUTSIDE .reveal so we never
    fight reveal's transform. */
 #cine-camera { transform-origin: 0 0; will-change: transform; }
-.reveal .fragment.cine-spoken.visible { opacity: 0.42 !important; transition: opacity 0.5s ease; }
-.reveal .fragment.cine-active.visible { opacity: 1 !important; transition: opacity 0.4s ease; }
+/* Every revealed fragment stays at FULL brightness. The camera alone directs the
+   eye — earlier fragments used to dim to 0.42 opacity, which read as the slide
+   "lighting down" its own content. Focus is conveyed by the pan/zoom, not by
+   fading what the viewer already read. The cine-active / cine-spoken classes are
+   still applied (the camera uses them to find its target), they just no longer
+   change opacity. */
+.reveal .fragment.cine-spoken.visible,
+.reveal .fragment.cine-active.visible { opacity: 1 !important; }
 </style>
 <script>
 (function () {

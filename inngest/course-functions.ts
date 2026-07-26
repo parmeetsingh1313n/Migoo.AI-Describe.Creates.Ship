@@ -16,13 +16,13 @@
 import { db } from "@/config/db";
 import { openrouter } from "@/config/openrouter";
 import { chapterContentSlides, chapterGenerationStatus, courseImages, coursesTable } from "@/config/schema";
-import { GENERATE_SINGLE_SLIDE_PROMPT, GENERATE_SLIDE_NARRATION_PROMPT, PLAN_SLIDE_PROMPT, EXPAND_CHAPTER_TOPICS_PROMPT } from "@/data/Prompt";
+import { GENERATE_SINGLE_SLIDE_PROMPT, GENERATE_SLIDE_NARRATION_PROMPT, PLAN_SLIDE_PROMPT, EXPAND_CHAPTER_TOPICS_PROMPT, PLAN_CHAPTER_QNA_PROMPT } from "@/data/Prompt";
 import { putWithRotation } from "@/lib/blob";
 import { uploadSlideHtml, resolveSlideHtml } from "@/lib/slide-html";
 import { uploadSlideNarration, resolveSlideNarration } from "@/lib/slide-narration";
 import { generateNanoBananaImage, generateNanoBananaImagesParallel } from "@/lib/apify-image";
 import { fetchSlideResearch } from "@/lib/tavily";
-import { SLIDE_TYPE_PAIRS, SLIDE_ACCENTS, SLIDE_ARCHETYPES, pickArchetype, pickNonCodeArchetype, componentName, isCodeArchetype, isCodeCompanionArchetype, isLikelyCodeTopic, codeSlideBudget } from "@/data/slide-design";
+import { SLIDE_TYPE_PAIRS, SLIDE_ACCENTS, SLIDE_ARCHETYPES, QNA_ARCHETYPES, QNA_TOPIC_PREFIX, pickArchetype, pickNonCodeArchetype, componentName, isCodeArchetype, isCodeCompanionArchetype, isLikelyCodeTopic, codeSlideBudget, isQnaTopic, isQnaArchetype, qnaArchetypeFor } from "@/data/slide-design";
 import { eq, sql } from "drizzle-orm";
 import { inngest } from "./client";
 
@@ -36,8 +36,19 @@ export const MAX_SLIDES_PER_CHAPTER = 25;
 // NARRATION BUDGET
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Target spoken length of ONE chapter video, in minutes. */
-export const TARGET_CHAPTER_MINUTES = 50;
+/**
+ * Hard FLOOR for a chapter video, in minutes. Never a ceiling — a chapter with
+ * more to teach is free to run 60, 70, 80+ minutes. The budget below sizes the
+ * MINIMUM each slide must deliver; the model overshoots when the material
+ * warrants it, and that overshoot is wanted, not trimmed.
+ */
+export const MIN_CHAPTER_MINUTES = 45;
+/**
+ * What we actually ask for. Set above the floor because models land slightly
+ * under an explicit word target more often than over, so aiming at the floor
+ * itself would keep producing 40-something-minute chapters.
+ */
+export const TARGET_CHAPTER_MINUTES = 55;
 /**
  * Real measured pace of the Sarvam voices as we call them.
  *
@@ -48,41 +59,131 @@ export const TARGET_CHAPTER_MINUTES = 50;
 export const NARRATION_WPM = 165;
 
 /**
- * Words of narration ONE slide should get, derived from how many slides the
- * chapter actually has, so the finished video lands near TARGET_CHAPTER_MINUTES
- * whether the chapter has 6 slides or 20.
+ * Minimum words of narration ONE slide must deliver, derived from the chapter's
+ * real slide count so the video clears MIN_CHAPTER_MINUTES whether the chapter
+ * has 6 slides or 20.
  *
  * A fixed per-slide count cannot work: at 4000 words/slide (the old prompt's
- * demand) a 10-slide chapter is a 4.5-HOUR video. Budget the chapter, then
- * divide. Clamped so a very long chapter still gets substantive slides and a
- * very short one doesn't produce a 20-minute monologue on a single slide.
+ * demand) a 10-slide chapter is a 4.5-HOUR video. Budget the chapter, divide.
+ *
+ * `minWords` is the floor the model is told never to go under. There is NO upper
+ * clamp on the chapter total: a slide that needs more depth gets it, and a rich
+ * chapter simply runs longer. The only bound is per-slide sanity — a 3-slide
+ * chapter shouldn't be three 15-minute monologues — while the CHAPTER total
+ * stays uncapped.
  */
-export function slideWordBudget(totalSlides: number): { targetWords: number; wordsPerBeat: number } {
-    const chapterWords = TARGET_CHAPTER_MINUTES * NARRATION_WPM; // 7,500 @ 50min
-    const raw = Math.round(chapterWords / Math.max(1, totalSlides));
-    // Floor 300 keeps a 25-slide chapter at ~50min instead of overshooting to 67;
-    // ceiling 1600 stops a 3-slide chapter becoming a 10-minute monologue per slide.
-    const targetWords = Math.min(1600, Math.max(300, raw));
+export function slideWordBudget(totalSlides: number): {
+    targetWords: number;
+    minWords: number;
+    wordsPerBeat: number;
+} {
+    const n = Math.max(1, totalSlides);
+    const targetWords = Math.min(1800, Math.max(300, Math.round((TARGET_CHAPTER_MINUTES * NARRATION_WPM) / n)));
+    // The floor the model must clear, from MIN_CHAPTER_MINUTES rather than the target.
+    const minWords = Math.max(250, Math.round((MIN_CHAPTER_MINUTES * NARRATION_WPM) / n));
     // Beats per slide run 8-12; size each segment against the middle of that range.
     const wordsPerBeat = Math.max(30, Math.round(targetWords / 10));
-    return { targetWords, wordsPerBeat };
+    return { targetWords, minWords, wordsPerBeat };
 }
 
 
-export type ChapterTopic = { topic: string; needsCode: boolean };
+export type QnaMeta = { question: string; type: string; answerOutline: string };
+export type ChapterTopic = { topic: string; needsCode: boolean; qna?: QnaMeta };
+
+/**
+ * Slides reserved at the end of every chapter for the Q&A discussion session.
+ *
+ * Teaching topics are capped at MAX_TEACHING_SLIDES rather than
+ * MAX_SLIDES_PER_CHAPTER so that teaching + Q&A can never exceed the 25-slide
+ * budget. That ceiling is load-bearing: images are keyed
+ * `chapterIndex * MAX_SLIDES_PER_CHAPTER + slideIndex`, so a chapter spilling
+ * past 25 slides would collide with the NEXT chapter's image indices.
+ */
+export const MAX_QNA_SLIDES = 5;
+export const MAX_TEACHING_SLIDES = MAX_SLIDES_PER_CHAPTER - MAX_QNA_SLIDES;
+
+/** How many Q&A questions a chapter of this many teaching slides should close with. */
+export function qnaCountFor(teachingSlides: number): number {
+    if (teachingSlides <= 3) return 2;
+    if (teachingSlides <= 6) return 3;
+    if (teachingSlides <= 12) return 4;
+    return MAX_QNA_SLIDES;
+}
+
+/**
+ * Plan the closing Q&A session for a chapter: N questions the learner should
+ * work through now that the teaching is done, each becoming its own slide where
+ * the question is shown first and then answered step by step.
+ *
+ * Returns ChapterTopic entries carrying the question + a correct answer outline,
+ * marked with QNA_TOPIC_PREFIX so the slide pipeline can route them to the Q&A
+ * layouts. Best-effort: on any failure we return [] and the chapter simply ends
+ * without a Q&A session rather than failing generation.
+ */
+export async function planChapterQna(chapterTitle: string, teachingTopics: ChapterTopic[]): Promise<ChapterTopic[]> {
+    if (teachingTopics.length === 0) return [];
+    const count = qnaCountFor(teachingTopics.length);
+    try {
+        const input = JSON.stringify({
+            chapterTitle,
+            slideTopics: teachingTopics.map(t => t.topic),
+            chapterTaughtCode: teachingTopics.some(t => t.needsCode),
+        });
+        const result = await openrouter.json(
+            PLAN_CHAPTER_QNA_PROMPT.replace("{{QNA_COUNT}}", String(count)),
+            input,
+            { model: "z-ai/glm-5.2", temperature: 0.2, maxTokens: 6000 },
+        );
+        const entries: Array<Partial<QnaMeta>> = Array.isArray(result) ? result : [];
+        const qna = entries
+            .filter(e => e && typeof e.question === "string" && e.question.trim())
+            .slice(0, count)
+            .map(e => {
+                const type = String(e.type ?? "theory").toLowerCase().trim();
+                const question = e.question!.trim();
+                return {
+                    topic: `${QNA_TOPIC_PREFIX} ${question}`,
+                    // Only a "code" question needs a code card; the archetype already
+                    // pins the layout, this just keeps the code-budget accounting honest.
+                    needsCode: type === "code",
+                    qna: {
+                        question,
+                        type,
+                        answerOutline: typeof e.answerOutline === "string" ? e.answerOutline.trim() : "",
+                    },
+                };
+            });
+        if (qna.length > 0) {
+            console.log(`❓ Planned ${qna.length} Q&A slides (${qna.map(q => q.qna.type).join(", ")}) for "${chapterTitle}"`);
+            return qna;
+        }
+    } catch (e: any) {
+        console.warn(`⚠️ Q&A planning failed for "${chapterTitle}": ${e.message?.substring(0, 120)} — chapter will have no Q&A session`);
+    }
+    return [];
+}
 
 /**
  * Expands a chapter's subContent points (broad learning objectives) into
  * granular, slide-sized topics — 1-3 per point depending on how much depth
- * that point actually needs, capped at MAX_SLIDES_PER_CHAPTER total, each
- * flagged with whether it needs a real code example. Replaces the old fixed
- * "1 subContent point = 1 slide" mapping so simple topics stay short and rich
- * topics get the multiple slides they need. Falls back to the raw subContent
- * list (1:1, needsCode via keyword heuristic) on any failure — expansion is
- * an enhancement, never a blocker for chapter generation.
+ * that point actually needs, capped at MAX_TEACHING_SLIDES, each flagged with
+ * whether it needs a real code example — then appends the chapter's Q&A
+ * discussion slides. Replaces the old fixed "1 subContent point = 1 slide"
+ * mapping so simple topics stay short and rich topics get the multiple slides
+ * they need. Falls back to the raw subContent list (1:1, needsCode via keyword
+ * heuristic) on any failure — expansion is an enhancement, never a blocker for
+ * chapter generation.
+ *
+ * BOTH the images function and the slides function call this and must get the
+ * IDENTICAL list, or the slide↔image index mapping drifts — which is why the
+ * Q&A slides are appended here rather than in the slides pipeline alone.
  */
 export async function expandChapterTopics(chapterTitle: string, subContent: string[]): Promise<ChapterTopic[]> {
     if (subContent.length === 0) return [{ topic: chapterTitle, needsCode: false }];
+    const withQna = async (teaching: ChapterTopic[]): Promise<ChapterTopic[]> => {
+        const qna = await planChapterQna(chapterTitle, teaching);
+        return [...teaching, ...qna];
+    };
     try {
         const input = JSON.stringify({ chapterTitle, subContent });
         const result = await openrouter.json(EXPAND_CHAPTER_TOPICS_PROMPT, input, {
@@ -103,15 +204,17 @@ export async function expandChapterTopics(chapterTitle: string, subContent: stri
                 topic: e.topic.trim(),
                 needsCode: typeof e.needsCode === "boolean" ? e.needsCode : isLikelyCodeTopic(e.topic),
             }))
-            .slice(0, MAX_SLIDES_PER_CHAPTER);
+            .slice(0, MAX_TEACHING_SLIDES);
         if (topics.length > 0) {
             console.log(`📐 Expanded ${subContent.length} subContent points → ${topics.length} slide topics (${topics.filter(t => t.needsCode).length} code) for "${chapterTitle}"`);
-            return topics;
+            return await withQna(topics);
         }
     } catch (e: any) {
         console.warn(`⚠️ Topic expansion failed for "${chapterTitle}": ${e.message?.substring(0, 120)} — falling back to 1:1 mapping`);
     }
-    return subContent.slice(0, MAX_SLIDES_PER_CHAPTER).map(topic => ({ topic, needsCode: isLikelyCodeTopic(topic) }));
+    return await withQna(
+        subContent.slice(0, MAX_TEACHING_SLIDES).map(topic => ({ topic, needsCode: isLikelyCodeTopic(topic) }))
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -650,6 +753,11 @@ export const generateCourseImagesFn = inngest.createFunction(
                 : await step.run(`expand-topics-for-images-${chIdx}`, () => expandChapterTopics(chapterTitle, rawSubContent));
             if (chapter.chapterId) slideTopicsByChapter[chapter.chapterId] = chapterTopics;
             chapterTopics.forEach(({ topic }, slideIdx) => {
+                // Q&A slides are pure question + worked answer — a decorative AI
+                // illustration would only crowd out the solution, so they get no image.
+                // The globalIdx is still SKIPPED (not reassigned) so every teaching
+                // slide keeps the exact index the slides function will look up.
+                if (isQnaTopic(topic)) return;
                 const globalIdx = chIdx * MAX_SLIDES_PER_CHAPTER + slideIdx;
                 imageJobs.push({
                     globalIdx, chIdx, slideIdx, chapterTitle,
@@ -1065,6 +1173,20 @@ export const generateCourseSlidesFn = inngest.createFunction(
         // depends only on prior archetypes (never on generated text), the whole wave
         // can be planned up front, before any parallel generation starts. ──
         const assignArchetypeFor = (si: number): string => {
+            // Q&A slides are pinned to the Q&A layouts — they sit outside the normal
+            // rotation entirely (the question must be at the top, answer worked below).
+            if (isQnaTopic(subTopics[si] ?? "")) {
+                const qnaOrdinal = subTopics.slice(0, si).filter(isQnaTopic).length;
+                const qType = chapterTopics[si]?.qna?.type ?? "";
+                // Match the layout to the question's actual type where one fits;
+                // otherwise rotate so consecutive Q&A slides look different.
+                const byType: Record<string, number> = { numerical: 0, code: 1, theory: 2, reasoning: 3 };
+                const archetype = typeof byType[qType] === "number"
+                    ? QNA_ARCHETYPES[byType[qType]]
+                    : qnaArchetypeFor(qnaOrdinal);
+                assignedArchetypes[si] = archetype;
+                return archetype;
+            }
             const naturalArchetype = pickArchetype(chapterIndex, si);
             const wantsCode = chapterTopics[si]?.needsCode ?? false;
             // How many code slides THIS chapter has planned so far (from the ledger).
@@ -1099,16 +1221,27 @@ export const generateCourseSlidesFn = inngest.createFunction(
             const primaryComponent = componentName(archetype);           // e.g. "CODE SNIPPET"
             const isCodeSlide = isCodeArchetype(archetype);
             const isCodeCompanion = isCodeCompanionArchetype(archetype);  // code + a companion component
+            // Q&A slides carry their question + ground-truth answer outline.
+            const qnaMeta = chapterTopics[si]?.qna ?? null;
+            // Index of the last TEACHING slide — that one is the chapter's conclusion,
+            // not the final Q&A slide (which would otherwise get the wrap-up framing).
+            const lastTeachingIdx = (() => {
+                for (let k = subTopics.length - 1; k >= 0; k--) if (!isQnaTopic(subTopics[k])) return k;
+                return subTopics.length - 1;
+            })();
             // Components used by EARLIER slides in THIS chapter — the model must not
             // fall back onto any of them again. Read from the ledger (so within-wave
             // earlier slides count too, even before they finish generating). Code
             // archetypes are exempt: a programming chapter legitimately needs several.
+            // Q&A layouts are exempt too — several Q&A slides SHOULD share the
+            // question-on-top shape, and they must not poison the teaching slides'
+            // anti-repeat list either.
             const usedComponents = Array.from(
                 new Set(
                     assignedArchetypes
                         .slice(0, si)
                         .map(a => componentName(a ?? ""))
-                        .filter(c => c && !isCodeArchetype(c))
+                        .filter(c => c && !isCodeArchetype(c) && !isQnaArchetype(c))
                 )
             );
 
@@ -1120,31 +1253,45 @@ export const generateCourseSlidesFn = inngest.createFunction(
                 chapterTitle: chapter.chapterTitle,
                 chapterOverview: chapter.chapterDescription ?? `This chapter covers ${chapter.chapterTitle} comprehensively.`,
                 chapterIndex: chapterIndex + 1,
-                fullChapterOutline: subTopics.map((t: string, i: number) => `Slide ${i + 1}: ${t}`),
-                slideTopic: subTopics[si],
+                fullChapterOutline: subTopics.map((t: string, i: number) => `Slide ${i + 1}: ${t.replace(QNA_TOPIC_PREFIX, "Q&A:")}`),
+                // Strip the internal [Q&A] marker — it is pipeline plumbing, and a raw
+                // "[Q&A]" would otherwise show up in a headline or get read aloud.
+                slideTopic: (subTopics[si] ?? "").replace(QNA_TOPIC_PREFIX, "").trim(),
                 slideIndex: si + 1,
                 totalSlides,
-                slidePosition: si === 0 ? "INTRO" : si === totalSlides - 1 ? "CONCLUSION" : "MIDDLE",
+                slidePosition: qnaMeta ? "QNA" : si === 0 ? "INTRO" : si === lastTeachingIdx ? "CONCLUSION" : "MIDDLE",
                 previousSlidesContext: previousContext,
                 conceptsAlreadyCovered: previousContext.flatMap(p => p.keyConceptsCovered),
-                nextSlideTopic: si + 1 < totalSlides ? subTopics[si + 1] : null,
+                nextSlideTopic: si + 1 < totalSlides ? (subTopics[si + 1] ?? "").replace(QNA_TOPIC_PREFIX, "Q&A:").trim() : null,
                 // 🎯 HARD COMMAND — the model MUST build exactly this component.
                 mandatoryComponent: primaryComponent,
                 mandatoryComponentSpec: archetype,
                 doNotReuseComponents: usedComponents,
                 // Code slides must be a real .code-card and MUST NOT contain an image.
+                // Q&A slides are image-free too — the worked answer needs the space.
                 isCodeSlide,
-                imageAllowed: !isCodeSlide,
+                imageAllowed: !isCodeSlide && !qnaMeta,
                 researchContext: research || null,
                 designHint: `🎯 BUILD THIS EXACT COMPONENT (non-negotiable): ${archetype}. `
                     + `Do NOT substitute a table/diff/tiles or any of these already-used layouts: [${usedComponents.join(", ") || "none yet"}]. `
-                    + (isCodeCompanion
+                    + (qnaMeta
+                        ? `Do NOT output {{IMAGE_PLACEHOLDER}} or any <img> on this slide — the question and its worked answer are the entire content. `
+                        : isCodeCompanion
                         ? `This is a 2-COLUMN slide: a syntax-highlighted .code-card (header + <pre><code>, real line breaks, a REAL COMPLETE working snippet up to ~20 lines — it auto-scrolls, so never fake-truncate with "// rest omitted" or "...") on ONE side, and a COMPANION component on the OTHER side. Do NOT default to numbered callouts every time — choose the companion that BEST fits this code from the catalog (numbered stepper, definition/callout cards, a metric row, a mini comparison table, concept-vs-example, a feature list, a small chip cloud). The code and the companion are the ONLY two blocks. 🔴 The companion MUST BE DENSE: 3-4 items, and EACH item = a bold title + a real one-line detail (8-14 words) that teaches — NEVER lone 2-word labels. NEVER an image of code, NEVER code in a <table> cell. Do NOT output {{IMAGE_PLACEHOLDER}} or any <img> on this slide. `
                         : isCodeSlide
                         ? `This slide's topic genuinely needs a real code example. The ENTIRE body is ONE syntax-highlighted .code-card (header + <pre><code>, real line breaks preserved) — NEVER inline text, NEVER a <table> cell, NEVER an image of code. Write a REAL, COMPLETE, working snippet (up to ~50 lines) — it auto-scrolls in sync with narration, so never fake-truncate with "// rest omitted" or "...". Do NOT output {{IMAGE_PLACEHOLDER}} or any <img> on this slide. `
                         : `Include ONE {{IMAGE_PLACEHOLDER}} where it genuinely helps, kept SMALL (~28-30% side column, max-height 300px) so it never crowds out real content — or skip it entirely if this component doesn't need one. `)
                     + `🔴 DENSITY: every item in the component (row / card / step / callout / metric / node) MUST carry a bold title PLUS a real one-line detail (8-14 words) that teaches — bare 2-3 word labels are a FAILED slide. `
+                    + (qnaMeta
+                        ? `❓ THIS IS A Q&A DISCUSSION SLIDE (${qnaMeta.type}) — the chapter's teaching is over; this slide works through ONE question. `
+                          + `The QUESTION goes in a banded card at the TOP of the slide, verbatim: "${qnaMeta.question}" — prefixed by a small-caps "QUESTION" kicker, in the headline serif at 20-24px, so a viewer reads what is being asked BEFORE any answer appears. Do NOT paraphrase it and do NOT put it in the normal headline slot. `
+                          + `Below it, work through the answer as its own fragments so it reveals STEP BY STEP in sync with the narration — never dump the whole solution at once. `
+                          + `The correct answer is: ${qnaMeta.answerOutline || "derive it correctly from the chapter's material"}. Build the slide from THAT — it is ground truth. Getting the answer wrong is the single worst failure here. `
+                          + `Show the real working (actual arithmetic / real code / named concepts), not a description of the working. End with an unmistakable final answer — a highlighted result row, verdict band, or answer card. `
+                        : ``)
                     + `Type pairing: ${SLIDE_TYPE_PAIRS[(chapterIndex + si) % SLIDE_TYPE_PAIRS.length]}. Accent color: ${SLIDE_ACCENTS[(chapterIndex * 2 + si) % SLIDE_ACCENTS.length]}. Make this slide look clearly different from the previous one (except code slides, which may share a look with earlier code slides in this chapter).`,
+                // Present only on Q&A slides — the question + its ground-truth answer.
+                ...(qnaMeta ? { qnaQuestion: qnaMeta.question, qnaType: qnaMeta.type, qnaAnswerOutline: qnaMeta.answerOutline, isQnaSlide: true } : {}),
                 // Only present on the Phase-2 write call.
                 ...(plan ? { slidePlan: plan } : {}),
             });
@@ -1161,7 +1308,8 @@ export const generateCourseSlidesFn = inngest.createFunction(
                 // this slide's topic, and feed a compact context into the prompt so the
                 // narration + on-screen content is grounded, not hallucinated. Non-fatal.
                 const research = await fetchSlideResearch(
-                    subTopics[si],
+                    // Bare question for Q&A slides — the [Q&A] marker would poison the query.
+                    (subTopics[si] ?? "").replace(QNA_TOPIC_PREFIX, "").trim(),
                     `${courseName} · ${chapter.chapterTitle}`,
                 );
 
@@ -1250,7 +1398,13 @@ export const generateCourseSlidesFn = inngest.createFunction(
                 slideContent.archetype = archetype;
 
                 // Inject image URLs into placeholders — each slide gets its OWN image (global index).
-                if (slideContent.html && allImages.length > 0) {
+                // Q&A slides were never given an image (no job was queued for their
+                // globalIdx), so strip any placeholder the model emitted anyway rather
+                // than falling back to some other slide's illustration.
+                if (slideContent.html && qnaMeta) {
+                    slideContent.html = slideContent.html.replace(/<img[^>]*\{\{IMAGE_PLACEHOLDER\}\}[^>]*>/g, "")
+                        .replace(/\{\{IMAGE_PLACEHOLDER\}\}/g, "");
+                } else if (slideContent.html && allImages.length > 0) {
                     const gIdx = chapterIndex * MAX_SLIDES_PER_CHAPTER + si;
                     let extra = 0;
                     slideContent.html = slideContent.html.replace(/\{\{IMAGE_PLACEHOLDER\}\}/g, () => {
@@ -1273,12 +1427,13 @@ export const generateCourseSlidesFn = inngest.createFunction(
             const slideWithNarration = await step.run(`narrate-slide-${si}`, async () => {
                 // Per-slide word budget derived from the chapter's real slide count so
                 // the whole chapter lands near TARGET_CHAPTER_MINUTES.
-                const { targetWords, wordsPerBeat } = slideWordBudget(totalSlides);
+                const { targetWords, minWords, wordsPerBeat } = slideWordBudget(totalSlides);
                 const narrationInput = JSON.stringify({
                     ...buildSlideContext(researchContext, slidePlan),
                     slideHtml: slideVisuals.html ?? "",
                     narrationBeats: slidePlan,
                     targetWords,
+                    minWords,
                     wordsPerBeat,
                 });
 
@@ -1289,9 +1444,10 @@ export const generateCourseSlidesFn = inngest.createFunction(
                         const res = await openrouter.json(GENERATE_SLIDE_NARRATION_PROMPT, narrationInput, {
                             model: SLIDE_MODEL,
                             temperature: 0.8,
-                            // ~1.4 tokens/word + JSON overhead, with headroom over the
-                            // largest budget slideWordBudget can hand out.
-                            maxTokens: 8000,
+                            // Generous headroom: the prompt invites the model to run long
+                            // when the material deserves it, so this must never be the
+                            // thing that caps a slide. ~1.4 tokens/word + JSON overhead.
+                            maxTokens: 20000,
                             disableThinking: true,
                             clearThinking: true,
                             timeoutMs: 240000,
@@ -1310,12 +1466,11 @@ export const generateCourseSlidesFn = inngest.createFunction(
                             };
                             const words = String(fullText).split(/\s+/).filter(Boolean).length;
                             const mins = (words / NARRATION_WPM).toFixed(1);
-                            console.log(`🎙️ ${TAG} Slide ${si + 1} narration: ${words} words (~${mins} min, target ${targetWords})`);
-                            // Retry only a badly SHORT slide (under 60% of budget).
-                            // Overshoot is left alone — re-rolling costs a call and the
-                            // model rarely trims on a second pass.
-                            if (words < targetWords * 0.6 && attempt < 3) {
-                                console.warn(`⚠️ ${TAG} Slide ${si + 1} narration only ${words}/${targetWords} words — retrying...`);
+                            console.log(`🎙️ ${TAG} Slide ${si + 1} narration: ${words} words (~${mins} min, min ${minWords} / target ${targetWords})`);
+                            // Enforce the FLOOR only. Overshoot is never re-rolled —
+                            // a longer chapter is the goal, not a defect.
+                            if (words < minWords && attempt < 3) {
+                                console.warn(`⚠️ ${TAG} Slide ${si + 1} narration ${words} words is under the ${minWords} floor — retrying...`);
                                 narration = null;
                                 continue;
                             }

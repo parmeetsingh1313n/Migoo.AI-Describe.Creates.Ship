@@ -908,6 +908,18 @@ Output EXACTLY these labelled sections, in this order, as plain text:
 5. STYLE — the accent colour and type-pairing from designHint, and one line on the visual mood so
    this slide looks distinct from the previous one.
 
+❓ IF THE INPUT HAS "isQnaSlide": true — this is a closing Q&A discussion slide, not a teaching
+   slide. Plan it differently:
+   • HEADLINE is the QUESTION itself, verbatim from "qnaQuestion" — never a paraphrase, never a
+     topic title. It sits in a band at the TOP of the slide.
+   • COMPONENT is the worked ANSWER, built from "qnaAnswerOutline" (that outline is ground truth
+     — never contradict it, never invent a different answer). List the actual steps / code /
+     points the slide will show, with real values, not placeholders.
+   • NARRATION BEATS must walk the answer in order: beat 0 reads the question aloud and makes the
+     viewer think about it before answering; the middle beats work through one step each; the last
+     beat states the final answer plainly and says why it is right. Never give the answer away in
+     beat 0.
+
 Keep the whole plan concise and directive — it is a scaffold, not prose. English only.`;
 
 export const GENERATE_SINGLE_SLIDE_PROMPT = `You are an elite instructional designer and master educator creating ONE slide in a series of slides for a professional video course.
@@ -1446,17 +1458,25 @@ conceptsAlreadyCovered, nextSlideTopic, researchContext, the finished slideHtml,
 📝 LENGTH — THE #1 REQUIREMENT
 ═══════════════════════════════════════════════════════════════════════════════
 
-The input carries your EXACT budget for THIS slide. Obey it literally:
-  • targetWords    — the total words to write. Land within ±10% of it.
-  • wordsPerBeat   — roughly how long each beat's segment should be.
+The input carries your budget for THIS slide:
+  • minWords     — a HARD FLOOR. Going under this is a failed slide.
+  • targetWords  — what to aim for.
+  • wordsPerBeat — roughly how long each beat's segment should be.
 
-These are computed so that all slides in the chapter together add up to a ~50
-minute video. Writing long is just as wrong as writing short: overshoot and the
-chapter balloons past an hour, undershoot and it's a thin 15-minute video.
+These are computed from the chapter's slide count so the finished video clears
+45 minutes. Hit targetWords, and NEVER finish under minWords.
 
-Do NOT pad to reach the number. Every sentence must teach something — if you hit
-targetWords with room to spare, stop. If you're short, add real substance
-(another example, a deeper mechanism), never filler or restatement.
+There is NO upper limit. If this topic genuinely has more to teach — another
+mechanism worth explaining, a second example that earns its place, a subtlety
+that trips people up — write it. A chapter running 60, 70, 80 minutes because
+the material deserved it is a SUCCESS, not a problem. Long is only wrong when
+it is padding.
+
+So: never pad, never repeat, never restate what you already said — but never cut
+a genuinely useful explanation short to hit a number either. Every sentence must
+teach something new. If you have taught everything worth teaching and you are
+still under minWords, you have not gone deep enough — go back and add real
+substance (a mechanism, an example, a misconception), not filler.
 
 Each beat becomes one fragment. Same count, same order, same meaning as the beats
 you were given. The beats are CUES — expand each into full spoken prose. Never
@@ -1499,6 +1519,28 @@ Any middle slide bridges backward on its first fragment and forward to
 nextSlideTopic on its last.
 
 ═══════════════════════════════════════════════════════════════════════════════
+❓ Q&A SLIDES (when the input has "isQnaSlide": true)
+═══════════════════════════════════════════════════════════════════════════════
+
+The chapter's teaching is finished; this slide works through ONE question with
+the viewer. Narrate it the way a great teacher runs a problem session:
+
+1. Read the question aloud, in full, first. Then PAUSE on it — restate what is
+   actually being asked, point out what makes it non-trivial, and invite the
+   viewer to attempt it before you answer. Never reveal the answer here.
+2. Work the solution one step at a time, matching the on-screen steps in order.
+   Say WHY each step follows from the last, not just what it is. For numerical
+   questions speak the arithmetic; for code, explain what each part does and why
+   it is written that way; for theory, build the argument; for trade-offs, weigh
+   the options honestly.
+3. Call out the mistake most people make on this question, and why it is wrong.
+4. Close by stating the final answer unambiguously and what it generalises to —
+   the principle the viewer should carry to similar questions.
+
+"qnaAnswerOutline" in the input is GROUND TRUTH. Never contradict it, never
+invent a different answer, never hedge on the final result.
+
+═══════════════════════════════════════════════════════════════════════════════
 📤 OUTPUT
 ═══════════════════════════════════════════════════════════════════════════════
 
@@ -1515,3 +1557,57 @@ Return ONLY this JSON object — no markdown, no commentary:
 "fullText" MUST equal every fragment's text concatenated in index order — same
 words, nothing added or removed. One fragment per beat, indices starting at 0.
 ENGLISH ONLY — never any Chinese, Japanese, Korean, Cyrillic or other non-Latin script.`;
+
+/**
+ * Q&A SESSION PLANNER.
+ *
+ * Runs after a chapter's teaching topics are known and picks the questions the
+ * chapter should close with. Output feeds the trailing Q&A slides — one question
+ * per slide — so each question must be answerable thoroughly on a single slide.
+ */
+export const PLAN_CHAPTER_QNA_PROMPT = `You are an expert examiner designing the closing Q&A session for ONE chapter of a professional video course.
+
+You receive the chapter title and the ordered list of slide topics that were taught in it.
+Choose the questions a sharp learner would most benefit from working through now that the
+teaching is done.
+
+WHAT MAKES A GOOD QUESTION HERE:
+- It tests UNDERSTANDING, not recall. Never "what is X?" when the chapter defined X — ask
+  something that requires using X.
+- It is answerable thoroughly on ONE slide: a worked numerical solution, a short code
+  solution, a structured explanation, or a reasoned trade-off. Nothing that needs an essay.
+- It targets exactly the material this chapter taught. Never reach for concepts the chapter
+  never covered.
+- It is the kind of question that actually gets asked — in an interview, an exam, or by a
+  learner who is genuinely confused about this topic.
+- Together the questions cover DIFFERENT parts of the chapter. No two questions may test the
+  same idea.
+
+QUESTION TYPES — vary them. Assign each question exactly one "type":
+- "numerical"  — has a computed answer: a calculation, a complexity derivation, a conversion,
+                 a value to evaluate. There must be real arithmetic to show, step by step.
+- "code"       — the answer IS code: write a function, fix a bug, predict the output, refactor
+                 a snippet. Only use when the chapter actually taught code.
+- "theory"     — a conceptual question with a definite, structured answer: why does X behave
+                 this way, what is the difference between X and Y, what happens when Z.
+- "reasoning"  — a judgment/trade-off question: which approach fits this situation and why,
+                 when would you NOT use X. The honest answer weighs options.
+
+Pick the type that each question genuinely IS — do not force variety by mislabelling. But do
+prefer a spread: a chapter that taught code should usually get at least one "code" question,
+one that taught formulas at least one "numerical".
+
+HOW MANY: {{QNA_COUNT}} questions. Order them easiest → hardest.
+
+OUTPUT FORMAT (STRICT JSON — ONLY this array, no markdown, no explanation):
+[
+  {
+    "question": "The question exactly as it should appear on screen — one sentence, self-contained, no 'in this chapter' framing.",
+    "type": "numerical",
+    "answerOutline": "A compact outline of the correct answer: the steps/values/points the slide must show. This is a cue for the slide writer, not the finished answer — but it must be CORRECT and specific, with real numbers, real code, or real named concepts."
+  }
+]
+
+Every "question" must be fully self-contained — a viewer reading only that sentence knows what
+is being asked. Every "answerOutline" must be factually correct: it is the ground truth the
+slide is built from. English only.`;
