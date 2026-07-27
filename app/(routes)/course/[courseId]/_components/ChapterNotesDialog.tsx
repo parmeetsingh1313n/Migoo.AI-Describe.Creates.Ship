@@ -849,6 +849,16 @@ export function ChapterNotesDialog({ open, onClose, chapterTitle, slides, course
   useEffect(() => { setMounted(true); return () => setMounted(false) }, [])
   useEffect(() => { if (!open) return; setBgDataUrl(''); imgToDataUrl(DESIGNS[selected].img).then(setBgDataUrl).catch(() => setBgDataUrl('')) }, [selected, open])
 
+  // Lock the page behind the dialog while it is open. Without this, once the
+  // dialog's inner scroller hits its top/bottom, further wheel/touch scrolling
+  // chains to the document and the course page scrolls underneath the modal.
+  useEffect(() => {
+    if (!open) return
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => { document.body.style.overflow = prev }
+  }, [open])
+
   // Load cached notes on open
   useEffect(() => {
     if (!open || notesData) return
@@ -974,7 +984,7 @@ export function ChapterNotesDialog({ open, onClose, chapterTitle, slides, course
         <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
           
           {/* Controls Column */}
-          <div className="notes-scroll" style={{ width: notesData ? 360 : '100%', padding: 24, borderRight: notesData ? '1px solid rgba(15,23,42,0.06)' : 'none', display: 'flex', flexDirection: 'column', gap: 20, overflowY: 'auto' }}>
+          <div className="notes-scroll" style={{ width: notesData ? 360 : '100%', padding: 24, borderRight: notesData ? '1px solid rgba(15,23,42,0.06)' : 'none', display: 'flex', flexDirection: 'column', gap: 20, overflowY: 'auto', overscrollBehavior: 'contain' }}>
 
             {!notesData ? (
               <NotesIntro slideCount={slides.length} chapterTitle={chapterTitle} />
@@ -1037,7 +1047,7 @@ export function ChapterNotesDialog({ open, onClose, chapterTitle, slides, course
 
           {/* Right Live Preview Column */}
           {notesData && (
-            <div className="notes-scroll" style={{ flex: 1, background: '#f1f5f9', padding: 24, display: 'flex', flexDirection: 'column', gap: 14, overflowY: 'auto', maxHeight: '100%' }}>
+            <div className="notes-scroll" style={{ flex: 1, background: '#f1f5f9', padding: 24, display: 'flex', flexDirection: 'column', gap: 14, overflowY: 'auto', maxHeight: '100%', overscrollBehavior: 'contain' }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <span style={{ fontSize: 11, color: '#64748b', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1 }}>Live Document Preview</span>
                 <span style={{ fontSize: 10, color: '#6D5BD3', background: 'rgba(109,91,211,0.1)', padding: '2px 8px', borderRadius: 6, fontWeight: 600 }}>A4 Format</span>
