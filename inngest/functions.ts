@@ -454,6 +454,84 @@ function mergeWavBuffers(buffers: Buffer[]): Buffer {
     return Buffer.concat([hdr, merged]);
 }
 
+/** Duration in seconds of a PCM WAV buffer, read from its 44-byte header. */
+function wavDurationSec(buf: Buffer): number {
+    try {
+        const sampleRate = buf.readUInt32LE(24);
+        const bytesPerSample = buf.readUInt16LE(34) / 8;
+        const channels = buf.readUInt16LE(22);
+        const denom = sampleRate * bytesPerSample * channels;
+        return denom > 0 ? (buf.length - 44) / denom : 0;
+    } catch { return 0; }
+}
+
+// ─── Caption timing estimation (fallback when STT gives no word timestamps) ──
+//
+// The old fallback divided the WHOLE audio evenly across ALL words (every word
+// exactly audioDuration/wordCount seconds), so long words, short words and
+// sentence pauses all got identical time and the captions drifted in and out of
+// sync for the entire video — the exact bug the user reported. These helpers
+// replace it with (a) per-scene anchoring using the REAL duration of each
+// scene's TTS audio, so drift can never leak across a scene boundary, and
+// (b) speech-weighted distribution inside a scene, so "पुरातत्वविदों" gets more
+// time than "के" and sentence-final danda/periods absorb the natural pause.
+
+/** Relative speaking time of one word: letter count + trailing-punctuation pause. */
+function speechWeight(word: string): number {
+    const letters = word.replace(/[^\p{L}\p{N}]/gu, "").length;
+    let w = Math.max(2, letters);
+    if (/[।.!?]["')\]]*$/.test(word)) w += 5;      // sentence-final pause (danda / period)
+    else if (/[,;:]["')\]]*$/.test(word)) w += 2;  // clause pause
+    return w;
+}
+
+/** Spread words across [startSec, startSec+durSec] proportional to speech weight. */
+function distributeWords(words: string[], startSec: number, durSec: number): Array<{ word: string; start: number; end: number }> {
+    const weights = words.map(speechWeight);
+    const total = weights.reduce((a, b) => a + b, 0) || 1;
+    const out: Array<{ word: string; start: number; end: number }> = [];
+    let t = startSec;
+    for (let i = 0; i < words.length; i++) {
+        const d = (durSec * weights[i]) / total;
+        out.push({ word: words[i], start: +t.toFixed(2), end: +(t + d).toFixed(2) });
+        t += d;
+    }
+    return out;
+}
+
+/**
+ * Estimate word timestamps from the script when STT timing is unavailable.
+ * Each scene's narration is anchored inside that scene's real audio window
+ * (per-scene WAV durations measured in the merge step), scaled so the windows
+ * exactly tile the merged duration. Falls back to one global weighted
+ * distribution when per-scene durations are unknown (older runs).
+ */
+function estimateSceneAnchoredTimestamps(
+    scenes: Array<{ narration?: string }>,
+    sceneDurations: number[] | undefined,
+    totalDuration: number,
+): Array<{ word: string; start: number; end: number }> {
+    const durs = Array.isArray(sceneDurations)
+        && sceneDurations.length === scenes.length
+        && sceneDurations.some(d => d > 0)
+        ? sceneDurations : null;
+    if (durs) {
+        const sum = durs.reduce((a, b) => a + b, 0);
+        const scale = sum > 0 ? totalDuration / sum : 1;
+        const out: Array<{ word: string; start: number; end: number }> = [];
+        let offset = 0;
+        for (let i = 0; i < scenes.length; i++) {
+            const words = (scenes[i]?.narration ?? "").split(/\s+/).filter(Boolean);
+            const dur = (durs[i] ?? 0) * scale;
+            if (words.length && dur > 0) out.push(...distributeWords(words, offset, dur));
+            offset += dur;
+        }
+        return out;
+    }
+    const words = scenes.flatMap(s => (s?.narration ?? "").split(/\s+/).filter(Boolean));
+    return distributeWords(words, 0, totalDuration);
+}
+
 // ─── Inngest functions ───────────────────────────────────────────────────────
 
 export const helloWorld = inngest.createFunction(
@@ -1299,15 +1377,21 @@ OUTPUT: JSON object wrapped in <json> and </json> tags.`;
 
         // Merge all per-scene WAVs into one final audio file
         const voiceData = await step.run("merge-and-upload-audio", async () => {
-            const validUrls = sceneAudioUrls.filter(Boolean);
-            console.log(`🔗 Merging ${validUrls.length} scene audio files...`);
+            console.log(`🔗 Merging ${sceneAudioUrls.filter(Boolean).length} scene audio files...`);
 
             const audioBuffers: Buffer[] = [];
-            for (const url of validUrls) {
+            // Real duration of each scene's audio, index-aligned to scenes (0 for
+            // narration-less scenes) — the caption step anchors word timing to
+            // these windows when STT returns no word timestamps.
+            const sceneDurations: number[] = [];
+            for (const url of sceneAudioUrls) {
+                if (!url) { sceneDurations.push(0); continue; }
                 // Authenticated read — these Appwrite files may not be public and
                 // the account can hit its bandwidth quota (402); fetchAppwriteFile
                 // sends the matching project's API key and retries transient errors.
-                audioBuffers.push(await fetchAppwriteFile(url));
+                const buf = await fetchAppwriteFile(url);
+                audioBuffers.push(buf);
+                sceneDurations.push(+wavDurationSec(buf).toFixed(2));
             }
 
             const finalAudio = mergeWavBuffers(audioBuffers);
@@ -1331,6 +1415,7 @@ OUTPUT: JSON object wrapped in <json> and </json> tags.`;
             return {
                 audioUrl: blobResult.url,
                 audioDuration: Math.round(audioDuration * 10) / 10,
+                sceneDurations,
             };
         });
 
@@ -1449,7 +1534,25 @@ OUTPUT: JSON object wrapped in <json> and </json> tags.`;
                 // Step J: Extract word-level timestamps
                 const timestamps: Array<{ word: string; start: number; end: number }> = [];
 
-                if (outputData.words && Array.isArray(outputData.words)) {
+                // 🎯 Sarvam's REAL output shape (see sarvamai TimestampsModel):
+                // timestamps is an OBJECT of parallel arrays — words[],
+                // start_time_seconds[], end_time_seconds[]. The old parser only
+                // accepted Array.isArray(timestamps), so genuine word timings were
+                // silently discarded and EVERY video fell into the uniform-estimate
+                // fallback (all words identical length → captions forever drifting).
+                // Parse the parallel-array shape FIRST.
+                const ts = outputData.timestamps;
+                if (ts && !Array.isArray(ts) && Array.isArray(ts.words) && Array.isArray(ts.start_time_seconds)) {
+                    for (let i = 0; i < ts.words.length; i++) {
+                        const start = Number(ts.start_time_seconds[i] ?? 0);
+                        timestamps.push({
+                            word: String(ts.words[i] ?? ''),
+                            start,
+                            end: Number(ts.end_time_seconds?.[i] ?? start),
+                        });
+                    }
+                    console.log(`🎯 Parsed ${timestamps.length} REAL word timestamps (parallel-array shape)`);
+                } else if (outputData.words && Array.isArray(outputData.words)) {
                     for (const w of outputData.words) {
                         timestamps.push({
                             word: w.word || w.text || '',
@@ -1479,18 +1582,42 @@ OUTPUT: JSON object wrapped in <json> and </json> tags.`;
                     }
                 }
 
-                // Fallback: estimate timestamps from transcript
-                if (timestamps.length === 0 && fullText) {
-                    console.warn('⚠️ No word timestamps in output, using estimated timing');
-                    const words = fullText.split(/\s+/);
-                    const avgDuration = (voiceData.audioDuration || 60) / words.length;
-                    words.forEach((w: string, i: number) => {
-                        timestamps.push({
-                            word: w,
-                            start: +(i * avgDuration).toFixed(2),
-                            end: +((i + 1) * avgDuration).toFixed(2),
-                        });
-                    });
+                // Mid fallback: no word timing, but diarized segments carry real
+                // start/end — distribute each segment's words inside its window.
+                const diarEntries = outputData.diarized_transcript?.entries;
+                if (timestamps.length === 0 && Array.isArray(diarEntries) && diarEntries.length > 0) {
+                    console.warn('⚠️ No word timestamps — anchoring words to diarized segment windows');
+                    for (const e of diarEntries) {
+                        const words = String(e.transcript ?? '').split(/\s+/).filter(Boolean);
+                        const start = Number(e.start_time_seconds ?? 0);
+                        const dur = Math.max(0, Number(e.end_time_seconds ?? start) - start);
+                        if (words.length && dur > 0) timestamps.push(...distributeWords(words, start, dur));
+                    }
+                }
+
+                // Last fallback: scene-anchored, speech-weighted estimate from the
+                // script — each scene's words fill that scene's REAL audio window,
+                // so drift can never accumulate across the whole video.
+                if (timestamps.length === 0) {
+                    console.warn('⚠️ No word timestamps in output — using scene-anchored weighted estimate');
+                    timestamps.push(...estimateSceneAnchoredTimestamps(
+                        scriptData.scenes,
+                        (voiceData as any).sceneDurations,
+                        voiceData.audioDuration || 60,
+                    ));
+                }
+
+                // Defensive: some STT builds emit milliseconds — rescale when the
+                // timeline is ~1000x the audio length.
+                const audioDur = voiceData.audioDuration || 0;
+                let maxEnd = 0;
+                for (const t of timestamps) if (t.end > maxEnd) maxEnd = t.end;
+                if (audioDur > 0 && maxEnd > audioDur * 100) {
+                    console.warn(`⚠️ Timestamps look like milliseconds (max ${maxEnd} vs ${audioDur}s audio) — rescaling /1000`);
+                    for (const t of timestamps) {
+                        t.start = +(t.start / 1000).toFixed(2);
+                        t.end = +(t.end / 1000).toFixed(2);
+                    }
                 }
 
                 console.log(`📊 Extracted ${timestamps.length} word timestamps`);
@@ -1536,24 +1663,20 @@ OUTPUT: JSON object wrapped in <json> and </json> tags.`;
                 // Clean up temp file on error
                 try { fs.unlinkSync(tempFilePath); } catch { }
                 console.error(`❌ Sarvam Batch STT Error: ${error.message}`);
-                console.log(`⚠️ Falling back to estimated word timestamps from narration text...`);
+                console.log(`⚠️ Falling back to scene-anchored estimated word timestamps...`);
 
-                // Fallback: estimate timestamps from script narration
+                // Fallback: scene-anchored, speech-weighted estimate from the
+                // script — each scene's narration fills that scene's REAL audio
+                // window (per-scene WAV durations from the merge step) instead of
+                // spreading every word uniformly across the whole video.
                 const fullNarration = scriptData.scenes
                     .map((s: any) => s.narration)
                     .join(' ');
-                const words = fullNarration.split(/\s+/);
-                const totalDuration = voiceData.audioDuration || 60;
-                const avgWordDuration = totalDuration / words.length;
-
-                const timestamps: Array<{ word: string; start: number; end: number }> = [];
-                words.forEach((w: string, i: number) => {
-                    timestamps.push({
-                        word: w,
-                        start: +(i * avgWordDuration).toFixed(2),
-                        end: +((i + 1) * avgWordDuration).toFixed(2),
-                    });
-                });
+                const timestamps = estimateSceneAnchoredTimestamps(
+                    scriptData.scenes,
+                    (voiceData as any).sceneDurations,
+                    voiceData.audioDuration || 60,
+                );
 
                 // Group words into caption segments (~6 words each for comfortable reading speed)
                 const WORDS_PER_SEGMENT = 6;
@@ -1574,7 +1697,7 @@ OUTPUT: JSON object wrapped in <json> and </json> tags.`;
                     });
                 }
 
-                console.log(`✅ Fallback: Created ${segments.length} estimated caption segments from ${words.length} words`);
+                console.log(`✅ Fallback: Created ${segments.length} scene-anchored caption segments from ${timestamps.length} words`);
 
                 return {
                     transcript: fullNarration,
