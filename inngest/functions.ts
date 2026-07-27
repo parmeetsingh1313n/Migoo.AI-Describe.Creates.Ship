@@ -1620,6 +1620,26 @@ OUTPUT: JSON object wrapped in <json> and </json> tags.`;
                     }
                 }
 
+                // 🚨 Normalize to TRUE word level. Sarvam's timestamps.words[] can
+                // carry PHRASE/SENTENCE-level entries (one entry = a whole
+                // utterance). Grouping 6 of those per caption put entire
+                // paragraphs of the script on screen at once. Split every
+                // multi-word entry into its real words, spreading the entry's
+                // time window across them by speech weight, so a caption segment
+                // is always ~6 WORDS — never 6 sentences.
+                const phraseEntries = timestamps.filter(t => /\s/.test(t.word.trim())).length;
+                const wordTimestamps: typeof timestamps = [];
+                for (const t of timestamps) {
+                    const parts = t.word.trim().split(/\s+/).filter(Boolean);
+                    if (parts.length <= 1) { wordTimestamps.push(t); continue; }
+                    wordTimestamps.push(...distributeWords(parts, t.start, Math.max(0, t.end - t.start)));
+                }
+                if (phraseEntries > 0) {
+                    console.warn(`⚠️ ${phraseEntries} phrase-level STT entries split into words (${timestamps.length} → ${wordTimestamps.length})`);
+                }
+                timestamps.length = 0;
+                timestamps.push(...wordTimestamps);
+
                 console.log(`📊 Extracted ${timestamps.length} word timestamps`);
 
                 // Clean up temp files
