@@ -104,6 +104,17 @@ async function callMgModel(
         throw err;
     }
 
+    // 404 (router miss / model cold on this key) and 5xx are TRANSIENT — often
+    // key-specific. Retry the SAME model on the next key before giving up on it,
+    // so GLM-5.2 stays primary instead of a single bad key dropping to fallback.
+    if (res.status === 404 || res.status >= 500) {
+        const body = await res.text();
+        console.warn(`⚠️ [mg-llm] transient ${res.status} on [${model}] key${_mgKeyIdx + 1}: ${body.slice(0, 200) || '(empty body)'} — retrying on next key.`);
+        const err: any = new Error(`TRANSIENT: ${model} (${res.status})`);
+        err.isRateLimit = true; // reuse the retriable flag → rotateKey + keep same model
+        throw err;
+    }
+
     if (!res.ok) {
         const body = await res.text();
         throw new Error(`[mg-llm] API error ${res.status}: ${body.slice(0, 300)}`);

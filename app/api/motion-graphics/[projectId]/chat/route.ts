@@ -186,10 +186,10 @@ export async function POST(
             const rows = uploadedAssets.map((a, i) => {
                 const targetHint =
                     a.category === 'logo'       ? 'logo_reveal, call_to_action' :
-                    a.category === 'screenshot' ? 'browser_mockup, phone_mockup' :
+                    a.category === 'screenshot' ? 'browser_mockup, phone_mockup, ui_showcase' :
                     a.category === 'product'    ? 'image_showcase, split_hero, video_hero' :
-                    a.category === 'person'     ? 'testimonial, split_hero' :
-                                                  'logo_reveal, browser_mockup, image_showcase';
+                    a.category === 'person'     ? 'testimonial, split_hero, video_hero' :
+                                                  'logo_reveal, browser_mockup, image_showcase' ;
                 return `| Asset ${i + 1} | ${a.category || 'other'} | ${a.url} | ${a.description} | ${targetHint} |`;
             }).join('\n');
 
@@ -366,16 +366,25 @@ INSTRUCTION: For each row, find the matching scene type in your output and set i
         // losing the user's brand logo or screenshot during refinement passes.
         // We do NOT overwrite if the scene already has an animated Kling video URL.
         if (scenesData?.scenes && uploadedAssets.length > 0) {
-            const LOGO_TYPES   = new Set(['logo_reveal', 'call_to_action']);
-            const SCREEN_TYPES = new Set(['browser_mockup', 'phone_mockup', 'bento_grid', 'image_showcase', 'split_hero', 'video_hero']);
-            const claimed      = new Set<number>();
+            // Per-category best-fit scene types (checked in scene order → asset lands in
+            // the earliest suitable scene). A person photo belongs in a testimonial/hero,
+            // NOT a browser frame; a screenshot in a device/app mockup; a logo in the
+            // reveal + CTA. This is the guaranteed placement even if the LLM mis-slots.
+            const TARGETS_BY_CATEGORY: Record<string, string[]> = {
+                logo:       ['logo_reveal', 'call_to_action'],
+                screenshot: ['browser_mockup', 'phone_mockup', 'ui_showcase', 'bento_grid', 'image_showcase'],
+                product:    ['image_showcase', 'split_hero', 'video_hero', 'bento_grid'],
+                person:     ['testimonial', 'split_hero', 'video_hero'],
+            };
+            const ALL_VISUAL = [
+                'logo_reveal', 'call_to_action', 'browser_mockup', 'phone_mockup', 'ui_showcase',
+                'bento_grid', 'image_showcase', 'split_hero', 'video_hero', 'testimonial',
+            ];
+            const claimed = new Set<number>();
 
             for (const asset of uploadedAssets) {
                 const cat = (asset.category || '').toLowerCase();
-                let targets: Set<string>;
-                if (cat === 'logo')      targets = LOGO_TYPES;
-                else if (['screenshot', 'product', 'person'].includes(cat)) targets = SCREEN_TYPES;
-                else targets = new Set([...LOGO_TYPES, ...SCREEN_TYPES]);
+                const targets = new Set(TARGETS_BY_CATEGORY[cat] || ALL_VISUAL);
 
                 // Helper to check if url is a Kling-generated/preserved video
                 const isVideo = (url: string | undefined): boolean => {

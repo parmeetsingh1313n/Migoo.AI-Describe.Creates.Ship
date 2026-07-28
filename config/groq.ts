@@ -662,7 +662,9 @@ class EnhancedGroqClient {
     }): Promise<string> {
         const model = options?.model || 'qwen/qwen3.6-27b';
         const temperature = options?.temperature ?? 0.3;
-        const maxTokens = options?.maxTokens ?? 600;
+        // qwen3.6 is a reasoning model: it spends tokens on a <think> block BEFORE
+        // the real answer, so the budget must cover both. 600 was starving the answer.
+        const maxTokens = options?.maxTokens ?? 1500;
 
         console.log('🔍 Groq vision request:', { model, imageUrl: imageUrl.slice(0, 60) + '...' });
 
@@ -699,7 +701,21 @@ class EnhancedGroqClient {
         }
 
         const data = await response.json();
-        const rawContent = data?.choices?.[0]?.message?.content?.trim() || "";
+        let rawContent = data?.choices?.[0]?.message?.content?.trim() || "";
+
+        // qwen3.6 emits chain-of-thought as a <think>…</think> block inside content.
+        // Strip it so callers get ONLY the real answer — otherwise the reasoning text
+        // leaks into asset descriptions and breaks strict "CATEGORY:/DESCRIPTION:" parsing.
+        if (rawContent.includes('<think>')) {
+            const lastClose = rawContent.lastIndexOf('</think>');
+            if (lastClose !== -1) {
+                rawContent = rawContent.slice(lastClose + '</think>'.length).trim();
+            } else {
+                // Unclosed think block (answer got truncated) — drop the whole thing.
+                rawContent = rawContent.replace(/<think>[\s\S]*$/i, '').trim();
+            }
+        }
+        rawContent = rawContent.replace(/<\/?think>/gi, '').trim();
 
         if (!rawContent) throw new Error('No content in Groq vision response');
 
