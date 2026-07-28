@@ -653,14 +653,14 @@ class EnhancedGroqClient {
 
     /**
      * Caption an image using Groq vision (chat/completions with image_url)
-     * Uses meta-llama/llama-4-scout-17b-16e-instruct for vision tasks
+     * Uses qwen/qwen3.6-27b for vision tasks (llama-4-scout was deprecated/removed by Groq)
      */
     async captionImage(imageUrl: string, prompt: string, options?: {
         model?: string;
         temperature?: number;
         maxTokens?: number;
     }): Promise<string> {
-        const model = options?.model || 'meta-llama/llama-4-scout-17b-16e-instruct';
+        const model = options?.model || 'qwen/qwen3.6-27b';
         const temperature = options?.temperature ?? 0.3;
         const maxTokens = options?.maxTokens ?? 600;
 

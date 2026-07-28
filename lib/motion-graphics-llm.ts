@@ -60,10 +60,13 @@ async function callMgModel(
     temperature: number,
     maxTokens: number,
     apiKey: string,
+    timeoutMs: number = 240_000,
 ): Promise<{ rawText: string; finishReason?: string }> {
     const controller = new AbortController();
-    // GLM-5.2 at high reasoning effort can take longer than 5 min — give it headroom.
-    const timeout = setTimeout(() => controller.abort(), 7 * 60 * 1000);
+    // Must stay UNDER Vercel's 300s function limit so a hung call aborts and the
+    // next model/key is tried instead of the whole request timing out. Callers that
+    // fan out in parallel (chunked mode) pass an even shorter budget.
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
     const res = await fetch(NVIDIA_BASE, {
         method: 'POST',
@@ -561,44 +564,79 @@ export const motionGraphicsLLM = {
             'No markdown. No explanation. No wrapper object.';
 
 
-        const allScenes: any[] = [];
+        // ── Parallel chunk generation across API keys ────────────────────────
+        // Sequential generation could never fit inside Vercel's 300s limit (9 chunks
+        // × a slow GLM-5.2 call each). Instead we fan the chunks out concurrently,
+        // giving each chunk its OWN key (round-robin by index) so parallel calls hit
+        // different rate-limit buckets. Concurrency is capped at the number of keys.
+        const keys = getMgKeys();
+        const concurrency = Math.max(1, Math.min(keys.length || 1, 5));
+        // GLM-5.2 is always the primary model; the others are fallbacks only if it
+        // rate-limits or aborts. The short per-call timeout below keeps a slow GLM
+        // call from blowing the request deadline before a fallback can run.
+        const CHUNK_MODELS = [MG_PRIMARY_MODEL, MG_FALLBACK_MODEL, MG_LAST_RESORT_MODEL];
+        // Short per-call budget: with parallel fan-out a stuck call must bail quickly
+        // so its key/model rotates well before the request-level deadline.
+        const CHUNK_TIMEOUT_MS = 110_000;
 
-        for (let i = 0; i < numChunks; i++) {
+        // Try each model, and for each model each key (offset by chunk index), until one works.
+        async function generateChunk(chunkUser: string, keyOffset: number): Promise<any[]> {
+            let lastErr: any;
+            for (const model of CHUNK_MODELS) {
+                for (let k = 0; k < Math.max(1, keys.length); k++) {
+                    const apiKey = keys.length ? keys[(keyOffset + k) % keys.length] : getMgKey();
+                    try {
+                        const { rawText } = await callMgModel(
+                            model, CHUNK_SYSTEM, chunkUser, temperature, 2048, apiKey, CHUNK_TIMEOUT_MS,
+                        );
+                        const parsed = extractMgJSON(rawText);
+                        return Array.isArray(parsed) ? parsed : (parsed.scenes || []);
+                    } catch (err: any) {
+                        lastErr = err;
+                        // Rate-limit / abort (timeout) → try next key; other errors → next model.
+                        if (err?.isRateLimit || err?.name === 'AbortError') continue;
+                        break;
+                    }
+                }
+            }
+            throw lastErr ?? new Error('[mg-llm] chunk generation failed');
+        }
+
+        // Build every chunk's descriptor up front, then run a bounded worker pool.
+        const chunkJobs = Array.from({ length: numChunks }, (_, i) => {
             const startScene = i * CHUNK_SIZE + 1;
             const endScene   = Math.min((i + 1) * CHUNK_SIZE, totalScenes);
             const count      = endScene - startScene + 1;
             const sceneLines = extractSceneLines(startScene, endScene);
-
-            // Each chunk user message is ONLY the scene lines (~100-150 tokens input)
             const chunkUser =
                 `Convert these ${count} scene specifications into a JSON array of exactly ${count} objects:\n\n` +
                 sceneLines +
                 `\n\nReturn ONLY a JSON array: [{...}, ...]. Exactly ${count} objects. Start with [.`;
+            return { i, startScene, endScene, chunkUser, inputChars: sceneLines.length };
+        });
 
-            console.log(`[mg-llm] Chunk ${i + 1}/${numChunks}: scenes ${startScene}–${endScene} (${sceneLines.length} chars input)`);
-
-            try {
-                const raw = await tryMgModels(
-                    [MG_PRIMARY_MODEL, MG_FALLBACK_MODEL, MG_LAST_RESORT_MODEL],
-                    CHUNK_SYSTEM,
-                    chunkUser,
-                    temperature,
-                    2048,
-                );
-
-                const parsed    = extractMgJSON(raw);
-                const scenesArr = Array.isArray(parsed) ? parsed : (parsed.scenes || []);
-                allScenes.push(...scenesArr);
-                console.log(`[mg-llm] Chunk ${i + 1}: ✓ ${scenesArr.length} scenes (total: ${allScenes.length})`);
-            } catch (chunkErr: any) {
-                console.warn(`[mg-llm] Chunk ${i + 1} failed: ${chunkErr.message} — skipping batch`);
-            }
-
-            // 600ms gap between chunks — respects free-tier RPM window
-            if (i < numChunks - 1) {
-                await new Promise(r => setTimeout(r, 600));
+        const chunkResults: any[][] = new Array(numChunks).fill(null).map(() => []);
+        let cursor = 0;
+        async function worker() {
+            while (cursor < chunkJobs.length) {
+                const job = chunkJobs[cursor++];
+                console.log(`[mg-llm] Chunk ${job.i + 1}/${numChunks}: scenes ${job.startScene}–${job.endScene} (${job.inputChars} chars input)`);
+                try {
+                    const scenesArr = await generateChunk(job.chunkUser, job.i);
+                    chunkResults[job.i] = scenesArr;
+                    console.log(`[mg-llm] Chunk ${job.i + 1}: ✓ ${scenesArr.length} scenes`);
+                } catch (chunkErr: any) {
+                    console.warn(`[mg-llm] Chunk ${job.i + 1} failed: ${chunkErr.message} — skipping batch`);
+                    chunkResults[job.i] = [];
+                }
             }
         }
+
+        await Promise.all(Array.from({ length: concurrency }, () => worker()));
+
+        // Merge in original scene order.
+        const allScenes: any[] = chunkResults.flat();
+        console.log(`[mg-llm] All chunks done: ${allScenes.length} scenes (${concurrency}-way parallel over ${keys.length} key(s))`);
 
         // ── Premium voiceover enhancement via openai/gpt-oss-120b:free ─────────
         // LLM produces the scene structure; GPT-oss-120b rewrites ALL voiceover
@@ -772,6 +810,9 @@ async function enhanceVoiceovers(
             temperature: 0.85,
             max_tokens: 4096,
         }),
+        // This runs AFTER the parallel chunks; bound it so a hung enhancement call
+        // can't push the request past Vercel's 300s limit. It's non-fatal upstream.
+        signal: AbortSignal.timeout(60_000),
     });
 
     if (!res.ok) {

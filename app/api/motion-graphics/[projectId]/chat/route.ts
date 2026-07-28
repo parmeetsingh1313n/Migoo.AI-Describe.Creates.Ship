@@ -10,6 +10,11 @@ import { currentUser } from "@clerk/nextjs/server";
 import { and, eq } from "drizzle-orm";
 import { NextRequest, NextResponse } from "next/server";
 
+// Chunked scene generation fans out many LLM calls; give the function the full
+// Vercel budget. The LLM layer keeps every individual call well under this so a
+// single slow model aborts and falls back instead of timing out the whole request.
+export const maxDuration = 300;
+
 /** Retry a DB call up to `attempts` times with exponential backoff */
 async function withRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
     let delay = 500;
