@@ -386,10 +386,12 @@ INSTRUCTION: For each row, find the matching scene type in your output and set i
                 const cat = (asset.category || '').toLowerCase();
                 const targets = new Set(TARGETS_BY_CATEGORY[cat] || ALL_VISUAL);
 
-                // Helper to check if url is a Kling-generated/preserved video
+                // Helper to check if url is a Kling-generated/preserved video.
+                // Query-string tolerant: signed CDN URLs (".../video.mp4?signature=…")
+                // don't literally end in ".mp4", so match the extension before any ?/#.
                 const isVideo = (url: string | undefined): boolean => {
                     if (!url) return false;
-                    return url.endsWith('.mp4') || url.endsWith('.webm') || url.includes('video-files');
+                    return /\.(mp4|webm|mov)(\?|#|$)/i.test(url) || url.includes('video-files');
                 };
 
                 // Inject into first matching unoccupied scene slot

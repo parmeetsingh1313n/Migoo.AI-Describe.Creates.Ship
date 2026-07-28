@@ -111,7 +111,13 @@ const Img: React.FC<React.ComponentProps<typeof RemotionImg>> = (props) => {
     const raw = props.src as string;
     const src = resolveAssetUrl(raw);
     if (!src) return null;
-    const isVideo = src.endsWith('.mp4') || src.endsWith('.webm') || src.includes('video-files');
+    // Strip query string / hash before extension check — signed CDN URLs like
+    // ".../video.mp4?signature=abc" end with the token, NOT ".mp4", so endsWith
+    // would miss them and try to decode the MP4 as an image (EncodingError → crash).
+    const pathPart = src.split(/[?#]/)[0].toLowerCase();
+    const isVideo =
+        pathPart.endsWith('.mp4') || pathPart.endsWith('.webm') || pathPart.endsWith('.mov') ||
+        src.includes('video-files') || /\/video\.mp4/i.test(src) || /\.(mp4|webm|mov)(\?|#|$)/i.test(src);
     if (isVideo) {
         // Block raw Kling/fal CDN URLs that haven't been transcoded
         const isRawKling = src.includes('fal.media') || src.includes('klingai.com') || src.includes('klingai');

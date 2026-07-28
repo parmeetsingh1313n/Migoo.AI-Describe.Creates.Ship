@@ -456,7 +456,8 @@ export const motionGraphicsLLM = {
             // Determine media state so LLM knows what exists
             const imgUrl = s.imageUrl || '';
             let mediaState = 'no_media';
-            if (imgUrl.endsWith('.mp4') || imgUrl.endsWith('.webm') || imgUrl.includes('video-files')) {
+            // Query-tolerant .mp4/.webm/.mov match — signed CDN URLs carry a ?token suffix.
+            if (/\.(mp4|webm|mov)(\?|#|$)/i.test(imgUrl) || imgUrl.includes('video-files')) {
                 mediaState = 'is_video (Kling animated)';
             } else if (imgUrl.includes('blob.vercel') || imgUrl.includes('blob:')) {
                 mediaState = 'is_uploaded_image (user asset)';
