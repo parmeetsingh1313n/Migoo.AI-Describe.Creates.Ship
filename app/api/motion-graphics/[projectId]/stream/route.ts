@@ -17,6 +17,7 @@
 import { NextRequest } from 'next/server';
 import { db } from '@/config/db';
 import { motionGraphicProjects } from '@/config/schema';
+import { fingerprintsMatch } from '@/lib/theme-palette';
 import { eq } from 'drizzle-orm';
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
@@ -103,7 +104,9 @@ export async function GET(
     if (!row) return new Response('Project not found', { status: 404 });
 
     const historicalMatch = fingerprint
-      ? ((row.renderHistory as any[]) || []).find((h) => h?.fingerprint === fingerprint)
+      ? ((row.renderHistory as any[]) || []).find(
+          (h) => h?.fingerprint && fingerprintsMatch(h.fingerprint, fingerprint)
+        )
       : null;
 
     const videoUrlStr = historicalMatch?.videoUrl || row.videoUrl;

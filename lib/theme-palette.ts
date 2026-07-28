@@ -148,15 +148,65 @@ export function themeFromCustomSwatches(swatches: string[]): MotionGraphicTheme 
 }
 
 /**
+ * Deterministic stringify: recursively sorts object keys so two structurally
+ * identical values always serialize to the same string, regardless of key
+ * insertion order. Critical for fingerprints — the server computes them from
+ * freshly-built in-memory props (insertion-order keys) while the client
+ * recomputes from data round-tripped through Postgres `jsonb` (keys re-sorted
+ * alphabetically). Plain `JSON.stringify` would produce different strings for
+ * the same theme and the lookup would never match.
+ */
+export function canonicalStringify(value: any): string {
+    const sortDeep = (v: any): any => {
+        if (Array.isArray(v)) return v.map(sortDeep);
+        if (v && typeof v === 'object') {
+            return Object.keys(v).sort().reduce((acc: Record<string, any>, k) => {
+                acc[k] = sortDeep(v[k]);
+                return acc;
+            }, {});
+        }
+        return v;
+    };
+    return JSON.stringify(sortDeep(value));
+}
+
+/**
  * Fingerprint of "what colors this video would render with" — the global
  * theme plus any per-scene color overrides. Used both client-side (to decide
  * whether the current theme has already been rendered) and server-side (to
  * tag each completed render in `renderHistory`) — computed identically in
- * both places so a lookup always matches correctly.
+ * both places so a lookup always matches correctly. Uses canonicalStringify
+ * so key ordering (in-memory vs. jsonb-round-tripped) never breaks equality.
  */
 export function computeThemeFingerprint(theme: any, scenes: any[] | undefined | null): string {
-    const sceneColors = (scenes || []).map((s: any) => (s?.customColors ? JSON.stringify(s.colors) : ''));
-    return JSON.stringify({ theme, sceneColors });
+    const sceneColors = (scenes || []).map((s: any) => (s?.customColors ? canonicalStringify(s.colors) : ''));
+    return canonicalStringify({ theme, sceneColors });
+}
+
+/**
+ * Re-canonicalize a fingerprint string that may have been produced by an older
+ * (key-order-sensitive) version of computeThemeFingerprint, so historical
+ * renderHistory entries still match the current canonical fingerprint without
+ * forcing a re-render. Falls back to the raw string if it isn't valid JSON.
+ */
+export function normalizeFingerprint(fp: string): string {
+    try {
+        const parsed = JSON.parse(fp);
+        if (parsed && Array.isArray(parsed.sceneColors)) {
+            parsed.sceneColors = parsed.sceneColors.map((c: string) => {
+                if (!c) return '';
+                try { return canonicalStringify(JSON.parse(c)); } catch { return c; }
+            });
+        }
+        return canonicalStringify(parsed);
+    } catch {
+        return fp;
+    }
+}
+
+/** True if two fingerprints refer to the same theme, tolerant of key ordering. */
+export function fingerprintsMatch(a: string, b: string): boolean {
+    return a === b || normalizeFingerprint(a) === normalizeFingerprint(b);
 }
 
 export interface RenderHistoryEntry {
@@ -176,7 +226,7 @@ export function appendRenderHistory(
     entry: RenderHistoryEntry,
     maxEntries = 20
 ): RenderHistoryEntry[] {
-    const filtered = (existing || []).filter(h => h.fingerprint !== entry.fingerprint);
+    const filtered = (existing || []).filter(h => !fingerprintsMatch(h.fingerprint, entry.fingerprint));
     filtered.push(entry);
     return filtered.slice(-maxEntries);
 }

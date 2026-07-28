@@ -32,7 +32,7 @@ import LiveMotionGraphicPlayer from './_components/LiveMotionGraphicPlayer'
 import PalettePicker from './_components/PalettePicker'
 import ThemeGateScreen from './_components/ThemeGateScreen'
 import DrawOutlineButton from '@/components/ui/DrawOutlineButton'
-import { computeThemeFingerprint, type MotionGraphicTheme } from '@/lib/theme-palette'
+import { computeThemeFingerprint, fingerprintsMatch, type MotionGraphicTheme } from '@/lib/theme-palette'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -592,7 +592,7 @@ export default function MotionGraphicProjectPage() {
     // to an earlier theme)? renderHistory persists across reloads, so this
     // recognition survives a refresh, unlike a client-only comparison would.
     const currentFingerprint = computeThemeFingerprint(project.theme, project.sceneData)
-    const historicalMatch = (project.renderHistory || []).find(h => h.fingerprint === currentFingerprint)
+    const historicalMatch = (project.renderHistory || []).find(h => fingerprintsMatch(h.fingerprint, currentFingerprint))
     // Show the real rendered MP4 only when the current theme has a matching
     // history entry and no new render is currently in flight.
     const showFinalPlayer = hasRemotionProps && !!historicalMatch && !isRenderInProgress
