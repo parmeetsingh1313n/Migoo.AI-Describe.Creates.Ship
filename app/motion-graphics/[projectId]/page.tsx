@@ -49,12 +49,12 @@ interface Project {
     prompt: string
     duration: number
     aspectRatio: string
-    voiceoverEnabled: number
+    voiceoverEnabled: boolean
     voice: string
     language: string
     music: string
     theme: MotionGraphicTheme | null
-    themeConfirmed?: number
+    themeConfirmed?: boolean
     sceneData: any[]
     voiceoverScript: string | null
     audioUrl: string | null

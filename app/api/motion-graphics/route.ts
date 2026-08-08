@@ -49,7 +49,7 @@ export async function POST(req: NextRequest) {
                     prompt: prompt.trim(),
                     duration,
                     aspectRatio,
-                    voiceoverEnabled: voiceoverEnabled ? 1 : 0,
+                    voiceoverEnabled: Boolean(voiceoverEnabled),
                     voice,
                     language,
                     music,

@@ -134,9 +134,9 @@ export async function PATCH(
                 allowedFields.remotionProps = { ...(row.remotionProps as any), theme: body.theme };
             }
         }
-        if (body.themeConfirmed !== undefined) allowedFields.themeConfirmed = body.themeConfirmed ? 1 : 0;
+        if (body.themeConfirmed !== undefined) allowedFields.themeConfirmed = Boolean(body.themeConfirmed);
         if (body.music !== undefined) allowedFields.music = body.music;
-        if (body.voiceoverEnabled !== undefined) allowedFields.voiceoverEnabled = body.voiceoverEnabled ? 1 : 0;
+        if (body.voiceoverEnabled !== undefined) allowedFields.voiceoverEnabled = Boolean(body.voiceoverEnabled);
         if (body.voice !== undefined) allowedFields.voice = body.voice;
         if (body.language !== undefined) allowedFields.language = body.language;
         if (body.prompt !== undefined) allowedFields.prompt = body.prompt;
